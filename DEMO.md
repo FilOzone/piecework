@@ -1,5 +1,10 @@
 # Demo script (about 5 minutes)
 
+## Two ways to run it
+
+- **Local** (fast, 1 epoch = 1 s): double-click `poc/Start demo.command`. Steps below.
+- **On Filecoin Calibration** (real public test network, 1 epoch = 30 s, each step 30–60 s): in Terminal, `cd poc && node start.mjs --calibnet`, open http://localhost:8080, click **Use the demo wallet** (or **Connect MetaMask**). Same steps; the client's files are already stored (data set #37109). Every transaction id opens on Filfox — show one to prove it is real.
+
 ## Before the call (2 minutes)
 
 1. In Finder, open `foc-compute/poc` and double-click **`Start demo.command`**. A Terminal window opens; leave it open.

@@ -52,6 +52,19 @@ What is real and what is a stand-in:
 | Client signatures (EIP-712, FilOz's definitions), piece CIDs (CommPv2, FilOz's library) | FVM precompiles: a stub reporting success, so FIL fees are kept instead of burned |
 | Containers (Docker, no network, read-only inputs); transactions, settlement, fees | Time: 1 block = 1 epoch = 1 s (30 s on Filecoin) |
 
+## On Filecoin Calibration (public test network)
+
+ComputeService is deployed on calibnet at [`0xb16534a9D2186A60216AB9A0e27c1C059A27b5F1`](https://calibration.filfox.info/en/address/0xb16534a9D2186A60216AB9A0e27c1C059A27b5F1) (see `poc/calibnet.json`), next to FilOz's own calibnet deployment of Filecoin Pay, PDPVerifier and FWSS. The demo provider is registered in FilOz's provider registry as **PieceWork_demo** (id 41).
+
+**Start:** `cd poc && node start.mjs --calibnet`, then open http://localhost:8080. The page offers two ways to play the client:
+
+- **Demo wallet (no MetaMask):** the program signs as the client with a test wallet; visitors just click.
+- **MetaMask:** you sign every step with your own account on Filecoin Calibration (needs test tFIL and USDFC from the faucets).
+
+Every step is a real calibnet transaction, linked to Filfox. One epoch is 30 s, so each step takes 30–60 s. Checked end to end on 2026-09-18: data set #37109 created with the client's signature, a job whose output was added to it through the authorizer and paid (J1), a session stopped after 3 epochs and billed exactly 3 epochs (S4).
+
+One-time setup (already done for this repo's deployment): `--new-provider-key`, `--new-demo-client-key` (keys stay in `~/.foc-compute-poc/calibnet/`, owner-readable only, never printed), fund both addresses from the calibnet faucets, then `--register` and `--deploy`.
+
 ## Contents
 
 | Path | What |
@@ -80,4 +93,4 @@ cd integration && forge test    # 10 tests: ComputeService with the real FOC con
 
 ## Status
 
-Stage A (local POC) working. Stage B in progress: ComputeService tested with the real FOC contracts (FWSS v1.4.0), including the data set authorizer for job outputs; the local POC runs on those contracts. Next: browser wallet, then calibnet.
+Stage A (local POC) working. Stage B: running on Filecoin Calibration with FilOz's contracts, a registered demo provider and our deployed ComputeService; client via MetaMask or a demo wallet. Proofs of possession are simulated (honest-provider assumption).

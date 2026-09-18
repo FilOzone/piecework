@@ -8,6 +8,7 @@
 //                               The client is the visitor's MetaMask; the provider signs with its own key
 //                               (~/.foc-compute-poc/calibnet/provider.key, never printed).
 //   calibnet setup (one time):  --new-provider-key   create the provider key, print its address only
+//                               --new-demo-client-key  create the demo client's key (visitors without MetaMask)
 //                               --register           register the provider in FilOz's registry (5 tFIL fee)
 //                               --deploy             deploy ComputeService, write poc/calibnet.json
 //
@@ -48,6 +49,7 @@ const RUN = path.join(process.env.HOME, ".foc-compute-poc", NETWORK);
 const STORAGE = path.join(RUN, "storage"); // the provider's copy of the client's data set
 const STATE_FILE = path.join(RUN, "state.json"); // calibnet: survives restarts
 const KEY_FILE = path.join(RUN, "provider.key"); // calibnet: provider key, owner-readable only
+const DEMO_KEY_FILE = path.join(RUN, "demo-client.key"); // calibnet: demo client key (test tokens only), owner-readable only
 const DEPLOY_FILE = path.join(HERE, "calibnet.json"); // calibnet: our ComputeService address (public)
 
 // FilOz's calibnet deployment (filecoin-services @ 4cbbea4, service_contracts/deployments.json, key 314159;
@@ -139,6 +141,7 @@ const saveState = () => CAL && fs.writeFileSync(STATE_FILE, JSON.stringify(ST, (
 // ---------------------------------------------------------------- chain
 
 let pub, wallet, C, providerAcct; // C: contract addresses
+let demoAcct, demoWallet; // calibnet: the demo client wallet the page can use instead of MetaMask
 const ABI = {};
 const A = {}; // local: deployer, client; both: provider (address)
 const withErrors = (abi) => { // the contract's ABI plus all our errors, so nested revert reasons decode
@@ -199,6 +202,10 @@ async function connectCalibnet() {
   A.provider = providerAcct.address;
   pub = createPublicClient({ chain: filecoinCalibration, transport: rpc(NET.rpc), pollingInterval: 4000 });
   wallet = createWalletClient({ chain: filecoinCalibration, transport: rpc(NET.rpc), account: providerAcct });
+  if (fs.existsSync(DEMO_KEY_FILE)) {
+    demoAcct = privateKeyToAccount(fs.readFileSync(DEMO_KEY_FILE, "utf8").trim()); // in memory only, never printed
+    demoWallet = createWalletClient({ chain: filecoinCalibration, transport: rpc(NET.rpc), account: demoAcct });
+  }
   for (const n of FOC.NAMES) ABI[n] = FOC.artifact(n).abi;
   ABI.ERC20 = localArtifact("MockERC20").abi; // standard ERC-20 functions
   C = { ...CALIBNET, cs: loadJSON(DEPLOY_FILE, {}).computeService };
@@ -488,9 +495,10 @@ async function state() {
   const walletBal = await read(C.usdfc, ABI.ERC20, "balanceOf", [current]);
   const [fundedUntil, funds, available] = await read(C.payments, ABI.FilecoinPayV1, "getAccountInfoIfSettled", [C.usdfc, current]);
   const approval = await read(C.payments, ABI.FilecoinPayV1, "operatorApprovals", [C.usdfc, current, C.fwss]);
+  const csApproval = C.cs ? await read(C.payments, ABI.FilecoinPayV1, "operatorApprovals", [C.usdfc, current, C.cs]) : [false];
   out.client = { address: current, wallet: fmt(walletBal), inFilecoinPay: fmt(funds), available: fmt(available),
     onHold: fmt(funds - available), fundedUntil: fundedUntil > 10n ** 30n ? null : Number(fundedUntil),
-    storageApproved: approval[0] };
+    storageApproved: approval[0], computeApproved: csApproval[0] };
   const c = cl();
   out.dataSetId = c ? c.dataSetId : null;
   out.hasFiles = c ? Object.keys(c.pieces).length > 0 : false;
@@ -522,6 +530,7 @@ async function config() {
     network: NETWORK, chainId: NET.chain.id, chainName: NET.chain.name, rpc: NET.rpc, explorer: NET.explorer,
     epochSeconds: NET.epochSeconds, token: NET.token, contracts: C, provider: A.provider,
     localClient: CAL ? null : A.client,
+    demoClient: demoAcct?.address ?? null,
     params: {
       session: { image: digest(PARAMS.session.image), name: PARAMS.session.name, rate: PARAMS.session.rate.toString(), lockupPeriod: PARAMS.session.lockupPeriod.toString() },
       jobs: Object.fromEntries(Object.entries(PARAMS.jobs).map(([k, j]) => [k, { name: j.name, image: digest(j.image), price: j.price.toString(), deadline: j.deadline.toString(), inputs: JOB_SCRIPTS[j.image].inputs.toString() }])),
@@ -564,6 +573,7 @@ function serve() {
             current = getAddress(a.client);
             return json(200, { ok: true, dataSetId: cl()?.dataSetId ?? null, clientDataSetId: cl()?.clientDataSetId ?? null });
           }
+          if (action === "wallet") return json(200, { result: await demoWalletRequest(a.method, a.params) });
           if (action === "clientlog") { clientLog.push({ t: Date.now(), text: a.what, fn: a.fn, tx: a.tx, block: a.block }); return json(200, { ok: true }); }
           if (action === "ask") return json(200, { lines: await ask(a.sessionId, a.question) });
           if (action === "dataset/create") return json(200, { ok: true, ...(await createDataSetFor(a.client, a.clientDataSetId, a.signature)) });
@@ -582,6 +592,32 @@ function serve() {
   }).listen(WEB_PORT, "127.0.0.1");
 }
 
+// ---------------------------------------------------------------- demo client wallet (calibnet)
+
+// The page's demo wallet forwards the two signing requests here; everything else goes straight to the RPC.
+// uint fields arrive as strings in JSON typed data: turn them back into integers before signing.
+function coerce(types, type, value) {
+  if (type.endsWith("[]")) return value.map((v) => coerce(types, type.slice(0, -2), v));
+  if (types[type]) return Object.fromEntries(types[type].map((f) => [f.name, coerce(types, f.type, value[f.name])]));
+  if (/^u?int\d*$/.test(type)) return BigInt(value);
+  return value;
+}
+async function demoWalletRequest(method, params) {
+  if (!demoAcct) throw new Error("no demo wallet on this server");
+  if (method === "eth_sendTransaction") {
+    const t = params[0];
+    if (getAddress(t.from) !== demoAcct.address) throw new Error("wrong sender");
+    return serial(demoAcct, () => demoWallet.sendTransaction({ to: t.to, data: t.data, value: t.value ? BigInt(t.value) : 0n,
+      gas: t.gas ? BigInt(t.gas) : undefined, chain: filecoinCalibration }));
+  }
+  if (method === "eth_signTypedData_v4") {
+    const { domain, types, primaryType, message } = typeof params[1] === "string" ? JSON.parse(params[1]) : params[1];
+    const { EIP712Domain, ...rest } = types;
+    return demoAcct.signTypedData({ domain: { ...domain, chainId: Number(domain.chainId) }, types: rest, primaryType, message: coerce(rest, primaryType, message) });
+  }
+  throw new Error(`unsupported wallet method ${method}`);
+}
+
 // ---------------------------------------------------------------- calibnet one-time setup commands
 
 async function calibnetCommand() {
@@ -590,6 +626,10 @@ async function calibnetCommand() {
     if (fs.existsSync(KEY_FILE)) return say("A provider key already exists. Address:", privateKeyToAccount(fs.readFileSync(KEY_FILE, "utf8").trim()).address);
     fs.writeFileSync(KEY_FILE, generatePrivateKey(), { mode: 0o600 });
     return say("Provider key created (kept in", KEY_FILE, "— never shown). Provider address:", privateKeyToAccount(fs.readFileSync(KEY_FILE, "utf8").trim()).address);
+  }
+  if (process.argv.includes("--new-demo-client-key")) {
+    if (!fs.existsSync(DEMO_KEY_FILE)) fs.writeFileSync(DEMO_KEY_FILE, generatePrivateKey(), { mode: 0o600 });
+    return say("Demo client key ready (kept in", DEMO_KEY_FILE, "— never shown). Demo client address:", privateKeyToAccount(fs.readFileSync(DEMO_KEY_FILE, "utf8").trim()).address);
   }
   await connectCalibnet();
   say("Provider", A.provider, "balance", fmt(await pub.getBalance({ address: A.provider })), "tFIL");
@@ -614,7 +654,7 @@ async function calibnetCommand() {
 // ---------------------------------------------------------------- main
 
 async function main() {
-  const setup = ["--new-provider-key", "--register", "--deploy"].some((f) => process.argv.includes(f));
+  const setup = ["--new-provider-key", "--new-demo-client-key", "--register", "--deploy"].some((f) => process.argv.includes(f));
   if (CAL && setup) { await calibnetCommand(); process.exit(0); }
 
   try { await execFile("docker", ["info"], XENV); }

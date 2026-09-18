@@ -201,7 +201,7 @@ const EIP712Types = {
   AddPieces: [{ name: "clientDataSetId", type: "uint256" }, { name: "nonce", type: "uint256" }, { name: "pieceData", type: "Cid[]" }, { name: "pieceMetadata", type: "PieceMetadata[]" }],
 };
 
-let CFG, chain, pub, wal, me = null;
+let CFG, chain, pub, wal, me = null, usingDemo = false;
 let S = null, busy = false, tab = "time", message = null, answers = null, lastQ = "", pick = "index";
 
 // ---------------------------------------------------------------- wallet and transactions
@@ -237,7 +237,33 @@ async function useAccount(addr) {
   await refresh();
 }
 
+// Demo wallet: a wallet held by the demo program (test tokens only). Signing requests go to the program;
+// everything else (reads, gas estimates) goes to the chain's RPC. Visitors need no MetaMask.
+const demoProvider = {
+  async request({ method, params }) {
+    if (method === "eth_accounts" || method === "eth_requestAccounts") return [CFG.demoClient];
+    if (method === "eth_chainId") return toHex(CFG.chainId);
+    if (method === "eth_sendTransaction" || method === "eth_signTypedData_v4") {
+      const r = await fetch("/api/wallet", { method: "POST", body: JSON.stringify({ method, params }, (k, v) => typeof v === "bigint" ? toHex(v) : v) }).then((r) => r.json());
+      if (r.error) throw new Error(r.error);
+      return r.result;
+    }
+    const r = await fetch(CFG.rpc, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }) }).then((r) => r.json());
+    if (r.error) throw Object.assign(new Error(r.error.message), { code: r.error.code, data: r.error.data });
+    return r.result;
+  },
+};
+async function useDemoWallet() {
+  usingDemo = true;
+  me = getAddress(CFG.demoClient);
+  wal = createWalletClient({ chain, transport: custom(demoProvider), account: me });
+  await fetch("/api/connect", { method: "POST", body: JSON.stringify({ client: me }) });
+  message = { text: "You are using the demo wallet: the demo program signs as the client, with test tokens. Every step is still a real transaction on Filecoin Calibration (click a transaction id to see it on Filfox)." };
+  await refresh();
+}
+
 async function connectMetaMask() {
+  usingDemo = false;
   if (!window.ethereum) { message = { err: true, text: "MetaMask is not installed in this browser." }; return render(); }
   const [a] = await window.ethereum.request({ method: "eth_requestAccounts" });
   await ensureChain();
@@ -245,7 +271,7 @@ async function connectMetaMask() {
 }
 
 async function ensureChain() {
-  if (CFG.network !== "calibnet") return;
+  if (CFG.network !== "calibnet" || usingDemo) return;
   const id = await window.ethereum.request({ method: "eth_chainId" });
   if (Number(id) === CFG.chainId) return;
   await window.ethereum.request({ method: "wallet_switchEthereumChain", params: [{ chainId: toHex(CFG.chainId) }] });
@@ -265,7 +291,7 @@ async function tx(address, abi, functionName, args, what) {
   await ensureChain();
   const { request } = await pub.simulateContract({ account: me, address, abi, functionName, args });
   const gas = (await pub.estimateContractGas({ account: me, address, abi, functionName, args })) * 3n / 2n;
-  message = { text: `${what}… ${CFG.network === "calibnet" ? "confirm in MetaMask, then wait for the block (about 30–60 s)." : ""}` };
+  message = { text: `${what}… ${CFG.network === "calibnet" ? (usingDemo ? "sent by the demo wallet; waiting for the block (about 30–60 s)." : "confirm in MetaMask, then wait for the block (about 30–60 s).") : ""}` };
   render();
   const hash = await wal.writeContract({ ...request, gas });
   const r = await pub.waitForTransactionReceipt({ hash, timeout: 600_000 });
@@ -322,7 +348,7 @@ const ACTIONS = {
     const ap = CFG.params.approval;
     await tx(C().usdfc, A().erc20, "approve", [C().payments, amt], `Allow Filecoin Pay to take ${amount} ${CFG.token} from your wallet`);
     await tx(C().payments, A().payments, "deposit", [C().usdfc, me, amt], `Deposit ${amount} ${CFG.token} into Filecoin Pay`);
-    await tx(C().payments, A().payments, "setOperatorApproval", [C().usdfc, C().cs, true, BigInt(ap.rateAllowance), BigInt(ap.lockupAllowance), BigInt(ap.maxLockupPeriod)],
+    if (!S.client.computeApproved) await tx(C().payments, A().payments, "setOperatorApproval", [C().usdfc, C().cs, true, BigInt(ap.rateAllowance), BigInt(ap.lockupAllowance), BigInt(ap.maxLockupPeriod)],
       `Let the compute service open payments for you, up to ${m(formatUnits(BigInt(ap.rateAllowance), 18))} ${CFG.token}/epoch and ${m(formatUnits(BigInt(ap.lockupAllowance), 18))} on hold`);
     if (!S.authorizerSet) await tx(C().fwss, A().fwss, "setDataSetAuthorizer", [BigInt(S.dataSetId), C().cs], `Let providers deliver job results into your data set #${S.dataSetId}, only while you have a job open with them`);
     return "Your money is in Filecoin Pay; you allowed the compute service to open payments for you, within the limits you set, and to let providers add job results to your data set while a job is open. Nothing is paid yet.";
@@ -379,9 +405,12 @@ const txLink = (h) => CFG.explorer ? `<a href="${CFG.explorer}${h}" target="_bla
 
 function walletPanel() {
   if (CFG.network !== "calibnet") return "";
-  if (!window.ethereum) return `<h2>Connect a wallet</h2><p>This page needs MetaMask (with the Filecoin Calibration network).</p>`;
-  if (!me) return `<div class="row" style="justify-content:space-between"><div><h2>Connect your wallet</h2><p class="muted">You are the client: your MetaMask account on Filecoin Calibration signs every step.</p></div><button class="b primary" id="connect">Connect MetaMask</button></div>`;
-  return "";
+  const who = me ? `<p class="muted">You are the client: <code>${esc(me)}</code> (${usingDemo ? "demo wallet" : "your MetaMask"}). The storage provider is the demo program: <code>${esc(CFG.provider)}</code>.</p>` : "";
+  const demo = CFG.demoClient ? `<button class="b ${me ? "" : "primary"}" id="usedemo">Use the demo wallet (no MetaMask)</button>` : "";
+  const mm = window.ethereum ? `<button class="b" id="connect">Connect MetaMask</button>` : "";
+  return `<div class="row" style="justify-content:space-between"><div><h2>${me ? "Who is who" : "Choose who plays the client"}</h2>
+    ${me ? who : `<p class="muted">Demo wallet: the demo program signs for you, with test tokens; just click. MetaMask: you sign every step yourself.</p>`}</div>
+    <div class="row">${demo}${mm}</div></div>`;
 }
 
 function scene() {
@@ -416,7 +445,7 @@ function moneyPanel() {
       <p class="muted">In real life your files would already be stored. Here: ${c.storageApproved ? "" : `3 transactions to pay for storage (deposit ${m(formatUnits(BigInt(st.deposit), 18))} ${CFG.token}, and let Warm Storage charge you), then `}2 signatures: create your data set with this provider, and add ${4} sample files to it. The provider submits them to FWSS.</p>
       <div class="row"><button class="b primary" data-act="storeFiles" ${busy ? "disabled" : ""}>Store my files</button></div>`;
   }
-  const started = S.clientLog.length > 0 || S.authorizerSet;
+  const started = c.computeApproved && S.authorizerSet;
   if (!started) return `<h2>Step 1 · Put money in Filecoin Pay</h2>
     <p class="muted">Four transactions: allow Filecoin Pay to take the amount from your wallet, deposit it, let the compute service open payments for you (within limits), and let providers add job results to your data set, only while you have a job open with them.</p>
     <div class="row">
@@ -490,7 +519,7 @@ function render() {
   st.textContent = message?.text ?? (S.clientLog.length ? "" : S.hasFiles ? "Your files are already stored: you have a data set with this storage provider (right), on FWSS, paid through Filecoin Pay. Start by putting money in Filecoin Pay for compute." : "");
   st.hidden = !st.textContent;
   $("money").innerHTML = moneyPanel();
-  const ready = S.client && S.hasFiles && (S.clientLog.length > 0 || S.authorizerSet);
+  const ready = S.client && S.hasFiles && S.client.computeApproved && S.authorizerSet;
   for (const [id, f] of [["time", timePanel], ["job", jobPanel]]) {
     const el = $(id);
     el.hidden = tab !== id;
@@ -512,8 +541,9 @@ async function refresh() {
 }
 
 document.addEventListener("click", async (e) => {
-  const t = e.target.closest("[data-act],[data-file],#connect,#tab-time,#tab-job");
+  const t = e.target.closest("[data-act],[data-file],#connect,#usedemo,#tab-time,#tab-job");
   if (!t) return;
+  if (t.id === "usedemo") return useDemoWallet().catch((err) => { message = { err: true, text: reason(err) }; render(); });
   if (t.id === "connect") return connectMetaMask().catch((err) => { message = { err: true, text: reason(err) }; render(); });
   if (t.id === "tab-time" || t.id === "tab-job") { tab = t.id.slice(4); message = null; return render(); }
   if (t.dataset.file !== undefined) {
