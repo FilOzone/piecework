@@ -236,7 +236,7 @@ footer{color:var(--ink-3);font-size:.85rem;display:flex;flex-direction:column;ga
     },
     () => ({
       title: "Delivered on time, so the provider is paid",
-      text: `<p>The result (<b>search-index</b>) is added to your PDP data set as a new piece, stored and proven like the rest of your files.</p>
+      text: `<p>The result (<b>search-index</b>) is added to your PDP data set as a new piece, stored and proven like the rest of your files (at the normal storage price).</p>
              <p><b>How does Filecoin Pay know it was on time?</b> Every action on Filecoin is stamped with the moment it happens. The contract compares the delivery stamp (${clock(JOB_STEPS)}) with the deadline (10:00) — like a postmark on a letter. Before the deadline, it releases the 0.50 to the provider.</p>`,
       scene: { you: st.wB - JOB_PRICE, pay: 0, payLabel: "released", f2: { t: "0.50 paid", cls: "on" }, prov: st.pB + JOB_PRICE * 0.995, provNote: "Paid on delivery.", files: [...jobFiles().slice(0, 3).map(f => ({ ...f, c: f.c === "done" ? "done" : "" })), { n: "search-index (new)", s: "310 MB", c: "new" }], hl: "prov" }
     }),
@@ -273,6 +273,7 @@ footer{color:var(--ink-3);font-size:.85rem;display:flex;flex-direction:column;ga
         <button class="choice" data-s="A"><span class="k">Pay for time</span><h3>Rent an AI assistant for your documents</h3><p>Like a taxi meter: pay every 30 seconds while you use it, stop whenever you want.</p><span class="go">Start · 5 short steps →</span></button>
         <button class="choice" data-s="B"><span class="k">Pay per job</span><h3>Order a job on your files</h3><p>Like a print shop: pay once, and only if the result is delivered on time.</p><span class="go">Start · 5 short steps →</span></button>
       </div>
+      <section class="card" style="display:flex;flex-direction:column;gap:8px"><h3 style="font-size:1.05rem">Good to know</h3><div class="text" style="max-width:none"><p><b>AI agents can use it too.</b> An agent can rent a service or order a job on your behalf through an API, paying from your Filecoin Pay balance within the limits you set.</p><p><b>Quality is not checked — yet.</b> Like commercial GPU clouds, the contract guarantees delivery on time and a fair charge, not the quality of the result. Proofs of correct execution can be added later: zero-knowledge proofs for simple jobs, secure hardware (TEEs) for AI workloads.</p></div></section>
       <footer><span>A simulation: no real money, no wallet needed. The payment rules follow the real Filecoin Pay contract.</span><span>Want every detail? <a href="${EXPLORER}" target="_blank" rel="noopener">Open the detailed simulator</a>.</span></footer>`;
     document.querySelectorAll("[data-s]").forEach(b => b.onclick = () => { st.story = b.dataset.s; st.i = 0; show(); });
   }
