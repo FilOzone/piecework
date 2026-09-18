@@ -74,8 +74,8 @@ export async function deployLocal({ pub, wallet, chain, deployer, usdfc, log = (
     [C.pdp, C.payments, usdfc, deployer, C.registry, C.sessionKeys, 1n], libs);
   // maxProvingPeriod 2880 epochs, challenge window 60 (FilOz's mainnet values), FilBeam controller unused
   C.fwss = await proxy(fwssImpl, ABI.FilecoinWarmStorageService, "initialize", [2880n, 60n, deployer]);
-  const view = await deploy("FilecoinWarmStorageServiceStateView", [C.fwss]);
-  await write({ pub, wallet, chain }, deployer, C.fwss, ABI.FilecoinWarmStorageService, "setViewContract", [view]);
+  C.view = await deploy("FilecoinWarmStorageServiceStateView", [C.fwss]);
+  await write({ pub, wallet, chain }, deployer, C.fwss, ABI.FilecoinWarmStorageService, "setViewContract", [C.view]);
   C.cs = await deploy("ComputeService", [C.payments, usdfc, C.pdp, C.sessionKeys]);
   log("FOC contracts installed", C);
   return { C, ABI };
@@ -83,8 +83,11 @@ export async function deployLocal({ pub, wallet, chain, deployer, usdfc, log = (
 
 export async function write({ pub, wallet, chain }, account, address, abi, functionName, args = [], value) {
   const { request } = await pub.simulateContract({ account, address, abi, functionName, args, value });
-  const hash = await wallet.writeContract({ ...request, chain, gas: 15_000_000n });
-  const r = await pub.waitForTransactionReceipt({ hash });
+  // local: a fixed budget (anvil estimates can be too low); Filecoin: estimate × 1.5 (FEVM gas units are much larger)
+  const gas = chain.id === 31337 ? 15_000_000n
+    : (await pub.estimateContractGas({ account, address, abi, functionName, args, value })) * 3n / 2n;
+  const hash = await wallet.writeContract({ ...request, chain, gas });
+  const r = await pub.waitForTransactionReceipt({ hash, timeout: 600_000 });
   if (r.status !== "success") throw new Error(`${functionName} reverted`);
   return r;
 }

@@ -9,6 +9,20 @@ A storage provider that already stores (and proves with PDP) a client's data set
 
 Correctness of results is the client's responsibility, as with commercial GPU clouds.
 
+## Guarantees
+
+The labels used in tests and tables below (S = sessions, J = jobs):
+
+| | Guarantee |
+|---|---|
+| **S1** | If the client's money runs out during a session, the provider is still paid: for the time served, plus at most the safety margin (`rate × lockupPeriod`). |
+| **S2** | The client never pays more than the safety margin beyond the service it received. |
+| **S3** | Nobody can charge the client without its approval: only the operator it approved (ComputeService), within the limits it set. |
+| **S4** | Stop means stop: when the client stops, it pays exactly the epochs used, and the margin is released. |
+| **J1** | If the provider delivers the outputs (new pieces in the client's data set) before the deadline, it is paid the price. |
+| **J2** | If nothing is delivered by the deadline, the client gets the full price back. |
+| **J3** | The provider is paid at most once, and never more than the price held for the job. |
+
 ## Live proof of concept (local)
 
 `poc/` runs everything on one Mac: a local blockchain with **the real FOC contracts at the versions deployed on calibnet and mainnet** (Filecoin Pay v1.0.0, PDPVerifier, FWSS v1.4.0, provider registry, session keys), our `ComputeService`, and a storage provider that runs programs in containers next to the client's files. The client's files are a real FWSS data set (created with the client's signature, pieces with real piece CIDs). Every button on the page is a real transaction.

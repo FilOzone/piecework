@@ -146,15 +146,16 @@ body.down .offline{display:block}
 <div class="wrap">
   <div class="top">
     <div>
-      <div class="eyebrow">PieceWork · live proof of concept</div>
+      <div class="eyebrow" id="eyebrow">PieceWork · live proof of concept</div>
       <h1>Compute on your PDP data set</h1>
-      <p class="lede">Every button sends a real transaction to a blockchain running on this computer, with the real Filecoin Pay contract. The storage provider really runs programs, in containers, next to your files.</p>
+      <p class="lede" id="lede"></p>
     </div>
     <div class="chain" id="chain">connecting…</div>
   </div>
 
-  <div class="card offline"><b>The demo is not running.</b> Start it again from the project folder (<code>npm start</code> in <code>poc/</code>), then reload this page.</div>
+  <div class="card offline"><b>The demo is not running.</b> Start it again (double-click <code>Start demo.command</code> in <code>poc/</code>), then reload this page.</div>
 
+  <div class="card panel" id="wallet" hidden></div>
   <div id="scene"></div>
   <div class="story" id="story"></div>
 
@@ -172,210 +173,379 @@ body.down .offline{display:block}
 
   <div class="card panel" id="viewer" hidden></div>
 
-  <footer>
-    <div>Local chain: 1 block = 1 epoch = 1 second here (30 seconds on Filecoin). luca_usdfc is a local test token with no value, standing in for USDFC (the dollar stablecoin used by Filecoin Pay).</div>
-    <div>Real: the FOC contracts at the versions deployed on calibnet and mainnet (Filecoin Pay v1.0.0, PDPVerifier, FWSS v1.4.0, provider registry), ComputeService, the client's signatures, piece CIDs computed from the files, the containers. Stand-ins: the token, and proofs of possession, which are not run: the provider is assumed to be an honest provider that proves every period (the "PDP proof ✓" line is simulated).</div>
-  </footer>
+  <footer id="footer"></footer>
 </div>
 
-<script>
-(() => {
-  const $ = (id) => document.getElementById(id);
-  const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-  const n = (x) => Number(x);
-  const m = (x) => n(x).toFixed(3);
-  const icon = {
-    you: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/></svg>`,
-    pay: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="6" width="18" height="14" rx="2"/><path d="M3 10h18M8 15h3"/></svg>`,
-    prov: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="3" width="16" height="7" rx="1.5"/><rect x="4" y="14" width="16" height="7" rx="1.5"/><path d="M8 6.5h.01M8 17.5h.01"/></svg>`,
-  };
+<script type="module">
+import {
+  createPublicClient, createWalletClient, http, custom, parseUnits, formatUnits, toHex, BaseError, getAddress, defineChain,
+} from "https://cdn.jsdelivr.net/npm/viem@2.56.8/+esm";
 
-  const PROVING_PERIOD = 30; // blocks; simulated here (on Filecoin, FWSS uses 2880 epochs = 1 day)
-  let S = null, busy = false, tab = "time", message = null, answers = null, lastQ = "", pick = "index";
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const n = (x) => Number(x);
+const m = (x) => n(x).toFixed(3);
+const U = (x) => parseUnits(String(x), 18);
+const icon = {
+  you: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/></svg>`,
+  pay: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="6" width="18" height="14" rx="2"/><path d="M3 10h18M8 15h3"/></svg>`,
+  prov: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="3" width="16" height="7" rx="1.5"/><rect x="4" y="14" width="16" height="7" rx="1.5"/><path d="M8 6.5h.01M8 17.5h.01"/></svg>`,
+};
+const PROVING_PERIOD = 30; // blocks; simulated here (FWSS uses 2880 epochs = 1 day)
+// FWSS EIP-712 types (@filoz/synapse-core typed-data, same as filecoin-pin)
+const EIP712Types = {
+  MetadataEntry: [{ name: "key", type: "string" }, { name: "value", type: "string" }],
+  CreateDataSet: [{ name: "clientDataSetId", type: "uint256" }, { name: "payee", type: "address" }, { name: "metadata", type: "MetadataEntry[]" }],
+  Cid: [{ name: "data", type: "bytes" }],
+  PieceMetadata: [{ name: "pieceIndex", type: "uint256" }, { name: "metadata", type: "MetadataEntry[]" }],
+  AddPieces: [{ name: "clientDataSetId", type: "uint256" }, { name: "nonce", type: "uint256" }, { name: "pieceData", type: "Cid[]" }, { name: "pieceMetadata", type: "PieceMetadata[]" }],
+};
 
-  async function call(action, body = {}) {
-    if (busy) return;
-    busy = true; message = { text: "Sending transaction…" }; render();
-    try {
-      const r = await fetch(`/api/${action}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }).then((r) => r.json());
-      if (r.ok === false || r.error) message = { err: true, text: r.error };
-      else message = { text: STORY[action]?.(r) ?? "Done." };
-      return r;
-    } catch (e) { message = { err: true, text: String(e) }; }
-    finally { busy = false; await refresh(); }
+let CFG, chain, pub, wal, me = null;
+let S = null, busy = false, tab = "time", message = null, answers = null, lastQ = "", pick = "index";
+
+// ---------------------------------------------------------------- wallet and transactions
+
+async function init() {
+  CFG = await fetch("/api/config").then((r) => r.json());
+  chain = defineChain({ id: CFG.chainId, name: CFG.chainName, nativeCurrency: { name: "FIL", symbol: CFG.network === "calibnet" ? "tFIL" : "ETH", decimals: 18 }, rpcUrls: { default: { http: [CFG.rpc] } } });
+  pub = createPublicClient({ chain, transport: http(CFG.rpc), pollingInterval: CFG.network === "local" ? 500 : 4000 });
+  if (CFG.network === "local") { // built-in test wallet (an unlocked account of the local chain)
+    me = getAddress(CFG.localClient);
+    wal = createWalletClient({ chain, transport: http(CFG.rpc), account: me });
   }
+  $("lede").textContent = CFG.network === "calibnet"
+    ? "Every button sends a real transaction on Filecoin's Calibration test network, from your MetaMask, to the FOC contracts FilOz deployed there and to our ComputeService. The storage provider really runs programs, in containers, next to your files."
+    : "Every button sends a real transaction to a blockchain running on this computer, with the FOC contracts (same versions as on Filecoin). The storage provider really runs programs, in containers, next to your files.";
+  $("eyebrow").textContent = `PieceWork · live proof of concept · ${CFG.network === "calibnet" ? "Filecoin Calibration" : "local chain"}`;
+  $("footer").innerHTML = CFG.network === "calibnet"
+    ? `<div>Filecoin Calibration test network: 1 epoch = 30 seconds. USDFC and tFIL here are test tokens from faucets, with no value. Transactions are public: click an id to see it on Filfox.</div>
+       <div>Real: Filecoin Pay, PDPVerifier, FWSS (FilOz's calibnet deployment), ComputeService (<code>${esc(CFG.contracts.cs)}</code>), your signatures, piece CIDs computed from the files, the containers. Simulated: proofs of possession are not run; the provider is assumed honest (the "PDP proof ✓" line).</div>`
+    : `<div>Local chain: 1 block = 1 epoch = 1 second here (30 seconds on Filecoin). luca_usdfc is a local test token with no value, standing in for USDFC.</div>
+       <div>Real: the FOC contracts at the versions deployed on calibnet and mainnet (Filecoin Pay v1.0.0, PDPVerifier, FWSS v1.4.0, provider registry), ComputeService, the client's signatures, piece CIDs computed from the files, the containers. Stand-ins: the token, and proofs of possession, which are not run: the provider is assumed to be an honest provider that proves every period (the "PDP proof ✓" line is simulated).</div>`;
+  if (CFG.network === "calibnet" && window.ethereum) {
+    const accts = await window.ethereum.request({ method: "eth_accounts" }).catch(() => []);
+    if (accts[0]) await useAccount(accts[0]);
+    window.ethereum.on?.("accountsChanged", (a) => a[0] ? useAccount(a[0]) : location.reload());
+  }
+}
 
-  const STORY = {
-    setup: () => "Your money is in Filecoin Pay; you allowed the compute service to open payments for you, within the limits you set, and to let providers add job results to your data set while a job is open. Nothing is paid yet.",
-    deposit: () => "Added to your balance in Filecoin Pay.",
-    withdraw: () => "Your free balance went back to your wallet.",
-    openSession: () => "You asked for a session. Filecoin Pay puts the safety margin on hold. The provider is starting the service next to your files; billing starts when it is ready.",
-    closeSession: () => "You stopped. The rate was set to 0 and the payment ended at this epoch: you pay exactly the seconds you used, and the safety margin is released.",
-    postJob: () => "Job ordered. The price is on hold in Filecoin Pay. The provider is paid only if it adds the result to your data set before the deadline.",
-    expire: () => "The deadline passed without a result, so the job was cancelled and the money on hold came back to you.",
-  };
+async function useAccount(addr) {
+  me = getAddress(addr);
+  wal = createWalletClient({ chain, transport: custom(window.ethereum), account: me });
+  await fetch("/api/connect", { method: "POST", body: JSON.stringify({ client: me }) });
+  await refresh();
+}
 
-  function scene() {
-    const c = S.client, p = S.provider;
-    const running = S.sessions.find((s) => s.status === "running");
-    const waitingJob = S.jobs.find((j) => j.status === "waiting");
-    const files = S.files.map((f) => {
-      const cls = f.kind === "output" ? "new" : "";
-      return `<li class="${cls}"><span><span class="pid">#${f.pieceId}</span><a data-file="${f.pieceId}">${esc(f.name)}</a></span><span class="sz">${f.size} B</span></li>`;
-    }).join("");
-    const f1 = running ? { cls: "on", t: `streaming ${m(running.rate)}/s` } : waitingJob ? { cls: "", t: "price on hold" } : null;
-    return `<div class="scene">
-      <div class="actor ${message && !message.err ? "" : ""}"><div class="who">${icon.you}You</div>
-        <div class="big">${m(c.available)}</div><div class="unit">luca_usdfc free in Filecoin Pay</div>
-        <div class="note">Wallet (outside Filecoin Pay): ${m(c.wallet)} luca_usdfc${c.fundedUntil ? `<br>Funded until block ${c.fundedUntil}` : ""}</div></div>
-      <div class="flow ${f1?.cls ?? ""}"><span class="arr">→</span><span>${f1?.t ?? ""}</span></div>
-      <div class="actor pay"><div class="who">${icon.pay}On hold in Filecoin Pay</div>
-        <div class="big">${m(c.onHold)}</div><div class="unit">luca_usdfc held (safety margin, job price, and your storage reserve)</div></div>
-      <div class="flow ${running ? "on" : ""}"><span class="arr">→</span><span>${running ? "paid as time passes" : ""}</span></div>
-      <div class="actor prov"><div class="who">${icon.prov}Storage provider</div>
-        <div class="big">${m(p.earned)}</div><div class="unit">luca_usdfc earned (in Filecoin Pay)</div>
-        <div class="note">Holds your data set #${S.dataSetId} (FWSS, proven with PDP). Click a file to open it. <span style="color:var(--money)">Green</span> = results added by jobs.</div>
-        <div class="note"><span class="pill">PDP proof ✓</span> last proven at block ${Math.floor(S.block / PROVING_PERIOD) * PROVING_PERIOD}, next at ${(Math.floor(S.block / PROVING_PERIOD) + 1) * PROVING_PERIOD} <span class="muted">(simulated: we assume an honest provider that proves every period)</span></div>
-        <ul class="files">${files}</ul></div>
+async function connectMetaMask() {
+  if (!window.ethereum) { message = { err: true, text: "MetaMask is not installed in this browser." }; return render(); }
+  const [a] = await window.ethereum.request({ method: "eth_requestAccounts" });
+  await ensureChain();
+  await useAccount(a);
+}
+
+async function ensureChain() {
+  if (CFG.network !== "calibnet") return;
+  const id = await window.ethereum.request({ method: "eth_chainId" });
+  if (Number(id) === CFG.chainId) return;
+  await window.ethereum.request({ method: "wallet_switchEthereumChain", params: [{ chainId: toHex(CFG.chainId) }] });
+}
+
+function reason(e) {
+  if (e instanceof BaseError) {
+    const r = e.walk((x) => x?.data?.errorName);
+    if (r?.data?.errorName) return r.data.errorName;
+    return e.shortMessage;
+  }
+  return String(e?.message ?? e);
+}
+
+// One transaction from the client's wallet: dry run, gas estimate × 1.5, send, wait, record.
+async function tx(address, abi, functionName, args, what) {
+  await ensureChain();
+  const { request } = await pub.simulateContract({ account: me, address, abi, functionName, args });
+  const gas = (await pub.estimateContractGas({ account: me, address, abi, functionName, args })) * 3n / 2n;
+  message = { text: `${what}… ${CFG.network === "calibnet" ? "confirm in MetaMask, then wait for the block (about 30–60 s)." : ""}` };
+  render();
+  const hash = await wal.writeContract({ ...request, gas });
+  const r = await pub.waitForTransactionReceipt({ hash, timeout: 600_000 });
+  if (r.status !== "success") throw new Error(`${what} failed`);
+  await fetch("/api/clientlog", { method: "POST", body: JSON.stringify({ what, fn: functionName, tx: hash, block: Number(r.blockNumber) }) });
+  return r;
+}
+
+const C = () => CFG.contracts;
+const A = () => CFG.abi;
+async function free() {
+  const [, , available] = await pub.readContract({ address: C().payments, abi: A().payments, functionName: "getAccountInfoIfSettled", args: [C().usdfc, me] });
+  return available;
+}
+async function requireFree(amount, what) {
+  const f = await free();
+  if (f < amount) throw new Error(`Not enough free money in Filecoin Pay: ${m(formatUnits(f, 18))} ${CFG.token} free, ${what} needs ${m(formatUnits(amount, 18))}. Add money first.`);
+}
+
+const ACTIONS = {
+  // one time on calibnet: pay for storage, then let the provider create your data set and store your files
+  async storeFiles() {
+    const st = CFG.params.storage;
+    if (!S.client.storageApproved) {
+      await tx(C().usdfc, A().erc20, "approve", [C().payments, BigInt(st.deposit)], `Allow Filecoin Pay to take ${m(formatUnits(BigInt(st.deposit), 18))} ${CFG.token} for storage`);
+      await tx(C().payments, A().payments, "deposit", [C().usdfc, me, BigInt(st.deposit)], `Deposit ${m(formatUnits(BigInt(st.deposit), 18))} ${CFG.token} for storage`);
+      await tx(C().payments, A().payments, "setOperatorApproval", [C().usdfc, C().fwss, true, BigInt(st.rate), BigInt(st.lockup), 1n << 40n], "Let Warm Storage (FWSS) charge you for storing your files");
+    }
+    let dataSetId = S.dataSetId, clientDataSetId;
+    const domain = { name: "FilecoinWarmStorageService", version: "1", chainId: CFG.chainId, verifyingContract: C().fwss };
+    if (dataSetId === null) {
+      clientDataSetId = BigInt(toHex(crypto.getRandomValues(new Uint8Array(31))));
+      message = { text: "Sign in MetaMask: create your data set with this provider (a signature, no fee)." }; render();
+      const signature = await wal.signTypedData({ domain, types: EIP712Types, primaryType: "CreateDataSet", message: { clientDataSetId, payee: CFG.provider, metadata: [] } });
+      message = { text: "The provider is creating your data set on FWSS (about 30–60 s)…" }; render();
+      const r = await fetch("/api/dataset/create", { method: "POST", body: JSON.stringify({ client: me, clientDataSetId: clientDataSetId.toString(), signature }) }).then((r) => r.json());
+      if (!r.ok) throw new Error(r.error);
+      dataSetId = r.dataSetId;
+    }
+    const conn = await fetch("/api/connect", { method: "POST", body: JSON.stringify({ client: me }) }).then((r) => r.json());
+    clientDataSetId = BigInt(conn.clientDataSetId);
+    const files = await fetch("/api/sample-pieces").then((r) => r.json());
+    const nonce = BigInt(toHex(crypto.getRandomValues(new Uint8Array(31))));
+    message = { text: `Sign in MetaMask: add your ${files.length} files to data set #${dataSetId} (a signature, no fee).` }; render();
+    const signature = await wal.signTypedData({ domain, types: EIP712Types, primaryType: "AddPieces",
+      message: { clientDataSetId, nonce, pieceData: files.map((f) => ({ data: f.hex })), pieceMetadata: [] } });
+    message = { text: "The provider is storing your files as pieces of your data set (about 30–60 s)…" }; render();
+    const r2 = await fetch("/api/dataset/add", { method: "POST", body: JSON.stringify({ client: me, nonce: nonce.toString(), signature }) }).then((r) => r.json());
+    if (!r2.ok) throw new Error(r2.error);
+    return "Your files are stored: a data set on FWSS with this provider, paid through Filecoin Pay. Next, put money in for compute.";
+  },
+  async setup({ amount }) {
+    const amt = U(amount);
+    const ap = CFG.params.approval;
+    await tx(C().usdfc, A().erc20, "approve", [C().payments, amt], `Allow Filecoin Pay to take ${amount} ${CFG.token} from your wallet`);
+    await tx(C().payments, A().payments, "deposit", [C().usdfc, me, amt], `Deposit ${amount} ${CFG.token} into Filecoin Pay`);
+    await tx(C().payments, A().payments, "setOperatorApproval", [C().usdfc, C().cs, true, BigInt(ap.rateAllowance), BigInt(ap.lockupAllowance), BigInt(ap.maxLockupPeriod)],
+      `Let the compute service open payments for you, up to ${m(formatUnits(BigInt(ap.rateAllowance), 18))} ${CFG.token}/epoch and ${m(formatUnits(BigInt(ap.lockupAllowance), 18))} on hold`);
+    if (!S.authorizerSet) await tx(C().fwss, A().fwss, "setDataSetAuthorizer", [BigInt(S.dataSetId), C().cs], `Let providers deliver job results into your data set #${S.dataSetId}, only while you have a job open with them`);
+    return "Your money is in Filecoin Pay; you allowed the compute service to open payments for you, within the limits you set, and to let providers add job results to your data set while a job is open. Nothing is paid yet.";
+  },
+  async deposit({ amount }) {
+    const amt = U(amount);
+    await tx(C().usdfc, A().erc20, "approve", [C().payments, amt], `Allow Filecoin Pay to take ${amount} ${CFG.token}`);
+    await tx(C().payments, A().payments, "deposit", [C().usdfc, me, amt], `Deposit ${amount} ${CFG.token} into Filecoin Pay`);
+    return "Added to your balance in Filecoin Pay.";
+  },
+  async withdraw() {
+    const amt = await free();
+    await tx(C().payments, A().payments, "withdraw", [C().usdfc, amt], `Withdraw ${m(formatUnits(amt, 18))} ${CFG.token} back to your wallet`);
+    return "Your free balance went back to your wallet.";
+  },
+  async openSession() {
+    const s = CFG.params.session;
+    await requireFree(BigInt(s.rate) * BigInt(s.lockupPeriod), "the safety margin");
+    await tx(C().cs, A().cs, "openSession", [CFG.provider, s.image, BigInt(s.rate), BigInt(s.lockupPeriod), BigInt(S.dataSetId)], `Start a session: ${s.name}`);
+    return "You asked for a session. Filecoin Pay puts the safety margin on hold. The provider is starting the service next to your files; billing starts when it is ready.";
+  },
+  async closeSession({ id }) {
+    await tx(C().cs, A().cs, "closeSession", [BigInt(id)], `Stop session #${id}`);
+    return "You stopped. The rate was set to 0 and the payment ended at this epoch: you pay exactly the time you used, and the safety margin is released.";
+  },
+  async postJob() {
+    const j = CFG.params.jobs[pick];
+    await requireFree(BigInt(j.price), "this job");
+    const accepts = new Function(`return (${j.inputs})`)();
+    const inputs = S.files.filter((f) => f.live && f.kind === "input" && accepts(f.name)).map((f) => BigInt(f.pieceId));
+    const deadline = (await pub.getBlockNumber()) + BigInt(j.deadline);
+    await tx(C().cs, A().cs, "postJob", [CFG.provider, j.image, BigInt(S.dataSetId), inputs, BigInt(j.price), deadline], `Order job: ${j.name}`);
+    return "Job ordered. The price is on hold in Filecoin Pay. The provider is paid only if it adds the result to your data set before the deadline.";
+  },
+  async expire({ id }) {
+    await tx(C().cs, A().cs, "expire", [BigInt(id)], `Deadline passed: cancel job #${id} and release the money`);
+    return "The deadline passed without a result, so the job was cancelled and the money on hold came back to you.";
+  },
+};
+
+async function act(name, args = {}) {
+  if (busy) return;
+  busy = true; message = { text: "Preparing…" }; render();
+  try { message = { text: await ACTIONS[name](args) }; }
+  catch (e) { message = { err: true, text: reason(e) }; }
+  finally { busy = false; await refresh(); }
+}
+
+// ---------------------------------------------------------------- rendering
+
+const secs = (blocks) => blocks * (CFG?.epochSeconds ?? 1);
+const dur = (s) => s < 90 ? `${s} s` : `${Math.round(s / 60)} min`;
+const txLink = (h) => CFG.explorer ? `<a href="${CFG.explorer}${h}" target="_blank" rel="noopener">${esc(h)}</a>` : esc(h);
+
+function walletPanel() {
+  if (CFG.network !== "calibnet") return "";
+  if (!window.ethereum) return `<h2>Connect a wallet</h2><p>This page needs MetaMask (with the Filecoin Calibration network).</p>`;
+  if (!me) return `<div class="row" style="justify-content:space-between"><div><h2>Connect your wallet</h2><p class="muted">You are the client: your MetaMask account on Filecoin Calibration signs every step.</p></div><button class="b primary" id="connect">Connect MetaMask</button></div>`;
+  return "";
+}
+
+function scene() {
+  const c = S.client;
+  const running = S.sessions.find((s) => s.status === "running");
+  const waitingJob = S.jobs.find((j) => j.status === "waiting");
+  const files = S.files.map((f) => `<li class="${f.kind === "output" ? "new" : ""}"><span><span class="pid">#${f.pieceId}</span><a data-file="${f.pieceId}">${esc(f.name)}</a></span><span class="sz">${f.size} B</span></li>`).join("");
+  const f1 = running ? { cls: "on", t: `streaming ${m(running.rate)}/epoch` } : waitingJob ? { cls: "", t: "price on hold" } : null;
+  const proven = Math.floor(S.block / PROVING_PERIOD) * PROVING_PERIOD;
+  return `<div class="scene">
+    <div class="actor"><div class="who">${icon.you}You${me ? ` · ${me.slice(0, 6)}…${me.slice(-4)}` : ""}</div>
+      <div class="big">${c ? m(c.available) : "–"}</div><div class="unit">${CFG.token} free in Filecoin Pay</div>
+      <div class="note">${c ? `Wallet (outside Filecoin Pay): ${m(c.wallet)} ${CFG.token}${c.fundedUntil ? `<br>Funded until block ${c.fundedUntil}` : ""}` : "Not connected"}</div></div>
+    <div class="flow ${f1?.cls ?? ""}"><span class="arr">→</span><span>${f1?.t ?? ""}</span></div>
+    <div class="actor pay"><div class="who">${icon.pay}On hold in Filecoin Pay</div>
+      <div class="big">${c ? m(c.onHold) : "–"}</div><div class="unit">${CFG.token} held (safety margin, job price, and your storage reserve)</div></div>
+    <div class="flow ${running ? "on" : ""}"><span class="arr">→</span><span>${running ? "paid as time passes" : ""}</span></div>
+    <div class="actor prov"><div class="who">${icon.prov}Storage provider</div>
+      <div class="big">${m(S.providerEarned)}</div><div class="unit">${CFG.token} earned (in Filecoin Pay)</div>
+      <div class="note">${S.dataSetId !== null ? `Holds your data set #${S.dataSetId} (FWSS, proven with PDP). Click a file to open it. <span style="color:var(--money)">Green</span> = results added by jobs.` : "Does not hold files of yours yet."}</div>
+      ${S.dataSetId !== null ? `<div class="note"><span class="pill">PDP proof ✓</span> last proven at block ${proven}, next at ${proven + PROVING_PERIOD} <span class="muted">(simulated: we assume an honest provider that proves every period)</span></div>` : ""}
+      <ul class="files">${files}</ul></div>
+  </div>`;
+}
+
+function moneyPanel() {
+  const c = S.client;
+  if (!c) return `<p class="muted">Connect your wallet (above) to start.</p>`;
+  if (!S.hasFiles) {
+    const st = CFG.params.storage;
+    return `<h2>Step 0 · Store your files with this provider (one time)</h2>
+      <p class="muted">In real life your files would already be stored. Here: ${c.storageApproved ? "" : `3 transactions to pay for storage (deposit ${m(formatUnits(BigInt(st.deposit), 18))} ${CFG.token}, and let Warm Storage charge you), then `}2 signatures: create your data set with this provider, and add ${4} sample files to it. The provider submits them to FWSS.</p>
+      <div class="row"><button class="b primary" data-act="storeFiles" ${busy ? "disabled" : ""}>Store my files</button></div>`;
+  }
+  const started = S.clientLog.length > 0 || S.authorizerSet;
+  if (!started) return `<h2>Step 1 · Put money in Filecoin Pay</h2>
+    <p class="muted">Four transactions: allow Filecoin Pay to take the amount from your wallet, deposit it, let the compute service open payments for you (within limits), and let providers add job results to your data set, only while you have a job open with them.</p>
+    <div class="row">
+      <button class="b primary" data-act="setup" data-amount="2" ${busy ? "disabled" : ""}>Deposit 2 ${CFG.token}</button>
+      ${CFG.network === "local" ? `<button class="b" data-act="setup" data-amount="0.03" ${busy ? "disabled" : ""}>Deposit only 0.03 (to see what happens when money runs out)</button>` : ""}
     </div>`;
+  return `<div class="row" style="justify-content:space-between"><h2>Your money</h2><div class="row">
+    <button class="b" data-act="deposit" data-amount="1" ${busy ? "disabled" : ""}>Add 1 ${CFG.token}</button>
+    <button class="b" data-act="withdraw" ${busy || n(c.available) === 0 ? "disabled" : ""}>Take free money back to wallet</button></div></div>`;
+}
+
+function timePanel() {
+  const P = S.params;
+  const running = S.sessions.find((s) => s.status === "running");
+  const opening = S.sessions.find((s) => s.status === "opening");
+  const past = S.sessions.filter((s) => s.status === "closed").slice(-3).reverse();
+  let body;
+  if (running) {
+    const el = secs(S.block - running.startBlock);
+    body = `<div class="live">
+        <div class="stat clock"><div class="l">Running for</div><div class="v">${dur(el)}</div></div>
+        <div class="stat"><div class="l">Cost so far</div><div class="v">${m(running.usedSoFar)}</div></div>
+        <div class="stat"><div class="l">Rate</div><div class="v">${m(running.rate)}/epoch</div></div></div>
+      <form class="row" id="askform"><input class="q" id="q" placeholder="Search your files, e.g. data set, revenue, customer" value="${esc(lastQ)}"><button class="b" ${busy ? "disabled" : ""}>Ask</button></form>
+      ${answers ? `<pre class="viewer">${answers.length ? answers.map(esc).join("\n") : "No match in your files."}</pre>` : ""}
+      <div class="row"><button class="b primary" data-act="closeSession" data-id="${running.id}" ${busy ? "disabled" : ""}>Stop</button>
+      <span class="muted">Session #${running.id}, payment rail #${running.railId}. Billing started at block ${running.startBlock}.</span></div>`;
+  } else if (opening) {
+    body = `<p><span class="pill warn">starting</span> The provider is starting the service next to your files…</p>`;
+  } else {
+    body = `<div class="row"><button class="b primary" data-act="openSession" ${busy ? "disabled" : ""}>Start the search assistant</button>
+      <span class="muted">${m(P.rate)} ${CFG.token} per epoch (${CFG.epochSeconds} s). Safety margin on hold while it runs: ${m(P.margin)} (${dur(secs(P.lockupPeriod))}).</span></div>`;
   }
+  const hist = past.map((s) => `<li><span>Session #${s.id}: ${s.rateStopped ? `stopped by you after ${dur(secs(s.stopBlock - s.startBlock))}` : s.startBlock ? "ended when your money ran out" : "never started"}</span><span class="sz">${m(s.usedSoFar)} ${CFG.token}</span></li>`).join("");
+  return `<h2>Pay for time: rent a search assistant over your files</h2>
+    <p class="muted">Like renting a machine in the cloud. You pay per epoch while it runs; when you stop, payment stops at that epoch.</p>
+    ${body}${hist ? `<ul class="files">${hist}</ul>` : ""}`;
+}
 
-  function moneyPanel() {
-    const c = S.client, started = n(c.inFilecoinPay) > 0 || S.clientLog.length > 0;
-    if (!started) return `<h2>Step 1 · Put money in Filecoin Pay</h2>
-      <p class="muted">Four transactions: allow Filecoin Pay to take the amount from your wallet, deposit it, let the compute service open payments for you (at most ${m(0.01)} luca_usdfc per second and ${m(3)} luca_usdfc on hold), and let providers add job results to your data set, only while you have a job open with them.</p>
-      <div class="row">
-        <button class="b primary" data-act="setup" data-amount="2" ${busy ? "disabled" : ""}>Deposit 2 luca_usdfc</button>
-        <button class="b" data-act="setup" data-amount="0.03" ${busy ? "disabled" : ""}>Deposit only 0.03 (to see what happens when money runs out)</button>
-      </div>`;
-    return `<div class="row" style="justify-content:space-between"><h2>Your money</h2><div class="row">
-        <button class="b" data-act="deposit" data-amount="1" ${busy ? "disabled" : ""}>Add 1 luca_usdfc</button>
-        <button class="b" data-act="withdraw" data-amount="all" ${busy || n(c.available) === 0 ? "disabled" : ""}>Take free money back to wallet</button></div></div>`;
+function jobPanel() {
+  const J = S.params.jobs;
+  const list = S.jobs.slice().reverse().map((j) => {
+    const left = j.deadline - S.block;
+    const stage = { waiting: j.stage === "late" ? ["warn", "provider missed the deadline"] : j.stage === "blocked" ? ["warn", "result refused by FWSS"] : ["warn", j.stage === "running" ? "running in a container" : j.stage === "storing" ? "storing the result" : "waiting for the provider"], paid: ["", "delivered and paid"], refunded: ["off", "cancelled, money back"] }[j.status] ?? ["off", j.status];
+    const canExpire = j.status === "waiting" && left < 0;
+    return `<div class="job"><div class="h"><b>#${j.id} · ${esc(j.name ?? "")}</b><span class="pill ${stage[0]}">${stage[1]}</span></div>
+      <div class="muted">Price ${m(j.price)} ${CFG.token} · deadline block ${j.deadline}${j.status === "waiting" ? (left >= 0 ? ` (${dur(secs(left))} left)` : " (passed)") : ""}</div>
+      ${j.output ? `<div>Result: <a data-file="${j.output.pieceId}" style="cursor:pointer">${esc(j.output.name)}</a> <span class="muted">piece #${j.output.pieceId} in your data set</span></div>` : ""}
+      ${canExpire ? `<div><button class="b primary" data-act="expire" data-id="${j.id}" ${busy ? "disabled" : ""}>Get my money back</button></div>` : ""}</div>`;
+  }).join("");
+  const opts = Object.entries(J).map(([k, j]) => `<option value="${k}" ${k === pick ? "selected" : ""}>${esc(j.name)} — ${m(j.price)} ${CFG.token}, deadline ${dur(secs(j.deadline))}</option>`).join("");
+  return `<h2>Pay per job: order a result</h2>
+    <p class="muted">The price is put on hold. The provider runs the program on your files and adds the result to your data set; it is paid only if it does so before the deadline.</p>
+    <div class="row"><select id="jobsel">${opts}</select><button class="b primary" data-act="postJob" ${busy ? "disabled" : ""}>Order</button></div>
+    <div class="jobs">${list || `<p class="muted">No jobs yet.</p>`}</div>`;
+}
+
+function logPanel() {
+  const items = [...S.clientLog.map((l) => ({ ...l, who: "you" })), ...S.providerLog.map((l) => ({ ...l, who: "prov" }))].sort((a, b) => b.t - a.t);
+  return items.map((l) => `<li><span class="who ${l.who}">${l.who === "you" ? "You" : "Provider"}</span><span>${esc(l.text)}${l.fn ? `<br><code>${esc(l.fn)} · block ${l.block} · ${txLink(l.tx)}</code>` : ""}</span></li>`).join("");
+}
+
+function render() {
+  if (!S || !CFG) return;
+  $("chain").innerHTML = `<b>●</b> ${CFG.network === "calibnet" ? "Filecoin Calibration" : "local chain"} · block ${S.block}<br>Filecoin Pay ${C().payments.slice(0, 10)}…<br>ComputeService ${(C().cs ?? "").slice(0, 10)}…`;
+  const w = walletPanel();
+  $("wallet").hidden = !w; $("wallet").innerHTML = w;
+  $("scene").innerHTML = scene();
+  const st = $("story");
+  st.className = "story" + (message?.err ? " err" : "");
+  st.textContent = message?.text ?? (S.clientLog.length ? "" : S.hasFiles ? "Your files are already stored: you have a data set with this storage provider (right), on FWSS, paid through Filecoin Pay. Start by putting money in Filecoin Pay for compute." : "");
+  st.hidden = !st.textContent;
+  $("money").innerHTML = moneyPanel();
+  const ready = S.client && S.hasFiles && (S.clientLog.length > 0 || S.authorizerSet);
+  for (const [id, f] of [["time", timePanel], ["job", jobPanel]]) {
+    const el = $(id);
+    el.hidden = tab !== id;
+    if (tab !== id) continue;
+    if (id === "time" && document.activeElement?.id === "q") { // keep the question box while typing
+      const tmp = document.createElement("div"); tmp.innerHTML = f();
+      el.querySelectorAll(".stat .v").forEach((v, i) => { const nv = tmp.querySelectorAll(".stat .v")[i]; if (nv) v.textContent = nv.textContent; });
+    } else el.innerHTML = ready ? f() : `<p class="muted">First complete the step above.</p>`;
   }
+  $("tab-time").className = tab === "time" ? "on" : "";
+  $("tab-job").className = tab === "job" ? "on" : "";
+  $("log").innerHTML = logPanel();
+}
 
-  function timePanel() {
-    const P = S.params;
-    const running = S.sessions.find((s) => s.status === "running");
-    const opening = S.sessions.find((s) => s.status === "opening");
-    const past = S.sessions.filter((s) => s.status === "closed").slice(-3).reverse();
-    let body = "";
-    if (running) {
-      const secs = S.block - running.startBlock;
-      body = `<div class="live">
-          <div class="stat clock"><div class="l">Running for</div><div class="v">${secs} s</div></div>
-          <div class="stat"><div class="l">Cost so far</div><div class="v">${m(running.usedSoFar)}</div></div>
-          <div class="stat"><div class="l">Rate</div><div class="v">${m(running.rate)}/s</div></div></div>
-        <form class="row" id="askform"><input class="q" id="q" placeholder="Search your files, e.g. data set, revenue, customer" value="${esc(lastQ)}"><button class="b" ${busy ? "disabled" : ""}>Ask</button></form>
-        ${answers ? `<pre class="viewer">${answers.length ? answers.map(esc).join("\n") : "No match in your files."}</pre>` : ""}
-        <div class="row"><button class="b primary" data-act="closeSession" data-id="${running.id}" ${busy ? "disabled" : ""}>Stop</button>
-        <span class="muted">Session #${running.id}, payment rail #${running.railId}. Billing started at block ${running.startBlock}.</span></div>`;
-    } else if (opening) {
-      body = `<p><span class="pill warn">starting</span> The provider is starting the service next to your files…</p>`;
-    } else {
-      body = `<div class="row"><button class="b primary" data-act="openSession" ${busy ? "disabled" : ""}>Start the search assistant</button>
-        <span class="muted">${m(P.rate)} luca_usdfc per second. Safety margin on hold while it runs: ${m(P.margin)} (${P.lockupPeriod} s).</span></div>`;
-    }
-    const hist = past.map((s) => `<li><span>Session #${s.id}: ${s.rateStopped ? `stopped by you after ${s.stopBlock - s.startBlock} s` : s.startBlock ? "ended when your money ran out" : "never started"}</span><span class="sz">${m(s.usedSoFar)} luca_usdfc</span></li>`).join("");
-    return `<h2>Pay for time: rent a search assistant over your files</h2>
-      <p class="muted">Like renting a machine in the cloud. You pay per second while it runs; when you stop, payment stops at that second.</p>
-      ${body}${hist ? `<ul class="files">${hist}</ul>` : ""}`;
+async function refresh() {
+  try { S = await fetch("/api/state").then((r) => r.json()); document.body.classList.remove("down"); }
+  catch { document.body.classList.add("down"); }
+  render();
+}
+
+document.addEventListener("click", async (e) => {
+  const t = e.target.closest("[data-act],[data-file],#connect,#tab-time,#tab-job");
+  if (!t) return;
+  if (t.id === "connect") return connectMetaMask().catch((err) => { message = { err: true, text: reason(err) }; render(); });
+  if (t.id === "tab-time" || t.id === "tab-job") { tab = t.id.slice(4); message = null; return render(); }
+  if (t.dataset.file !== undefined) {
+    const f = S.files.find((x) => x.pieceId === n(t.dataset.file));
+    const text = await fetch(`/api/file/${t.dataset.file}`).then((r) => r.text());
+    const v = $("viewer");
+    v.hidden = false;
+    v.innerHTML = `<div class="row" style="justify-content:space-between"><h2>${esc(f?.name)}</h2><button class="b" id="closeviewer">Close</button></div>
+      <div class="muted">Piece #${f?.pieceId} in data set #${S.dataSetId} · ${esc(f?.cid)} · ${f?.kind === "output" ? "result added by a job" : "your original file"}</div><pre class="viewer">${esc(text)}</pre>`;
+    $("closeviewer").onclick = () => { v.hidden = true; };
+    return v.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }
+  const a = t.dataset.act;
+  if (a === "openSession" || a === "closeSession") answers = null;
+  act(a, { amount: t.dataset.amount, id: t.dataset.id });
+});
+document.addEventListener("change", (e) => { if (e.target.id === "jobsel") pick = e.target.value; });
+document.addEventListener("submit", async (e) => {
+  if (e.target.id !== "askform") return;
+  e.preventDefault();
+  const running = S.sessions.find((s) => s.status === "running");
+  lastQ = $("q").value.trim();
+  if (!running || !lastQ) return;
+  const r = await fetch("/api/ask", { method: "POST", body: JSON.stringify({ sessionId: running.id, question: lastQ }) }).then((r) => r.json());
+  answers = r.lines ?? [r.error];
+  message = { text: "The question ran inside the provider's container, next to your files. Billing continues per epoch until you stop." };
+  $("q").blur(); render();
+});
 
-  function jobPanel() {
-    const J = S.params.jobs;
-    const list = S.jobs.slice().reverse().map((j) => {
-      const left = j.deadline - S.block;
-      const stage = { waiting: j.stage === "late" ? ["warn", "provider missed the deadline"] : ["warn", j.stage === "running" ? "running in a container" : j.stage === "storing" ? "storing the result" : "waiting for the provider"], paid: ["", "delivered and paid"], refunded: ["off", "cancelled, money back"] }[j.status] ?? ["off", j.status];
-      const canExpire = j.status === "waiting" && left < 0;
-      return `<div class="job"><div class="h"><b>#${j.id} · ${esc(j.name ?? "")}</b><span class="pill ${stage[0]}">${stage[1]}</span></div>
-        <div class="muted">Price ${m(j.price)} luca_usdfc · deadline block ${j.deadline}${j.status === "waiting" ? (left >= 0 ? ` (${left} s left)` : " (passed)") : ""}</div>
-        ${j.output ? `<div>Result: <a data-file="${j.output.pieceId}" style="cursor:pointer">${esc(j.output.name)}</a> <span class="muted">piece #${j.output.pieceId} in your data set</span></div>` : ""}
-        ${canExpire ? `<div><button class="b primary" data-act="expire" data-id="${j.id}" ${busy ? "disabled" : ""}>Get my money back</button></div>` : ""}</div>`;
-    }).join("");
-    const opts = Object.entries(J).map(([k, j]) => `<option value="${k}" ${k === pick ? "selected" : ""}>${esc(j.name)} — ${m(j.price)} luca_usdfc, deadline ${j.deadline} s</option>`).join("");
-    return `<h2>Pay per job: order a result</h2>
-      <p class="muted">The price is put on hold. The provider runs the program on your files and adds the result to your data set; it is paid only if it does so before the deadline.</p>
-      <div class="row"><select id="jobsel">${opts}</select><button class="b primary" id="order" ${busy ? "disabled" : ""}>Order</button></div>
-      <div class="jobs">${list || `<p class="muted">No jobs yet.</p>`}</div>`;
-  }
-
-  function logPanel() {
-    const items = [
-      ...S.clientLog.map((l) => ({ ...l, who: "you" })),
-      ...S.providerLog.map((l) => ({ ...l, who: "prov" })),
-    ].sort((a, b) => b.t - a.t);
-    return items.map((l) => `<li><span class="who ${l.who}">${l.who === "you" ? "You" : "Provider"}</span><span>${esc(l.text)}${l.fn ? `<br><code>${esc(l.fn)} · block ${l.block} · ${esc(l.tx)}</code>` : ""}</span></li>`).join("");
-  }
-
-  function render() {
-    if (!S) return;
-    $("chain").innerHTML = `<b>●</b> local chain · block ${S.block}<br>Filecoin Pay ${S.contracts.payments.slice(0, 10)}…<br>ComputeService ${S.contracts.cs.slice(0, 10)}…`;
-    $("scene").innerHTML = scene();
-    const st = $("story");
-    st.className = "story" + (message?.err ? " err" : "");
-    st.textContent = message?.text ?? (S.clientLog.length ? "" : "Your files are already stored: you have a data set with this storage provider (right), on FWSS, paid through Filecoin Pay. Start by putting money in Filecoin Pay for compute.");
-    st.hidden = !st.textContent;
-    $("money").innerHTML = moneyPanel();
-    const ready = S.clientLog.length > 0;
-    for (const [id, f] of [["time", timePanel], ["job", jobPanel]]) {
-      const el = $(id);
-      el.hidden = tab !== id;
-      if (tab === id && !(id === "time" && document.activeElement?.id === "q")) el.innerHTML = ready ? f() : `<p class="muted">First put money in Filecoin Pay (above).</p>`;
-      else if (tab === id && id === "time") { // keep the question box while typing; refresh the rest
-        const tmp = document.createElement("div"); tmp.innerHTML = f();
-        el.querySelectorAll(".stat .v").forEach((v, i) => { const nv = tmp.querySelectorAll(".stat .v")[i]; if (nv) v.textContent = nv.textContent; });
-      }
-    }
-    $("tab-time").className = tab === "time" ? "on" : "";
-    $("tab-job").className = tab === "job" ? "on" : "";
-    $("log").innerHTML = logPanel();
-  }
-
-  async function refresh() {
-    try {
-      S = await fetch("/api/state").then((r) => r.json());
-      document.body.classList.remove("down");
-    } catch { document.body.classList.add("down"); }
-    render();
-  }
-
-  document.addEventListener("click", async (e) => {
-    const t = e.target.closest("[data-act],[data-file],#order,#tab-time,#tab-job");
-    if (!t) return;
-    if (t.id === "tab-time" || t.id === "tab-job") { tab = t.id.slice(4); message = null; return render(); }
-    if (t.id === "order") return call("postJob", { job: pick });
-    if (t.dataset.file !== undefined) {
-      const f = S.files.find((x) => x.pieceId === n(t.dataset.file));
-      const text = await fetch(`/api/file/${t.dataset.file}`).then((r) => r.text());
-      const v = $("viewer");
-      v.hidden = false;
-      v.innerHTML = `<div class="row" style="justify-content:space-between"><h2>${esc(f?.name)}</h2><button class="b" id="closeviewer">Close</button></div>
-        <div class="muted">Piece #${f?.pieceId} in data set #${S.dataSetId} · ${esc(f?.cid)} · ${f?.kind === "output" ? "result added by a job" : "your original file"}</div><pre class="viewer">${esc(text)}</pre>`;
-      $("closeviewer").onclick = () => { v.hidden = true; };
-      return v.scrollIntoView({ behavior: "smooth", block: "nearest" });
-    }
-    const a = t.dataset.act;
-    if (a === "setup" || a === "deposit" || a === "withdraw") return call(a, { amount: t.dataset.amount });
-    if (a === "openSession") { answers = null; return call(a); }
-    if (a === "closeSession") { answers = null; return call(a, { sessionId: n(t.dataset.id) }); }
-    if (a === "expire") return call(a, { jobId: n(t.dataset.id) });
-  });
-  document.addEventListener("change", (e) => { if (e.target.id === "jobsel") pick = e.target.value; });
-  document.addEventListener("submit", async (e) => {
-    if (e.target.id !== "askform") return;
-    e.preventDefault();
-    const running = S.sessions.find((s) => s.status === "running");
-    lastQ = $("q").value.trim();
-    if (!running || !lastQ) return;
-    const r = await fetch("/api/ask", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ sessionId: running.id, question: lastQ }) }).then((r) => r.json());
-    answers = r.lines ?? [r.error];
-    message = { text: "The question ran inside the provider's container, next to your files. Billing continues per second until you stop." };
-    $("q").blur(); render();
-  });
-
-  refresh();
-  setInterval(() => { if (!busy) refresh(); }, 1000);
-})();
+await init();
+await refresh();
+setInterval(() => { if (!busy) refresh(); }, CFG.network === "calibnet" ? 4000 : 1000);
 </script>
 </body>
 </html>
