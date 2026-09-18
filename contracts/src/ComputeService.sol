@@ -2,6 +2,7 @@
 pragma solidity ^0.8.27;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import {FilecoinPayV1} from "filecoin-pay/src/FilecoinPayV1.sol";
 
 /// @notice The part of PDPVerifier that ComputeService needs (FilOzone/pdp @ 4d6b30f, src/PDPVerifier.sol):
@@ -10,6 +11,25 @@ import {FilecoinPayV1} from "filecoin-pay/src/FilecoinPayV1.sol";
 interface IPieceLiveness {
     function pieceLive(uint256 setId, uint256 pieceId) external view returns (bool);
     function getNextPieceId(uint256 setId) external view returns (uint256);
+}
+
+/// @notice FWSS per-data-set authorizer interface (FilOzone/filecoin-services @ 4cbbea4,
+///         src/interfaces/IDataSetAuthorizer.sol). Once a client attaches an authorizer to its data set
+///         (FWSS.setDataSetAuthorizer, L1540), FWSS asks it to approve every write to that data set.
+interface IDataSetAuthorizer {
+    function isAuthorized(
+        uint256 dataSetId,
+        address payer,
+        bytes32 operation,
+        bytes32 digest,
+        bytes calldata signature,
+        bytes calldata operationData
+    ) external returns (bool authorized);
+}
+
+/// @notice The part of SessionKeyRegistry the authorizer needs (FilOzone/SessionKeyRegistry).
+interface ISessionKeyRegistry {
+    function authorizationExpiry(address user, address signer, bytes32 permission) external view returns (uint256);
 }
 
 /// @title ComputeService (proof of concept)
@@ -21,9 +41,13 @@ interface IPieceLiveness {
 ///         Pay per job:            postJob (price locked) -> commitOutputs before deadline (pay, terminate)
 ///                                                        -> or expire after deadline (refund).
 ///
+///         Job outputs go into the client's own data set. On FWSS this needs the client's authorization for each
+///         addPieces; instead, the client attaches this contract as its data set's authorizer (IDataSetAuthorizer),
+///         and it approves the provider's addPieces only while a job of that client with that provider is open.
+///
 ///         Guarantees S1-S4 and J1-J3 are stated in the project's protocol design and tested in
 ///         test/ComputeGuarantees.t.sol (Filecoin Pay mechanics) and test/ComputeService.t.sol (this contract).
-contract ComputeService {
+contract ComputeService is IDataSetAuthorizer {
     // ---------------------------------------------------------------- types
 
     enum SessionStatus { None, Open, Ready, Closed }
@@ -57,11 +81,21 @@ contract ComputeService {
     FilecoinPayV1 public immutable payments;
     IERC20 public immutable token;
     IPieceLiveness public immutable pdp;
+    ISessionKeyRegistry public immutable sessionKeys; // address(0) = no session keys (local POC)
+
+    // FWSS operation id for adding pieces (SignatureVerificationLib.ADD_PIECES_TYPEHASH, filecoin-services at 4cbbea4, L29)
+    bytes32 public constant ADD_PIECES_TYPEHASH = keccak256(
+        "AddPieces(uint256 clientDataSetId,uint256 nonce,Cid[] pieceData,PieceMetadata[] pieceMetadata)"
+        "Cid(bytes data)" "MetadataEntry(string key,string value)"
+        "PieceMetadata(uint256 pieceIndex,MetadataEntry[] metadata)"
+    );
 
     uint256 public nextSessionId = 1;
     uint256 public nextJobId = 1;
     mapping(uint256 => Session) public sessions;
     mapping(uint256 => Job) public jobs;
+    // open (posted, not yet paid or expired) jobs per data set, client and provider
+    mapping(uint256 dataSetId => mapping(address client => mapping(address provider => uint256))) public openJobs;
 
     // ---------------------------------------------------------------- events
 
@@ -86,10 +120,11 @@ contract ComputeService {
     error DeadlineInPast();
     error OutputNotNew(uint256 pieceId);
 
-    constructor(FilecoinPayV1 payments_, IERC20 token_, IPieceLiveness pdp_) {
+    constructor(FilecoinPayV1 payments_, IERC20 token_, IPieceLiveness pdp_, ISessionKeyRegistry sessionKeys_) {
         payments = payments_;
         token = token_;
         pdp = pdp_;
+        sessionKeys = sessionKeys_;
     }
 
     // ================================================================ pay for time
@@ -157,6 +192,7 @@ contract ComputeService {
         jobs[jobId] = Job(
             msg.sender, provider, railId, price, deadline, dataSetId, imageDigest, pdp.getNextPieceId(dataSetId), JobStatus.Posted
         );
+        openJobs[dataSetId][msg.sender][provider]++;
         emit JobPosted(jobId, msg.sender, provider, railId, imageDigest, dataSetId, inputPieceIds, price, deadline);
     }
 
@@ -175,6 +211,7 @@ contract ComputeService {
             if (!pdp.pieceLive(j.dataSetId, outputPieceIds[i])) revert PieceNotLive(j.dataSetId, outputPieceIds[i]);
         }
         j.status = JobStatus.Paid;
+        openJobs[j.dataSetId][j.client][j.provider]--;
         payments.modifyRailPayment(j.railId, 0, j.price);
         payments.terminateRail(j.railId);
         emit JobPaid(jobId, outputPieceIds, block.number);
@@ -187,8 +224,33 @@ contract ComputeService {
         if (j.status != JobStatus.Posted) revert WrongStatus();
         if (block.number <= j.deadline) revert DeadlineNotPassed();
         j.status = JobStatus.Expired;
+        openJobs[j.dataSetId][j.client][j.provider]--;
         payments.terminateRail(j.railId);
         payments.modifyRailLockup(j.railId, 0, 0);
         emit JobExpired(jobId);
+    }
+
+    // ================================================================ FWSS data set authorizer
+
+    /// @notice Called by FWSS for every write to a data set whose client attached this contract as authorizer.
+    ///         Allowed: (1) anything signed by the client itself or by one of its valid session keys, so the
+    ///         client's normal use is unchanged; (2) adding pieces signed by a provider while that client has an
+    ///         open job with that provider on this data set (the window for delivering outputs).
+    ///         Everything else (e.g. a provider removing pieces, or adding pieces with no open job) is refused.
+    function isAuthorized(
+        uint256 dataSetId,
+        address payer,
+        bytes32 operation,
+        bytes32 digest,
+        bytes calldata signature,
+        bytes calldata /* operationData */
+    ) external view returns (bool) {
+        (address signer, ECDSA.RecoverError err,) = ECDSA.tryRecover(digest, signature);
+        if (err != ECDSA.RecoverError.NoError) return false;
+        if (signer == payer) return true;
+        if (address(sessionKeys) != address(0) && sessionKeys.authorizationExpiry(payer, signer, operation) >= block.timestamp) {
+            return true;
+        }
+        return operation == ADD_PIECES_TYPEHASH && openJobs[dataSetId][payer][signer] > 0;
     }
 }

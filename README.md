@@ -48,6 +48,7 @@ What is real and what is a stand-in:
 | `contracts/src/ComputeService.sol` | The operator contract: sessions (pay for time) and jobs (pay per job). |
 | `contracts/src/MockPDP.sol` | Local stand-in for PDPVerifier. |
 | `contracts/test/ComputeService.t.sol` | Tests of ComputeService against the real Filecoin Pay (16 tests). |
+| `integration/test/FwssCompute.t.sol` | ComputeService with real PDPVerifier, FWSS, provider registry, session keys (10 tests). |
 | `contracts/test/ComputeGuarantees.t.sol` | Tests of the Filecoin Pay behaviour the protocol relies on (17 tests). |
 | `contracts/src/IComputeService.sol` | The interface as first proposed. |
 | `demo/index.html`, `demo/explore.html` | Simulations without a chain (explainer and detailed version). |
@@ -56,10 +57,12 @@ What is real and what is a stand-in:
 ## Run the tests
 
 ```sh
-cd contracts
-forge test
+cd contracts && forge test      # 33 tests: Filecoin Pay mechanics + ComputeService
+cd integration && forge test    # 10 tests: ComputeService with the real FOC contracts
 ```
+
+`integration/` runs ComputeService together with the contracts **deployed on calibnet and mainnet**: FilOzone/filecoin-services @ `4cbbea4` (FWSS v1.4.0), its PDPVerifier and Filecoin Pay v1.0.0 (git submodule `contracts/lib/filecoin-services`). Only the USDFC token and the FVM precompiles (FilOz's `MockFVMTest`) are stand-ins; signatures are real EIP-712 signatures. It checks the **data set authorizer**: the client attaches ComputeService to its FWSS data set (`setDataSetAuthorizer`), and ComputeService then lets the provider add pieces (job outputs) only while a job of that client with that provider is open. The client's own signatures and session keys keep working.
 
 ## Status
 
-Stage A (local POC) working. Next, stage B: calibnet, with the real PDPVerifier / FWSS and a browser wallet. Open question: outputs added to the client's data set need the client's authorization in FWSS (`piecesAdded`).
+Stage A (local POC) working. Stage B in progress: ComputeService tested with the real FOC contracts (FWSS v1.4.0), including the data set authorizer for job outputs. Next: run the real contracts in the local POC, browser wallet, then calibnet.

@@ -157,7 +157,7 @@ async function installContracts() {
   C.usdfc = await deploy("MockERC20", ["USDFC (local test token)", "USDFC"]);
   C.payments = await deploy("FilecoinPayV1");
   C.pdp = await deploy("MockPDP");
-  C.cs = await deploy("ComputeService", [C.payments, C.usdfc, C.pdp]);
+  C.cs = await deploy("ComputeService", [C.payments, C.usdfc, C.pdp, "0x0000000000000000000000000000000000000000"]); // no session-key registry locally
   await send(A.deployer, C.usdfc, ABI.MockERC20, "mint", [A.client, PARAMS.walletStart]);
   say("Installed:", C);
 }

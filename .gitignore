@@ -3,3 +3,5 @@ contracts/cache/
 .DS_Store
 poc/node_modules/
 poc/.run/
+integration/out/
+integration/cache/

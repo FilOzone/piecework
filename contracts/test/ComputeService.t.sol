@@ -9,7 +9,7 @@ import {Test} from "forge-std/Test.sol";
 import {FilecoinPayV1} from "filecoin-pay/src/FilecoinPayV1.sol";
 import {PaymentsTestHelpers} from "filecoin-pay/test/helpers/PaymentsTestHelpers.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {ComputeService, IPieceLiveness} from "../src/ComputeService.sol";
+import {ComputeService, IPieceLiveness, ISessionKeyRegistry} from "../src/ComputeService.sol";
 import {MockPDP} from "../src/MockPDP.sol";
 
 contract ComputeServiceTest is Test {
@@ -38,7 +38,7 @@ contract ComputeServiceTest is Test {
         PROVIDER = helper.USER2();
 
         pdp = new MockPDP();
-        cs = new ComputeService(payments, token, IPieceLiveness(address(pdp)));
+        cs = new ComputeService(payments, token, IPieceLiveness(address(pdp)), ISessionKeyRegistry(address(0)));
 
         // The provider holds the client's data set with two input pieces (ids 0, 1).
         vm.startPrank(PROVIDER);

@@ -1,0 +1,29 @@
+# Integration tests: ComputeService against the contracts deployed on calibnet/mainnet
+# (FilOzone/filecoin-services @ 4cbbea4 = FWSS v1.4.0, with its PDPVerifier and Filecoin Pay v1.0.0).
+[profile.default]
+src = 'test'
+test = 'test'
+out = 'out'
+cache_path = 'cache'
+allow_paths = ['../contracts']
+libs = ['../contracts/lib/filecoin-services/service_contracts/lib']
+solc = "0.8.30"
+via_ir = true
+optimizer = true
+optimizer_runs = 200
+bytecode_hash = "none"
+remappings = [
+    '@openzeppelin/contracts/=../contracts/lib/filecoin-services/service_contracts/lib/openzeppelin-contracts/contracts/',
+    '@openzeppelin/contracts-upgradeable/=../contracts/lib/filecoin-services/service_contracts/lib/openzeppelin-contracts-upgradeable/contracts/',
+    'forge-std/=../contracts/lib/filecoin-services/service_contracts/lib/forge-std/src/',
+    '@fws-payments/=../contracts/lib/filecoin-services/service_contracts/lib/fws-payments/src/',
+    'filecoin-pay/src/=../contracts/lib/filecoin-services/service_contracts/lib/fws-payments/src/',
+    'fvm-solidity/=../contracts/lib/filecoin-services/service_contracts/lib/fws-payments/lib/fvm-solidity/src/',
+    '@pdp/=../contracts/lib/filecoin-services/service_contracts/lib/pdp/src/',
+    '@session-key-registry/=../contracts/lib/filecoin-services/service_contracts/lib/session-key-registry/src/',
+    '@fvm-solidity/=../contracts/lib/filecoin-services/service_contracts/lib/pdp/lib/fvm-solidity/src/',
+    '@pythnetwork/pyth-sdk-solidity/=../contracts/lib/filecoin-services/service_contracts/lib/pdp/lib/pyth-sdk-solidity/',
+    'fwss/=../contracts/lib/filecoin-services/service_contracts/src/',
+    'focc/=../contracts/src/',
+    'fwss-test/=../contracts/lib/filecoin-services/service_contracts/test/',
+]
