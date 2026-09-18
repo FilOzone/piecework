@@ -1,0 +1,14 @@
+{
+  "network": "calibnet",
+  "chainId": 314159,
+  "computeService": "0xb16534a9D2186A60216AB9A0e27c1C059A27b5F1",
+  "tx": "0x21ad6319611e685d6ddb643c08de4fd71d0e97653db5c603655af9b1f338bb96",
+  "block": 4080388,
+  "constructorArgs": [
+    "0x09a0fDc2723fAd1A7b8e3e00eE5DF73841df55a0",
+    "0xb3042734b608a1B16e9e86B374A3f3e389B4cDf0",
+    "0x85e366Cf9DD2c0aE37E963d9556F5f4718d6417C",
+    "0x518411c2062E119Aaf7A8B12A2eDf9a939347655"
+  ],
+  "deployedAt": "2026-09-18T13:27:37.999Z"
+}

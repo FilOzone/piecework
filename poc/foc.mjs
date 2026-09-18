@@ -95,8 +95,9 @@ export async function write({ pub, wallet, chain }, account, address, abi, funct
 // ---------------------------------------------------------------- provider registration
 
 export async function registerProvider(ctx, provider, C, ABI, serviceURL) {
+  const addr = typeof provider === "string" ? provider : provider.address; // provider: address or local account
   const id = await ctx.pub.readContract({ address: C.registry, abi: ABI.ServiceProviderRegistry,
-    functionName: "getProviderIdByAddress", args: [provider] });
+    functionName: "getProviderIdByAddress", args: [addr] });
   if (id !== 0n) return { providerId: id };
   const [keys, values] = encodePDPCapabilities({
     serviceURL, minPieceSizeInBytes: 127n, maxPieceSizeInBytes: 1n << 30n, storagePricePerTibPerDay: parseEther("2.5"),
@@ -104,9 +105,9 @@ export async function registerProvider(ctx, provider, C, ABI, serviceURL) {
     ipniPiece: false, ipniIpfs: false,
   });
   const r = await write(ctx, provider, C.registry, ABI.ServiceProviderRegistry, "registerProvider",
-    [provider, "PieceWork_demo", "Compute over PDP data (proof of concept, not a storage service)", 0, keys, values], parseEther("5"));
+    [addr, "PieceWork_demo", "Compute over PDP data (proof of concept, not a storage service)", 0, keys, values], parseEther("5"));
   const providerId = await ctx.pub.readContract({ address: C.registry, abi: ABI.ServiceProviderRegistry,
-    functionName: "getProviderIdByAddress", args: [provider] });
+    functionName: "getProviderIdByAddress", args: [addr] });
   return { providerId, receipt: r };
 }
 
