@@ -132,9 +132,9 @@ footer{color:var(--ink-3);font-size:.85rem;display:flex;flex-direction:column;ga
     const flow = (f) => f ? `<div class="flow ${f.cls || ""}"><span class="arr">→</span><span>${f.t}</span></div>` : `<div class="flow"><span class="arr">→</span></div>`;
     const flowL = (f) => f ? `<div class="flow ${f.cls || ""}"><span class="arr">${f.cls === "back" ? "←" : "→"}</span><span>${f.t}</span></div>` : `<div class="flow"><span class="arr">→</span></div>`;
     return `<div class="scene">
-      <div class="actor ${o.hl === "you" ? "hl" : ""}"><div class="who">${icon.you}You</div><div class="big">${money(o.you)}</div><div class="unit">USDFC in your wallet</div>${o.youNote ? `<div class="note">${o.youNote}</div>` : ""}</div>
+      <div class="actor ${o.hl === "you" ? "hl" : ""}"><div class="who">${icon.you}You</div><div class="big">${money(o.you)}</div><div class="unit">USDFC, your balance in Filecoin Pay</div>${o.youNote ? `<div class="note">${o.youNote}</div>` : ""}</div>
       ${flowL(o.f1)}
-      <div class="actor pay ${o.hl === "pay" ? "hl" : ""}"><div class="who">${icon.pay}Filecoin Pay</div><div class="big">${money(o.pay)}</div><div class="unit">${o.payLabel || "held"}</div>${o.payNote ? `<div class="note">${o.payNote}</div>` : ""}</div>
+      <div class="actor pay ${o.hl === "pay" ? "hl" : ""}"><div class="who">${icon.pay}On hold in Filecoin Pay</div><div class="big">${money(o.pay)}</div><div class="unit">${o.payLabel || "held"}</div>${o.payNote ? `<div class="note">${o.payNote}</div>` : ""}</div>
       ${flow(o.f2)}
       <div class="actor prov ${o.hl === "prov" ? "hl" : ""}"><div class="who">${icon.prov}Storage provider</div><div class="big">${money(o.prov)}</div><div class="unit">USDFC earned</div><div class="note">${o.provNote || "Stores your PDP data set and proves possession daily."}</div><ul class="files">${files}</ul></div>
     </div>`;
@@ -146,15 +146,15 @@ footer{color:var(--ink-3);font-size:.85rem;display:flex;flex-direction:column;ga
     () => ({
       title: "Your files are already stored on Filecoin",
       text: `<p>You keep your company documents on Filecoin with a <b>storage provider</b>, in a <b>PDP data set</b>: with PDP (Proof of Data Possession), the provider proves on-chain, every day, that it still holds every file.</p>
-             <p>You also have <b>${money(WALLET)} USDFC</b> (a dollar stablecoin) in <b>Filecoin Pay</b>, the payment contract that handles money between you and providers.</p>
+             <p>You have already <b>deposited ${money(WALLET)} USDFC</b> (a dollar stablecoin) from your crypto wallet into <b>Filecoin Pay</b>, the payment contract between you and providers — like topping up a prepaid account. Providers can only be paid from it according to rules you agreed to.</p>
              <p>Now you'd like an <b>AI assistant</b> that can answer questions about these documents — without downloading them anywhere.</p>`,
       scene: { you: WALLET, pay: 0, payLabel: "nothing held yet", prov: 0 }
     }),
     () => ({
       title: st.nA > 1 ? `You rent the AI assistant again (session ${st.nA})` : "You rent the AI assistant — right next to your files",
       text: `<p>The provider runs the assistant <b>on its own machines, where your files already are</b>. The price is like a taxi meter: <b>2 USDFC per hour</b>, counted every 30 seconds.</p>
-             <p>When it starts, Filecoin Pay sets aside a small <b>deposit</b> (${money(DEPOSIT)} USDFC, five minutes' worth). It is there only in case your wallet runs dry — if you stop normally, you get it back.</p>`,
-      scene: { you: st.wA - DEPOSIT, pay: DEPOSIT, payLabel: "deposit set aside", f1: { t: "deposit", cls: "on" }, prov: st.pA, provNote: "Starting the AI assistant next to your files…", hl: "pay" }
+             <p>When it starts, Filecoin Pay puts a small amount of your balance <b>on hold</b> (${money(DEPOSIT)} USDFC, five minutes' worth). It is only used if your balance runs out — if you stop normally, it is released.</p>`,
+      scene: { you: st.wA - DEPOSIT, pay: DEPOSIT, payLabel: "safety margin", f1: { t: "put on hold", cls: "on" }, prov: st.pA, provNote: "Starting the AI assistant next to your files…", hl: "pay" }
     }),
     () => {
       const q = [["What is our refund policy?", "Refunds within 30 days, per the product manuals (section 4)."], ["What were last month's top complaints?", "Late deliveries and the X200 pump manual, from 38 support tickets."], ["When is the launch?", "October 14, decided in the Sept 3 meeting notes."]];
@@ -167,7 +167,7 @@ footer{color:var(--ink-3);font-size:.85rem;display:flex;flex-direction:column;ga
         extra: `<div class="live"><div class="stat clock"><div class="l">Time used</div><div class="v">${clock(st.ticks)}</div></div><div class="stat"><div class="l">Cost so far</div><div class="v">${cost().toFixed(4)}</div></div></div>
                 ${shown.map(([qq, aa]) => `<div class="bubble"><div class="q">You: ${qq}</div><div class="a">Assistant: ${aa}</div></div>`).join("")}
                 <div class="nav"><button class="b" id="ask" ${st.asked >= q.length ? "disabled" : ""}>Ask a question</button><button class="b primary" id="stop">Stop</button></div>`,
-        scene: { you: st.wA - DEPOSIT - cost(), pay: DEPOSIT + 0, payLabel: "deposit set aside", f1: { t: `${RATE}/30 s`, cls: "on" }, f2: { t: "counted for the provider", cls: "on" }, prov: st.pA, provNote: `<b>Owed so far: ${cost().toFixed(4)}</b> — paid when you stop.`, hl: "prov" },
+        scene: { you: st.wA - DEPOSIT - cost(), pay: DEPOSIT + 0, payLabel: "safety margin", f1: { t: `${RATE}/30 s`, cls: "on" }, f2: { t: "counted for the provider", cls: "on" }, prov: st.pA, provNote: `<b>Owed so far: ${cost().toFixed(4)}</b> — paid when you stop.`, hl: "prov" },
         hideNext: true
       };
     },
@@ -176,24 +176,24 @@ footer{color:var(--ink-3);font-size:.85rem;display:flex;flex-direction:column;ga
       return {
         title: "You pressed Stop — the meter stopped right away",
         text: `<p>Filecoin Pay paid the provider for <b>exactly ${duration(st.ticks)}</b> of use: ${c.toFixed(4)} USDFC (minus a 0.5% network fee). Not a second more.</p>
-               <p>Your deposit came back to your wallet.</p>`,
-        scene: { you: st.wA - c, pay: 0, payLabel: "nothing held", f1: { t: "deposit returned", cls: "back" }, f2: { t: `${c.toFixed(4)} paid`, cls: "on" }, prov: st.pA + c - f, provNote: "Paid for the time used.", hl: "you" },
+               <p>The amount on hold was released back to your balance.</p>`,
+        scene: { you: st.wA - c, pay: 0, payLabel: "nothing held", f1: { t: "hold released", cls: "back" }, f2: { t: `${c.toFixed(4)} paid`, cls: "on" }, prov: st.pA + c - f, provNote: "Paid for the time used.", hl: "you" },
         again: "Rent again"
       };
     },
     () => ({
       title: "That's it",
       text: `<p><b>You rented an AI model next to your own files, paid by the half-minute, and stopped whenever you wanted.</b> Your files never left the provider, and nobody could charge you more than the time you used.</p>
-             <p>One question remains: why the deposit?</p>`,
+             <p>One question remains: why put anything on hold?</p>`,
       scene: { you: st.wA - cost(), pay: 0, payLabel: "nothing held", prov: st.pA + cost() * 0.995 },
-      bonus: { label: "What if my wallet runs dry?", go: 5 }, again: "Rent again"
+      bonus: { label: "What if my balance runs out?", go: 5 }, again: "Rent again"
     }),
     () => ({
-      title: "If your wallet runs dry, the deposit pays the provider",
+      title: "If your balance runs out, the amount on hold pays the provider",
       text: `<p>Filecoin Pay can't pay out money that isn't there — but the provider's machine doesn't switch off by itself. It needs a moment to notice and stop.</p>
-             <p>The deposit covers exactly that moment: the provider is paid for <b>at most five more minutes</b>, then stops. That's why providers can serve you without asking you to prepay.</p>`,
-      scene: { you: 0, pay: 0, payLabel: "deposit used", f2: { t: "deposit → provider", cls: "on" }, prov: 0.40 * 0.995, provNote: "Example: you started with 0.40. Your money covered 7 minutes; the deposit paid 5 more. Then the provider stopped.", hl: "pay" },
-      callout: `<div class="callout warn">Like a hotel holding a deposit on your card: you only pay it if something goes wrong.</div>`
+             <p>The amount on hold covers exactly that moment: the provider is paid for <b>at most five more minutes</b>, then stops. That's why providers can serve you without asking you to prepay.</p>`,
+      scene: { you: 0, pay: 0, payLabel: "used to pay the provider", f2: { t: "hold → provider", cls: "on" }, prov: 0.40 * 0.995, provNote: "Example: your balance was 0.40. It covered 7 minutes; the amount on hold paid 5 more. Then the provider stopped.", hl: "pay" },
+      callout: `<div class="callout warn">Like a hotel putting a hold on your card: you only pay it if something goes wrong.</div>`
     })
   ];
 
@@ -211,7 +211,7 @@ footer{color:var(--ink-3);font-size:.85rem;display:flex;flex-direction:column;ga
     () => ({
       title: "You need a search index of your documents",
       text: `<p>You want an AI to be able to search your manuals and support tickets. That means building a <b>search index</b> — a job that reads ~3 GB of files.</p>
-             <p>Instead of downloading everything, you ask the <b>storage provider</b> to do it where the files already are, and pay <b>once</b> when it's done.</p>`,
+             <p>Instead of downloading everything, you ask the <b>storage provider</b> — which keeps these files in your PDP data set — to do it where the files already are, and pay <b>once</b> when it's done. You pay from the ${money(WALLET)} USDFC you have deposited in <b>Filecoin Pay</b>.</p>`,
       scene: { you: WALLET, pay: 0, payLabel: "nothing held yet", prov: 0 }
     }),
     () => ({
@@ -250,7 +250,7 @@ footer{color:var(--ink-3);font-size:.85rem;display:flex;flex-direction:column;ga
     () => ({
       title: "If it's late, your money comes back",
       text: `<p>The clock reaches <b>10:00</b> with no result. From that moment Filecoin Pay <b>refuses any delivery</b> for this job — it's past the postmark date.</p>
-             <p>Anyone can then cancel the job, and the locked 0.50 goes straight back to your wallet.</p>`,
+             <p>Anyone can then cancel the job, and the locked 0.50 goes straight back to your balance.</p>`,
       scene: { you: WALLET, pay: 0, payLabel: "returned", f1: { t: "0.50 back to you", cls: "back" }, prov: 0, provNote: "Missed the deadline: not paid.", hl: "you" },
       callout: `<div class="callout">The contract doesn't judge the quality of the work — like any cloud provider, it guarantees delivery on time and a fair charge.</div>`
     })
@@ -293,9 +293,9 @@ footer{color:var(--ink-3);font-size:.85rem;display:flex;flex-direction:column;ga
         <div class="nav">
           <button class="b" id="back" ${st.i === 0 ? "disabled" : ""}>Back</button><span class="sp"></span>
           ${s.again ? `<button class="b primary" id="again">${s.again}</button>` : ""}
-          ${s.bonus ? `<button class="b" id="bonus">${s.bonus.label}</button><button class="b" id="other">Try the other story</button>` : ""}
+          ${s.bonus ? `<button class="b" id="bonus">${s.bonus.label}</button><button class="b" id="other">${st.story === "A" ? "Go to pay per job" : "Go to pay for time"}</button>` : ""}
           ${!s.bonus && !s.hideNext && st.i < mainSteps - 1 ? `<button class="b primary" id="next" ${s.nextDisabled ? "disabled" : ""}>Next</button>` : ""}
-          ${st.i >= mainSteps ? `<button class="b primary" id="other">Try the other story</button>` : ""}
+          ${st.i >= mainSteps ? `<button class="b primary" id="other">${st.story === "A" ? "Go to pay per job" : "Go to pay for time"}</button>` : ""}
         </div>
       </section>
       <footer><span>A simulation: no real money. The payment rules follow the real Filecoin Pay contract. <a href="${EXPLORER}" target="_blank" rel="noopener">Detailed simulator</a>.</span></footer>`;
