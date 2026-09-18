@@ -16,7 +16,10 @@ interface IComputeService {
     /// Provider only. Sets the rail rate to `rate`: billing starts here.
     function sessionReady(uint256 sessionId) external;
 
-    /// Client or provider. Terminates the rail (endEpoch = lockupLastSettledAt + lockupPeriod). Does not settle.
+    /// Client or provider. If the client stops (and is funded): sets the rate to 0, then terminates the rail,
+    /// so payment stops at the stop epoch and the safety margin is released (test S4).
+    /// If the provider stops because the client is underfunded: terminates only, so the provider can settle
+    /// up to lockupLastSettledAt + lockupPeriod (test S1). Does not settle.
     function closeSession(uint256 sessionId) external;
 
     event SessionOpened(uint256 indexed sessionId, address indexed client, address indexed provider, uint256 railId);

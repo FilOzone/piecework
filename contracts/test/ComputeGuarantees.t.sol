@@ -163,6 +163,47 @@ contract ComputeGuaranteesTest is Test {
         assertEq(gross, R * (closeEpoch - start + L), "client pays r * (k + L)");
     }
 
+    // S4 ("stop means stop"): when the funded client stops, ComputeService first sets the rate to 0,
+    // then terminates. The client pays exactly r * (epochs of service); the safety margin is released unused.
+    // Relies on: the old rate applies up to and including the current epoch, the new rate from the next one
+    // (FilecoinPayV1 L1073-1075).
+    function test_S4_clientStopRateZeroThenTerminate() public {
+        uint256 D = 1 ether;
+        helper.makeDeposit(CLIENT, CLIENT, D);
+        approveOperator();
+        uint256 start = vm.getBlockNumber();
+        uint256 railId = openSession();
+        uint256 providerBefore = funds(PROVIDER);
+
+        uint256 k = 30;
+        helper.advanceBlocks(k);
+        uint256 stopEpoch = vm.getBlockNumber();
+        vm.startPrank(OPERATOR); // closeSession by the client, executed by O
+        payments.modifyRailPayment(railId, 0, 0);
+        payments.terminateRail(railId);
+        vm.stopPrank();
+
+        helper.advanceBlocks(L + 100);
+        uint256 gross = settle(railId);
+
+        assertEq(gross, R * (stopEpoch - start), "client pays exactly r * epochs of service, no tail");
+        assertEq(funds(PROVIDER) - providerBefore, gross - fee(gross), "provider paid net of fee");
+        assertEq(funds(CLIENT), D - gross, "client charged exactly the service time");
+        assertEq(lockupCurrent(CLIENT), 0, "safety margin released");
+    }
+
+    // S4b: setting the rate to 0 is refused while the client is underfunded, so in that case the session
+    // is ended by termination only and the provider collects the safety margin (S1).
+    function test_S4b_rateZeroRefusedWhenClientUnderfunded() public {
+        helper.makeDeposit(CLIENT, CLIENT, R * L + R * 5);
+        approveOperator();
+        uint256 railId = openSession();
+        helper.advanceBlocks(50); // funds exhausted after 5 epochs
+        vm.prank(OPERATOR);
+        vm.expectRevert();
+        payments.modifyRailPayment(railId, 0, 0);
+    }
+
     // S3: without operator approval no rail can be created; allowances cap rate and lockup period.
     function test_S3_noRailWithoutApproval() public {
         helper.makeDeposit(CLIENT, CLIENT, 1 ether);
