@@ -1,0 +1,7 @@
+{
+  "name": "foc-compute-poc",
+  "private": true,
+  "type": "module",
+  "scripts": { "start": "node start.mjs" },
+  "dependencies": { "viem": "^2.21.0" }
+}

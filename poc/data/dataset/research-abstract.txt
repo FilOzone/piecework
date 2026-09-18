@@ -1,0 +1,3 @@
+Proofs of data possession let a client check, cheaply and repeatedly, that a storage provider still holds its data.
+When the provider that stores the data also runs computation over it, the data does not need to move.
+Payment for that computation can be streamed per epoch for interactive services, or escrowed per job for batch work.

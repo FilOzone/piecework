@@ -1,0 +1,5 @@
+Weekly sync, 12 September
+- Storage costs for the archive went down after moving cold data to Filecoin.
+- Marta will prepare the quarterly report on customer growth.
+- Open question: can we run the monthly analytics next to the data instead of downloading it?
+- Decision: pilot compute on the storage provider that already holds our data set.

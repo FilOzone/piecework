@@ -1,0 +1,3 @@
+"Retrieval was fast and the price was predictable." - customer A
+"We would like to run search over our archive without downloading it." - customer B
+"Monthly reports take hours because we copy the data out first." - customer C
