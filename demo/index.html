@@ -1,7 +1,7 @@
-<title>FOC Compute Simulator</title>
+<title>PieceWork</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=Source+Sans+3:wght@400;600&family=JetBrains+Mono:wght@400;600&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700;800&family=Source+Sans+3:wght@400;600&family=JetBrains+Mono:wght@400;600&display=swap">
 <style>
 :root{
   --ground:#EEF3F8; --surface:#FFFFFF; --surface-2:#F6F9FC; --line:#D5DFEA;
@@ -39,98 +39,119 @@
 body{background:var(--ground);color:var(--ink);font:16px/1.5 var(--body);margin:0;padding:24px 16px 48px}
 .wrap{max-width:1180px;margin:0 auto;display:flex;flex-direction:column;gap:20px}
 h1,h2,h3{font-family:var(--display);text-wrap:balance;margin:0}
-h1{font-size:clamp(1.6rem,3.2vw,2.2rem);font-weight:700;letter-spacing:-.01em}
-h2{font-size:1.05rem;font-weight:600}
+h1{font-size:clamp(2rem,4.5vw,2.8rem);font-weight:800;letter-spacing:-.02em;line-height:1.05}
+h1 .tag{display:block;font-size:.5em;font-weight:600;letter-spacing:0;color:var(--ink-2);margin-top:6px}
+h2{font-size:1.1rem;font-weight:600}
 h3{font-size:.95rem;font-weight:600}
-.eyebrow{font:600 .75rem/1 var(--body);letter-spacing:.08em;text-transform:uppercase;color:var(--accent)}
-.lede{color:var(--ink-2);max-width:68ch;margin:6px 0 0}
-.note{display:inline-flex;gap:8px;align-items:flex-start;background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:8px 12px;color:var(--ink-2);font-size:.9rem;max-width:100%}
-.note b{color:var(--ink)}
+.eyebrow{font:600 .75rem/1 var(--body);letter-spacing:.08em;text-transform:uppercase;color:var(--accent);margin-bottom:8px}
+.lede{color:var(--ink-2);max-width:70ch;margin:10px 0 0}
 a{color:var(--accent)}
+.intro{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px}
+.intro h2{grid-column:1/-1}
+.intro div{display:flex;flex-direction:column;gap:4px}
+.intro b{font-family:var(--display);font-weight:600}
+.intro p{margin:0;color:var(--ink-2);font-size:.95rem}
+.intro .fine{grid-column:1/-1;color:var(--ink-3);font-size:.85rem;margin:0}
 .tabs{display:flex;gap:6px;flex-wrap:wrap}
-.tab{font:600 .95rem var(--body);border:1px solid var(--line);background:var(--surface);color:var(--ink-2);padding:9px 14px;border-radius:8px;cursor:pointer}
+.tab{font:600 .95rem var(--body);border:1px solid var(--line);background:var(--surface);color:var(--ink-2);padding:10px 16px;border-radius:8px;cursor:pointer}
 .tab[aria-selected="true"]{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
 .tab small{font-weight:400;opacity:.85}
 .clock{display:flex;flex-wrap:wrap;gap:12px 20px;align-items:center;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px 16px}
-.clock .epoch{font:600 1.5rem var(--mono);font-variant-numeric:tabular-nums}
+.clock .big{font:600 1.5rem var(--mono);font-variant-numeric:tabular-nums}
 .clock .sub{color:var(--ink-3);font-size:.85rem}
 .clock .ctl{display:flex;gap:6px;flex-wrap:wrap;margin-left:auto}
 button.b{font:600 .9rem var(--body);border:1px solid var(--line);background:var(--surface-2);color:var(--ink);padding:8px 12px;border-radius:7px;cursor:pointer}
 button.b:hover:not(:disabled){border-color:var(--accent)}
 button.b.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
 button.b:disabled{opacity:.45;cursor:not-allowed}
-button:focus-visible,.tab:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+button.b.next{border:2px solid var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+button.b.next::after{content:"  ← next";font-weight:600;color:var(--accent)}
+button.b.primary.next::after{color:var(--accent-ink)}
+button:focus-visible,.tab:focus-visible,input:focus-visible,select:focus-visible,.svc:focus-within{outline:2px solid var(--accent);outline-offset:2px}
 .grid{display:grid;grid-template-columns:minmax(0,5fr) minmax(0,7fr);gap:20px;align-items:start}
-@media (max-width:860px){.grid{grid-template-columns:minmax(0,1fr)}}
+@media (max-width:880px){.grid{grid-template-columns:minmax(0,1fr)}}
 .panel{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:16px;display:flex;flex-direction:column;gap:14px}
+.story{border-radius:10px;padding:12px 14px;background:var(--accent-soft);color:var(--ink);line-height:1.5}
+.story .lbl{font:600 .72rem var(--body);letter-spacing:.08em;text-transform:uppercase;color:var(--accent);display:block;margin-bottom:4px}
+.svcs{display:grid;gap:8px}
+.svc{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:4px 10px;align-items:start;border:1px solid var(--line);border-radius:8px;padding:10px 12px;background:var(--surface-2);cursor:pointer}
+.svc input{margin-top:4px;accent-color:var(--accent)}
+.svc .nm{font-weight:600}
+.svc .ds{grid-column:2/4;color:var(--ink-2);font-size:.88rem}
+.svc .pr{font:.82rem var(--mono);color:var(--ink-2);white-space:nowrap}
+.svc.sel{border-color:var(--accent);background:var(--accent-soft)}
+.svc.locked{cursor:default;opacity:.8}
 .steps{display:flex;flex-direction:column;gap:10px;margin:0;padding:0;list-style:none}
 .step{display:grid;grid-template-columns:28px minmax(0,1fr);gap:10px;align-items:start}
 .step .n{width:24px;height:24px;border-radius:50%;background:var(--accent-soft);color:var(--accent);font:600 .8rem/24px var(--mono);text-align:center}
 .step .who{font:600 .72rem var(--body);letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3)}
 .step .row{display:flex;flex-wrap:wrap;gap:6px;margin-top:4px}
-.params{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px}
+details.set summary{cursor:pointer;color:var(--ink-3);font-size:.85rem}
+.params{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-top:8px}
 label.f{display:flex;flex-direction:column;gap:4px;font-size:.82rem;color:var(--ink-2)}
 label.f input,label.f select{font:.95rem var(--mono);padding:7px 8px;border:1px solid var(--line);border-radius:6px;background:var(--surface-2);color:var(--ink);min-width:0}
 .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:14px}
-.kv{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 12px;font-size:.9rem}
+.box{border:1px solid var(--line);border-radius:8px;padding:12px;display:flex;flex-direction:column;gap:10px;background:var(--surface-2)}
+.box h3{display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap}
+.box h3 .muted{font-family:var(--body);font-weight:400}
+.kv{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 12px;font-size:.9rem;margin:0}
 .kv dt{color:var(--ink-2)}
 .kv dd{margin:0;font:.88rem var(--mono);font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}
 .pill{display:inline-block;font:600 .75rem var(--body);padding:3px 9px;border-radius:999px;letter-spacing:.02em}
-.pill.idle{background:var(--surface-2);color:var(--ink-3);border:1px solid var(--line)}
+.pill.idle{background:var(--surface);color:var(--ink-3);border:1px solid var(--line)}
 .pill.on{background:var(--flow-soft);color:var(--flow)}
-.pill.warn{background:var(--warn-soft);color:var(--warn)}
 .pill.term{background:var(--accent-soft);color:var(--accent)}
-.pill.crit{background:var(--crit-soft);color:var(--crit)}
-.box{border:1px solid var(--line);border-radius:8px;padding:12px;display:flex;flex-direction:column;gap:10px;background:var(--surface-2)}
-.box h3{display:flex;justify-content:space-between;align-items:center;gap:8px}
 .banner{border-radius:8px;padding:10px 12px;font-size:.9rem}
 .banner.warn{background:var(--warn-soft);color:var(--warn)}
 .banner.info{background:var(--accent-soft);color:var(--ink)}
 .banner.ok{background:var(--flow-soft);color:var(--ink)}
-.banner b{font-weight:600}
-.pieces{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
-.pieces li{display:flex;justify-content:space-between;gap:10px;font-size:.88rem;flex-wrap:wrap}
-.pieces code{font:.8rem var(--mono);color:var(--ink-2);overflow-wrap:anywhere}
-.pieces .tag{font:600 .7rem var(--body);text-transform:uppercase;letter-spacing:.06em;color:var(--flow)}
-.log{font:.8rem/1.6 var(--mono);background:var(--surface-2);border:1px solid var(--line);border-radius:8px;padding:10px 12px;max-height:280px;overflow:auto}
-.log div{white-space:pre-wrap;overflow-wrap:anywhere}
-.log .e{color:var(--ink-3)}
-.log .c{color:var(--accent)}
-.log .fp{color:var(--flow)}
-.log .p{color:var(--warn)}
-.log .x{color:var(--crit)}
 .meter{height:8px;border-radius:99px;background:var(--line);overflow:hidden}
 .meter span{display:block;height:100%;background:var(--flow);transition:width .3s}
-@media (prefers-reduced-motion:reduce){.meter span{transition:none}}
+.dsmeta{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:.85rem;color:var(--ink-2)}
+.dsmeta b{color:var(--ink);font-weight:600}
+.ptab{overflow-x:auto}
+table.pieces{border-collapse:collapse;width:100%;font-size:.86rem;min-width:520px}
+table.pieces th{text-align:left;font:600 .72rem var(--body);letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);padding:4px 8px;border-bottom:1px solid var(--line)}
+table.pieces td{padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+table.pieces td.num,table.pieces td.cid{font-family:var(--mono);font-size:.8rem;color:var(--ink-2);white-space:nowrap}
+table.pieces tr.out td{background:var(--flow-soft)}
+.st{font:600 .74rem var(--body);white-space:nowrap}
+.st.read{color:var(--flow)} .st.busy{color:var(--warn)} .st.wait{color:var(--ink-3)} .st.new{color:var(--flow)} .st.use{color:var(--accent)}
+.log{display:flex;flex-direction:column;gap:8px;max-height:340px;overflow:auto;padding-right:4px}
+.ent{display:grid;grid-template-columns:auto minmax(0,1fr);gap:2px 10px;padding:8px 10px;border-radius:8px;background:var(--surface-2);border:1px solid var(--line)}
+.ent .t{font:.75rem var(--mono);color:var(--ink-3);white-space:nowrap;padding-top:2px}
+.ent .p{font-size:.92rem}
+.ent .x{grid-column:2;font:.74rem var(--mono);color:var(--ink-3);overflow-wrap:anywhere}
+.ent.money .p::before{content:"$ ";color:var(--flow);font-weight:700}
+.ent.err{border-color:var(--crit);background:var(--crit-soft)}
 footer{color:var(--ink-3);font-size:.85rem;display:flex;flex-direction:column;gap:4px}
 .muted{color:var(--ink-3);font-size:.85rem}
-.story{border-radius:10px;padding:12px 14px;background:var(--accent-soft);color:var(--ink);font-size:1rem;line-height:1.5}
-.story .lbl{font:600 .72rem var(--body);letter-spacing:.08em;text-transform:uppercase;color:var(--accent);display:block;margin-bottom:4px}
-button.b.next{border:2px solid var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
-button.b.next::after{content:"  ← next";font-weight:600;color:var(--accent)}
-button.b.primary.next::after{color:var(--accent-ink)}
+@media (prefers-reduced-motion:reduce){.meter span{transition:none}}
 </style>
 
 <div class="wrap">
   <header>
-    <div class="eyebrow">Filecoin Onchain Cloud · proof of concept</div>
-    <h1>Compute next to your data, paid through Filecoin Pay</h1>
-    <p class="lede">Your files are kept by a storage provider on Filecoin. Now that same provider can also <b>do work on your files</b>, right where they are, and a bank-like contract (Filecoin Pay) makes sure everyone is paid fairly. Two ways to buy: <b>rent a machine</b> and pay for the time, like a taxi meter, or <b>order a job</b> and pay once when it is delivered.</p>
+    <div class="eyebrow">Prototype · Filecoin Onchain Cloud</div>
+    <h1>PieceWork<span class="tag">Compute where your data already lives</span></h1>
+    <p class="lede">Your files are stored on Filecoin by a storage provider, who proves every day that it still has them. With PieceWork the same provider can also <b>work on your files right where they are</b> — no downloading, no moving data — and you pay from your wallet through <b>Filecoin Pay</b>, a payment contract that enforces the rules for both sides.</p>
   </header>
 
-  <div class="note"><span>ⓘ</span><span><b>This is a simulation:</b> no real money, no wallet needed. Follow the blue box on the left — it tells you what is happening and which button to press next. The money rules follow the real Filecoin Pay contract (<a href="https://github.com/FilOzone/filecoin-pay/blob/04ded6af6c15c4b5d98545f393dc656004d4aede/src/FilecoinPayV1.sol" target="_blank" rel="noopener">source</a>). Money is in USDFC, a dollar stablecoin.</span></div>
+  <section class="intro" aria-label="What to expect">
+    <h2>What to expect</h2>
+    <div><b>1 · Your files are already stored</b><p>You have a data set on Filecoin: a few files (pieces) kept by a storage provider and proven daily. You can see them on the right.</p></div>
+    <div><b>2 · Pick a service</b><p>The storage provider runs it on its own machines, right next to your files. <b>Rent</b> a service and pay for time, like a taxi meter — or <b>order</b> a one-off job and pay once, when the result is delivered.</p></div>
+    <div><b>3 · Follow the blue box</b><p>It says what is happening and highlights the next button. Move the clock forward to let time pass, and watch your wallet, the provider's earnings and your files change.</p></div>
+    <p class="fine">This is a simulation: no real money, no wallet to connect. The payment rules follow the real Filecoin Pay contract (<a href="https://github.com/FilOzone/filecoin-pay/blob/04ded6af6c15c4b5d98545f393dc656004d4aede/src/FilecoinPayV1.sol" target="_blank" rel="noopener">source</a>). Money is in USDFC, a US-dollar stablecoin.</p>
+  </section>
 
   <div class="tabs" role="tablist">
-    <button class="tab" role="tab" id="tab-session" aria-selected="true">Rent a machine <small>· pay for time</small></button>
+    <button class="tab" role="tab" id="tab-session" aria-selected="true">Rent a service <small>· pay for time</small></button>
     <button class="tab" role="tab" id="tab-job" aria-selected="false">Order a job <small>· pay per job</small></button>
   </div>
 
   <div class="clock">
-    <div>
-      <div class="muted">Simulated time</div>
-      <div class="epoch" id="elapsed">0 min 0 s</div>
-    </div>
-    <div class="sub" id="epoch">epoch #0 · the chain ticks every 30 s (1 epoch)</div>
+    <div><div class="muted">Simulated time</div><div class="big" id="elapsed">0 min 0 s</div></div>
+    <div class="sub" id="epoch">Filecoin moves in 30-second steps (epochs) · epoch #0</div>
     <div class="ctl">
       <button class="b" id="adv1">+30 s</button>
       <button class="b" id="adv10">+5 min</button>
@@ -140,7 +161,7 @@ button.b.primary.next::after{color:var(--accent-ink)}
   </div>
 
   <div class="grid">
-    <section class="panel" id="actions" aria-label="Actions"></section>
+    <section class="panel" id="actions" aria-label="What you can do"></section>
     <section class="panel" aria-label="State">
       <div class="cards">
         <div class="box" id="acc-client"></div>
@@ -151,389 +172,371 @@ button.b.primary.next::after{color:var(--accent-ink)}
     </section>
   </div>
 
-  <details class="panel" aria-label="Contract calls">
-    <summary><b>For engineers:</b> what happens on-chain at each click</summary>
-    <p class="muted" style="margin:0">Calls the proposed ComputeService contract would make, with the Filecoin Pay and PDP functions they use. Newest first.</p>
+  <section class="panel" aria-label="What is recorded on Filecoin">
+    <h2>What's recorded on Filecoin</h2>
+    <p class="muted" style="margin:0">Every step that moves money or changes your files leaves a public record on the Filecoin chain. Newest first; the small line shows the contract call behind it.</p>
     <div class="log" id="log"></div>
-  </details>
+  </section>
 
   <footer>
-    <span>For engineers — proposed protocol: ComputeService acts as the client's Filecoin Pay operator. Session: openSession → sessionReady → closeSession (terminates the rail) → settleRail. Batch job: postJob (escrow) → commitOutputs (pay, then terminate) or expire (refund).</span>
-    <span>Correctness of results is the client's responsibility, as with commercial GPU clouds; timeouts bound what each side can lose.</span>
+    <span>The payment contract checks that work is delivered on time and that nobody is charged beyond what was agreed. Like commercial GPU clouds, it does not check the quality of results.</span>
+    <span>Prototype of a proposed protocol · the numbers follow Filecoin Pay's rules: pay-per-epoch rails, a safety margin (lockup), one-time payments and a 0.5% network fee.</span>
   </footer>
 </div>
 
 <script>
 (() => {
-  const U = 1_000_000;                 // 1 USDFC = 1e6 micro-units in this simulation
-  const START = 0;
-  const fmt = x => (x / U).toFixed(6);
+  const U = 1_000_000, START = 0;
+  const fmt = x => (x / U).toFixed(4);
   const usd = x => fmt(x) + " USDFC";
-  const ceilDiv = (a, b) => Math.floor((a + b - 1) / b);
-  const fee = amt => ceilDiv(amt, 200); // 0.5%, rounded up (FilecoinPayV1 L54-55, L1085)
+  const fee = amt => Math.floor((amt + 199) / 200);
   const $ = id => document.getElementById(id);
+  const mins = ep => { const s = ep * 30; return s >= 60 ? `${Math.floor(s / 60)} min${s % 60 ? " " + (s % 60) + " s" : ""}` : `${s} s`; };
 
-  const presets = {
-    session: {
-      normal: { label: "Client well funded (5 USDFC)", deposit: 5 * U },
-      low:    { label: "Client low on funds (0.4 USDFC)", deposit: 0.4 * U }
-    },
-    job: {
-      normal: { label: "Client funded (5 USDFC)", deposit: 5 * U }
-    }
-  };
+  const PROVIDER = "NorthPeak Storage";
+  const PIECES = () => ([
+    { id: 1, name: "product-manuals/", kind: "folder", size: "2.1 GiB", cid: "bafkzcibd7q…4kpa", type: "docs" },
+    { id: 2, name: "support-tickets-2026.jsonl", kind: "file", size: "840 MiB", cid: "bafkzcibf2m…9xwe", type: "docs" },
+    { id: 3, name: "meeting-notes/", kind: "folder", size: "150 MiB", cid: "bafkzcibh8t…2mqa", type: "notes" },
+    { id: 4, name: "launch-event.mp4", kind: "file", size: "3.4 GiB", cid: "bafkzcibk5r…7vyd", type: "video" }
+  ]);
 
-  function makeWorld(kind, presetKey) {
-    const p = presets[kind][presetKey];
+  const SESSION_SVCS = [
+    { key: "assistant", name: "AI assistant over your documents", desc: "An AI model that the provider runs on its own machine, next to your files, so it can answer questions about them. Needs a GPU.", rate: 16667, reads: [1, 2, 3], action: "Ask a question",
+      uses: [["What is our refund policy?", [1, 2]], ["Summarize last month's top complaints", [2]], ["What did we decide about the launch date?", [3]], ["Which manual covers the X200 pump?", [1]]] },
+    { key: "notebook", name: "Data analysis workspace", desc: "A workspace on the provider's machine where you (or your data team) run your own analysis programs directly on your files — charts, counts, statistics — without downloading them. Runs on a CPU.", rate: 4167, reads: [1, 2, 3, 4], action: "Run an analysis",
+      uses: [["Count tickets by product", [2]], ["Plot tickets per week", [2]], ["Extract frames from the launch video", [4]], ["Word frequency across meeting notes", [3]]] }
+  ];
+  const JOB_SVCS = [
+    { key: "index", name: "Index documents for AI search", desc: "Reads your documents and builds a search index an AI can use (embeddings).", price: 500000, inputs: [1, 2], outputs: [["search-index.parquet", "310 MiB"]] },
+    { key: "video", name: "Make streaming versions of a video", desc: "Converts your video into three sizes for smooth playback.", price: 1200000, inputs: [4], outputs: [["launch-event-1080p.mp4", "1.9 GiB"], ["launch-event-720p.mp4", "980 MiB"], ["launch-event-480p.mp4", "420 MiB"]] },
+    { key: "summary", name: "Summarize meeting notes", desc: "Produces a one-page summary of all your meeting notes.", price: 200000, inputs: [3], outputs: [["meeting-summary.md", "12 KiB"]] }
+  ];
+
+  function makeWorld(kind, scenario) {
+    const deposit = scenario === "low" ? 0.4 * U : 5 * U;
     const w = {
-      kind, presetKey, epoch: START,
-      client: { funds: p.deposit, lc: 0, lr: 0, lls: START },
-      provider: { funds: 0 },
-      fees: 0,
-      rail: null,
-      phase: "idle",          // session: idle|opened|billing|closed|done ; job: idle|posted|paid|expired
-      requests: 0,
-      params: kind === "session" ? { rate: 16667, L: 10 } : { price: 500000, window: 20 },
-      job: null,
-      pieces: [
-        { name: "documents.tar", cid: "bafkzcibd7q…4kpa", kind: "input" },
-        { name: "model-weights.safetensors", cid: "bafkzcibf2m…9xwe", kind: "input" }
-      ],
-      log: []
+      kind, scenario, epoch: START,
+      client: { funds: deposit, lc: 0, lr: 0, lls: START },
+      provider: { funds: 0 }, fees: 0, rail: null, phase: "idle", uses: 0,
+      svc: kind === "session" ? SESSION_SVCS[0] : JOB_SVCS[0],
+      L: 10, window: 20, job: null, pieces: PIECES(), progress: {}, log: []
     };
-    log(w, "e", `Setup: client deposits ${usd(p.deposit)} into Filecoin Pay and approves ComputeService as operator.`);
-    log(w, "fp", `FilecoinPay.deposit(USDFC, client, ${fmt(p.deposit)}); FilecoinPay.setOperatorApproval(USDFC, ComputeService, true, …)`);
+    log(w, "money", `You added ${usd(deposit)} from your wallet to Filecoin Pay and allowed PieceWork to charge it within limits you set.`,
+      `FilecoinPay.deposit(USDFC, you, ${fmt(deposit)}) · FilecoinPay.setOperatorApproval(USDFC, PieceWork, true, rate/lockup limits)`);
     return w;
   }
+  function log(w, cls, plain, tech) { w.log.unshift({ epoch: w.epoch, cls, plain, tech }); }
 
-  function log(w, cls, text) { w.log.unshift({ epoch: w.epoch, cls, text }); }
-
-  // --- Filecoin Pay mechanics (simplified mirror of FilecoinPayV1) ---
+  // ---- Filecoin Pay rules (simplified mirror of FilecoinPayV1) ----
   function settleAccount(w) {
-    const c = w.client;
-    const elapsed = w.epoch - c.lls;
-    if (elapsed <= 0) return;
+    const c = w.client, el = w.epoch - c.lls;
+    if (el <= 0) return;
     if (c.lr === 0) { c.lls = w.epoch; return; }
-    const add = c.lr * elapsed;
+    const add = c.lr * el;
     if (c.funds >= c.lc + add) { c.lc += add; c.lls = w.epoch; }
-    else {
-      const frac = Math.floor((c.funds - c.lc) / c.lr);
-      c.lc += c.lr * frac; c.lls += frac;
-    }
+    else { const k = Math.floor((c.funds - c.lc) / c.lr); c.lc += c.lr * k; c.lls += k; }
   }
   const fullyFunded = w => { settleAccount(w); return w.client.lls === w.epoch; };
-  const available = w => w.client.funds - w.client.lc;
   const fundedUntil = w => w.client.lr === 0 ? Infinity : w.client.lls + Math.floor((w.client.funds - w.client.lc) / w.client.lr);
-
-  function accrued(w) {
+  function owed(w) {
     const r = w.rail; if (!r || r.status === "finalized") return 0;
     settleAccount(w);
     const cap = r.status === "terminated" ? Math.min(w.epoch, r.end) : Math.min(w.epoch, w.client.lls);
     return Math.max(0, cap - r.settled) * r.rate;
   }
-
-  function createRail(w, who) {
-    w.rail = { id: 1, rate: 0, period: 0, fixed: 0, settled: w.epoch, end: 0, status: "active" };
-    log(w, "fp", `FilecoinPay.createRail(USDFC, from=client, to=provider, validator=0x0, 0, 0) → rail #1`);
+  function createRail(w) {
+    w.rail = { rate: 0, period: 0, fixed: 0, settled: w.epoch, end: 0, status: "active" };
   }
-
-  function settleRail(w, who = "anyone") {
+  function settleRail(w) {
     const r = w.rail; if (!r || r.status === "finalized") return;
     settleAccount(w);
     const cap = r.status === "terminated" ? Math.min(w.epoch, r.end) : Math.min(w.epoch, w.client.lls);
     if (cap > r.settled && r.rate > 0) {
       const amt = r.rate * (cap - r.settled), f = fee(amt);
       w.client.funds -= amt; w.client.lc -= amt; w.provider.funds += amt - f; w.fees += f;
-      log(w, "fp", `FilecoinPay.settleRail(rail #1, ${w.epoch}) — ${cap - r.settled} epochs × ${fmt(r.rate)} = ${usd(amt)}; provider receives ${usd(amt - f)} after 0.5% fee`);
+      log(w, "money", `${PROVIDER} was paid ${usd(amt - f)} for ${mins(cap - r.settled)} of service (after the 0.5% network fee).`,
+        `FilecoinPay.settleRail(rail, ${w.epoch}) · ${cap - r.settled} epochs × ${fmt(r.rate)}`);
       r.settled = cap;
-    } else if (cap > r.settled) { r.settled = cap; }
-    else log(w, "e", `settleRail: nothing new to settle (settled up to #${r.settled}${r.status === "active" ? `, client funded up to #${w.client.lls}` : ""}).`);
+    } else if (cap > r.settled) r.settled = cap;
     if (r.status === "terminated" && r.settled >= r.end) {
       w.client.lc -= r.fixed; r.fixed = 0; r.status = "finalized";
-      log(w, "fp", `Rail #1 fully settled up to endEpoch #${r.end} → finalized; remaining lockup released to the client.`);
       if (w.phase === "closed") w.phase = "done";
     }
     settleAccount(w);
   }
-
-  function terminate(w, by) {
+  function terminate(w) {
     settleAccount(w);
     const r = w.rail;
-    r.end = w.client.lls + r.period;
-    w.client.lr -= r.rate;
-    r.status = "terminated";
-    log(w, "fp", `FilecoinPay.terminateRail(rail #1) by ${by} → endEpoch = lockupLastSettledAt (#${w.client.lls}) + L (${r.period}) = #${r.end}. No money moves.`);
+    r.end = w.client.lls + r.period; w.client.lr -= r.rate; r.status = "terminated";
+    return `FilecoinPay.terminateRail(rail) · endEpoch = ${w.client.lls} + ${r.period}`;
   }
 
-  // --- Session actions ---
+  // ---- Rent a service ----
   const S = {
     open(w) {
-      const { rate, L } = w.params;
-      log(w, "c", `Client → ComputeService.openSession(provider, image=sha256:4be1…, r=${fmt(rate)}/epoch, L=${L}, dataSet=#42)`);
-      createRail(w);
-      w.rail.period = L;
-      log(w, "fp", `FilecoinPay.modifyRailLockup(rail #1, period=${L}, fixed=0) — rate still 0, no billing yet`);
-      log(w, "p", `Provider sees SessionOpened and starts the container next to data set #42 …`);
-      w.phase = "opened";
+      createRail(w); w.rail.period = w.L; w.phase = "opened";
+      log(w, "", `You rented "${w.svc.name}" from ${PROVIDER}. The meter is open but not running yet.`,
+        `PieceWork.openSession(provider, image, r=${fmt(w.svc.rate)}, L=${w.L}, dataSet #42) → FilecoinPay.createRail(USDFC, you, provider) · modifyRailLockup(rail, ${w.L}, 0)`);
     },
     ready(w) {
-      const { rate, L } = w.params;
-      const need = rate * L;
+      const need = w.svc.rate * w.L;
       if (!fullyFunded(w) || w.client.funds < w.client.lc + need) {
-        log(w, "x", `Provider → ComputeService.sessionReady() REVERTS: the client must be funded for r × L = ${usd(need)} (Filecoin Pay rejects the rate change; tested, V4). Top up and retry.`);
+        log(w, "err", `The service could not start: your wallet needs at least ${usd(need)} free to cover the safety margin. Add money and try again.`,
+          `PieceWork.sessionReady() reverts: FilecoinPay.modifyRailPayment needs a fully funded payer`);
         return;
       }
-      w.client.lc += need; w.client.lr += rate;
-      w.rail.rate = rate; w.rail.settled = w.epoch;
-      log(w, "p", `Provider → ComputeService.sessionReady() — container healthy, billing starts now`);
-      log(w, "fp", `FilecoinPay.modifyRailPayment(rail #1, newRate=${fmt(rate)}, oneTime=0) — lockup reserved: r × L = ${usd(need)}`);
-      w.phase = "billing";
+      w.client.lc += need; w.client.lr += w.svc.rate; w.rail.rate = w.svc.rate; w.rail.settled = w.epoch; w.phase = "billing";
+      log(w, "", `${PROVIDER} started the service next to your files. The meter is now running (${usd(w.svc.rate)} every 30 s); ${usd(need)} is set aside as the safety margin.`,
+        `PieceWork.sessionReady() → FilecoinPay.modifyRailPayment(rail, ${fmt(w.svc.rate)}, 0)`);
     },
-    query(w) {
-      w.requests++;
-      log(w, "c", `Client/agent → provider: question #${w.requests} to the model over data set #42 (off-chain) → answered`);
+    use(w) {
+      const [q, reads] = w.svc.uses[w.uses % w.svc.uses.length]; w.uses++;
+      w.lastReads = reads;
+      const names = reads.map(id => w.pieces.find(p => p.id === id).name).join(", ");
+      log(w, "", `"${q}" → done, reading ${names}. (This happens directly between you and the provider; it is not paid per use.)`,
+        `off-chain request to the provider's endpoint`);
     },
     close(w, by) {
-      if (by === "client" && !fullyFunded(w)) {
-        log(w, "x", `Client → closeSession() REVERTS: a client can only terminate while its account is fully funded (L427–431). The provider can close instead.`);
+      if (by === "you" && !fullyFunded(w)) {
+        log(w, "err", `You can't stop the meter yourself while your wallet is short of money — only a funded client can. The provider can stop it instead.`,
+          `terminateRail reverts: client lockup not fully settled (FilecoinPayV1 L427–431)`);
         return;
       }
-      log(w, by === "client" ? "c" : "p", `${by === "client" ? "Client" : "Provider"} → ComputeService.closeSession()`);
-      terminate(w, "ComputeService (operator)");
-      w.phase = "closed";
+      const t = terminate(w); w.phase = "closed";
+      log(w, "", `${by === "you" ? "You" : PROVIDER} stopped the service. The meter can still count the safety margin (at most ${mins(w.rail.period)}) and then stops for good.`,
+        `PieceWork.closeSession() → ${t}`);
     },
-    topUp(w) {
-      w.client.funds += 1 * U;
-      log(w, "fp", `Client → FilecoinPay.deposit(USDFC, client, 1.000000)`);
-      settleAccount(w);
-    }
+    topUp(w) { w.client.funds += U; log(w, "money", `You added 1.0000 USDFC from your wallet.`, `FilecoinPay.deposit(USDFC, you, 1.0)`); settleAccount(w); }
   };
 
-  // --- Job actions ---
+  // ---- Order a job ----
   const J = {
     post(w) {
-      const { price, window } = w.params;
-      if (!fullyFunded(w) || w.client.funds < w.client.lc + price) {
-        log(w, "x", `postJob REVERTS: the client needs ${usd(price)} available to escrow.`); return;
+      const s = w.svc;
+      if (!fullyFunded(w) || w.client.funds < w.client.lc + s.price) { log(w, "err", `Not enough free money in your wallet to lock ${usd(s.price)}.`, `postJob reverts`); return; }
+      const deadline = w.epoch + w.window;
+      w.job = { deadline, done: 0 };
+      s.inputs.forEach(id => w.progress[id] = "wait");
+      createRail(w); w.client.lc += s.price; w.rail.fixed = s.price; w.phase = "posted";
+      const names = s.inputs.map(id => w.pieces.find(p => p.id === id).name).join(", ");
+      log(w, "money", `You ordered "${s.name}" on ${names}. ${usd(s.price)} is locked in Filecoin Pay until the result is delivered or the deadline passes (in ${mins(w.window)}).`,
+        `PieceWork.postJob(provider, image, inputs, p=${fmt(s.price)}, deadline=${deadline}) → PDPVerifier.pieceLive(#42, …) · FilecoinPay.createRail · modifyRailLockup(rail, 0, ${fmt(s.price)})`);
+    },
+    tick(w) {
+      if (w.phase !== "posted" || w.scenario === "late") return;
+      const ids = w.svc.inputs;
+      const cur = ids.find(id => w.progress[id] !== "read");
+      if (cur === undefined) return;
+      if (w.progress[cur] === "wait") { w.progress[cur] = "busy"; }
+      else if (w.progress[cur] === "busy") {
+        w.progress[cur] = "read";
+        const p = w.pieces.find(x => x.id === cur);
+        log(w, "", `${PROVIDER} read ${p.name} directly from its own storage and checked it matches your piece ID.`, `local read · compare with PDPVerifier.getPieceCid(#42, ${cur})`);
+        if (ids.every(id => w.progress[id] === "read")) w.phase = "computed";
       }
-      const deadline = w.epoch + window;
-      w.job = { price, deadline };
-      log(w, "c", `Client → ComputeService.postJob(provider, image=sha256:9c07…, inputs=[documents.tar], p=${fmt(price)}, deadline=#${deadline})`);
-      log(w, "fp", `PDPVerifier.pieceLive(#42, documents.tar) = true`);
-      createRail(w);
-      w.client.lc += price; w.rail.fixed = price;
-      log(w, "fp", `FilecoinPay.modifyRailLockup(rail #1, period=0, fixed=${fmt(price)}) — price escrowed`);
-      w.phase = "posted";
     },
     commit(w) {
-      const { price } = w.job;
-      w.pieces.push({ name: "embeddings.parquet", cid: "bafkzcibq3n…t7ro", kind: "output" });
-      log(w, "p", `Provider runs the container over documents.tar next to the data → output embeddings.parquet`);
-      log(w, "fp", `PDPVerifier.addPieces(#42, [bafkzcibq3n…t7ro]) — output stored as a new PDP piece`);
-      log(w, "p", `Provider → ComputeService.commitOutputs(job #1, [piece 3]) — checks pieceLive + getPieceCid`);
-      const f = fee(price);
-      w.client.funds -= price; w.client.lc -= price; w.rail.fixed -= price;
-      w.provider.funds += price - f; w.fees += f;
-      log(w, "fp", `FilecoinPay.modifyRailPayment(rail #1, 0, oneTime=${fmt(price)}) — provider receives ${usd(price - f)} after 0.5% fee`);
-      terminate(w, "ComputeService (operator)");
-      settleRail(w);
+      const s = w.svc;
+      s.outputs.forEach(([name, size], i) => w.pieces.push({ id: w.pieces.length + 1, name, size, kind: "file", cid: ["bafkzcibq3n…t7ro", "bafkzcibu1c…d4sk", "bafkzcibw9e…n2hz"][i] || "bafkzcib…", out: true }));
+      log(w, "", `${PROVIDER} added the result to your data set as ${s.outputs.length === 1 ? "a new piece" : s.outputs.length + " new pieces"}: ${s.outputs.map(o => o[0]).join(", ")}.`,
+        `PDPVerifier.addPieces(#42, [${s.outputs.length} piece CIDs])`);
+      const f = fee(s.price);
+      w.client.funds -= s.price; w.client.lc -= s.price; w.rail.fixed -= s.price; w.provider.funds += s.price - f; w.fees += f;
+      const t = terminate(w); settleRail(w);
+      log(w, "money", `Result delivered on time, so Filecoin Pay released the locked money: ${PROVIDER} received ${usd(s.price - f)} (after the 0.5% network fee).`,
+        `PieceWork.commitOutputs(job, outputs) → FilecoinPay.modifyRailPayment(rail, 0, ${fmt(s.price)}) → ${t}`);
       w.phase = "paid";
     },
     expire(w) {
-      log(w, "c", `Anyone → ComputeService.expire(job #1) — deadline #${w.job.deadline} passed with no outputs`);
-      terminate(w, "ComputeService (operator)");
-      const p = w.rail.fixed;
-      w.client.lc -= p; w.rail.fixed = 0;
-      log(w, "fp", `FilecoinPay.modifyRailLockup(rail #1, 0, fixed=0) — escrow ${usd(p)} returned to the client's available funds`);
-      settleRail(w);
-      w.phase = "expired";
+      const t = terminate(w), p = w.rail.fixed;
+      w.client.lc -= p; w.rail.fixed = 0; settleRail(w); w.phase = "expired";
+      log(w, "money", `The deadline passed with no result. The job was cancelled and ${usd(p)} went back to your wallet.`,
+        `PieceWork.expire(job) → ${t} · FilecoinPay.modifyRailLockup(rail, 0, 0)`);
     }
   };
 
-  // --- UI ---
-  let worlds = { session: makeWorld("session", "normal"), job: makeWorld("job", "normal") };
-  let mode = "session";
-  let timer = null;
-  const W = () => worlds[mode];
-
-  function advance(n) {
-    const w = W();
-    for (let i = 0; i < n; i++) { w.epoch++; settleAccount(w); }
-    render();
-  }
-
-  function kv(pairs) {
-    return `<dl class="kv">${pairs.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("")}</dl>`;
-  }
-
-  function renderSessionActions(w) {
-    const ph = w.phase;
-    const dis = b => b ? "" : "disabled";
-    const low = w.presetKey === "low";
-    return `
-      <h2>Rent an AI model that can read your documents</h2>
-      <label class="f" for="preset">Scenario
-        <select id="preset">${Object.entries(presets.session).map(([k, v]) => `<option value="${k}" ${k === w.presetKey ? "selected" : ""}>${v.label}</option>`).join("")}</select>
-      </label>
-      <details><summary class="muted">Settings: price and safety margin</summary><div class="params" style="margin-top:8px">
-        <label class="f" for="rate">Rate r (USDFC / epoch)
-          <input id="rate" type="number" step="0.000001" min="0.000001" value="${fmt(w.params.rate)}" ${dis(ph === "idle")}></label>
-        <label class="f" for="L">Lockup period L (ticks of 30 s)
-          <input id="L" type="number" step="1" min="1" value="${w.params.L}" ${dis(ph === "idle")}></label>
-      </div>
-      <p class="muted" style="margin:0">Price: ${fmt(w.params.rate)} USDFC per 30 s ≈ ${(w.params.rate * 120 / U).toFixed(2)} USDFC/hour. <b>Lockup period</b> = the safety margin: the bank keeps r × L = ${usd(w.params.rate * w.params.L)} of the client's money aside (${w.params.L} ticks = ${w.params.L * 30 / 60} min of service). It guarantees the provider gets paid for ${w.params.L} more ticks even if the client stops paying, and it is also the most the client can pay after closing.</p></details>
-      <ol class="steps">
-        <li class="step"><span class="n">1</span><div><div class="who">You</div>Rent the machine (like getting into a taxi). Nothing is billed yet.<div class="row"><button class="b primary" data-a="open" ${dis(ph === "idle")}>Rent the machine</button></div></div></li>
-        <li class="step"><span class="n">2</span><div><div class="who">Provider</div>The machine is on and ready. The meter starts now.<div class="row"><button class="b primary" data-a="ready" ${dis(ph === "opened")}>Machine is ready</button></div></div></li>
-        <li class="step"><span class="n">3</span><div><div class="who">You</div>Use the service as much as you like while time passes (move the clock above). You pay for time, not per use.<div class="row"><button class="b" data-a="query" ${dis(ph === "billing")}>Use the service (ask the model a question)</button><button class="b" data-a="topup" ${dis(ph !== "done")}>Add 1 USDFC to your account</button></div></div></li>
-        <li class="step"><span class="n">4</span><div><div class="who">You or the provider</div>Stop renting (like getting out of the taxi).<div class="row"><button class="b" data-a="closeC" ${dis(ph === "billing")}>I stop renting</button><button class="b" data-a="closeP" ${dis(ph === "billing")}>Provider stops</button></div></div></li>
-        <li class="step"><span class="n">5</span><div><div class="who">Anyone</div>Pay the provider what the meter shows.<div class="row"><button class="b" data-a="settle" ${dis(ph === "billing" || ph === "closed")}>Pay the provider</button></div></div></li>
-      </ol>
-      ${low ? `<p class="muted" style="margin:0">In this scenario your account runs out of money after a few minutes. Watch what happens to the provider.</p>` : ""}`;
-  }
-
-  function renderJobActions(w) {
-    const ph = w.phase, dis = b => b ? "" : "disabled";
-    const late = w.job && w.epoch > w.job.deadline;
-    return `
-      <h2>Order a job on your documents</h2>
-      <details><summary class="muted">Settings: price and deadline</summary><div class="params" style="margin-top:8px">
-        <label class="f" for="price">Price p (USDFC)
-          <input id="price" type="number" step="0.000001" min="0.000001" value="${fmt(w.params.price)}" ${dis(ph === "idle")}></label>
-        <label class="f" for="window">Deadline (ticks of 30 s from now)
-          <input id="window" type="number" step="1" min="1" value="${w.params.window}" ${dis(ph === "idle")}></label>
-      </div></details>
-      <ol class="steps">
-        <li class="step"><span class="n">1</span><div><div class="who">You</div>Order the job ("index my documents for AI search"). The price is locked away at the bank.<div class="row"><button class="b primary" data-a="post" ${dis(ph === "idle")}>Order the job</button></div></div></li>
-        <li class="step"><span class="n">2</span><div><div class="who">Provider</div>Does the job next to your files and puts the result in your folder. It is paid at that moment.<div class="row"><button class="b primary" data-a="commit" ${dis(ph === "posted" && !late)}>Deliver the result</button></div></div></li>
-        <li class="step"><span class="n">3</span><div><div class="who">Anyone</div>If the deadline passes with no result: cancel and give you your money back.<div class="row"><button class="b" data-a="expire" ${dis(ph === "posted" && late)}>Cancel and refund</button></div></div></li>
-      </ol>
-      <p class="muted" style="margin:0">To see the refund: order the job, then move the clock past the deadline (+5 min a few times) without delivering.</p>`;
-  }
-
-  function railBox(w) {
-    const r = w.rail;
-    if (!r) return `<h3>${w.kind === "session" ? "The meter" : "The locked box"} <span class="pill idle">not started</span></h3><p class="muted" style="margin:0">${w.kind === "session" ? "The bank opens a meter when you rent the machine." : "The bank locks the price away when you order the job."}</p>`;
-    const statusPill = {
-      active: w.kind === "session" ? (r.rate > 0 ? `<span class="pill on">running</span>` : `<span class="pill idle">waiting for the machine</span>`) : `<span class="pill on">money locked</span>`,
-      terminated: `<span class="pill term">stopped</span>`,
-      finalized: `<span class="pill idle">closed and paid</span>`
-    }[r.status];
-    const acc = accrued(w);
-    const rows = w.kind === "session"
-      ? [["Price every 30 s", usd(r.rate)], ["Safety margin (lockup period)", `${r.period} ticks = ${r.period * 30 / 60} min`], ["Owed to the provider, not paid yet", usd(acc)]]
-      : [["Locked for the job", usd(r.fixed)]];
-    let banner = "";
-    if (w.kind === "session") {
-      const fu = fundedUntil(w);
-      if (r.status === "active" && r.rate > 0 && w.epoch > fu) {
-        banner = `<div class="banner warn"><b>Your account ran out of money.</b> The provider is still guaranteed the safety margin (${r.period} more ticks), but nothing beyond that. It should stop the machine and collect what it is owed.</div>`;
-      } else if (r.status === "active" && r.rate > 0) {
-        banner = `<div class="banner ok">If you stop now, you pay at most <b>${usd(r.rate * r.period)}</b> more (the safety margin). Your money lasts about <b>${Math.max(0, Math.round((fu - w.epoch) * 30 / 60))} more minutes</b>.</div>`;
-      } else if (r.status === "terminated") {
-        banner = `<div class="banner info">Stopped. The meter can count at most the safety margin (until ${Math.max(0, r.end - w.epoch)} ticks from now); nothing can be charged after that.</div>`;
-      }
-    } else if (w.job && r.status === "active") {
-      banner = `<div class="banner ok">Money locked until the result is delivered or the deadline passes${w.epoch > w.job.deadline ? " — <b>the deadline has passed</b>" : ` (${Math.round((w.job.deadline - w.epoch) * 30 / 60 * 10) / 10} min left)`}.</div>`;
-    } else if (w.phase === "paid") {
-      banner = `<div class="banner ok">Result delivered, provider paid, box closed.</div>`;
-    } else if (w.phase === "expired") {
-      banner = `<div class="banner info">No result in time: the money went back to you.</div>`;
-    }
-    return `<h3>${w.kind === "session" ? "The meter" : "The locked box"} ${statusPill}</h3>${kv(rows)}${banner}`;
-  }
-
+  // ---- story ----
   function story(w) {
-    const r = w.rail;
+    const r = w.rail, s = w.svc;
     if (w.kind === "session") {
-      const L = w.params.L, mins = (L * 30 / 60);
       switch (w.phase) {
-        case "idle": return { t: "Your documents are stored with the provider. Rent an AI model server that runs right next to them — like getting into a taxi. Nothing is billed yet.", next: "open" };
-        case "opened": return { t: "The provider is switching the machine on next to your files. The meter is not running yet: it starts only when the machine is ready.", next: "ready" };
+        case "idle": return { t: `Choose a service below, then rent it — like getting into a taxi. Nothing is charged until the service is actually running.`, next: "open" };
+        case "opened": return { t: `${PROVIDER} is starting "${s.name}" right next to your files. The meter starts only when the provider says it is ready.`, next: "ready" };
         case "billing":
-          if (w.epoch > fundedUntil(w)) return { t: `Your money at the bank has run out. The provider is only guaranteed ${L} more ticks (${mins} min) of payment, so it should stop the machine and collect them.`, next: "closeP" };
-          return { t: `The meter is running: ${fmt(r.rate)} USDFC every 30 s. Let time pass with the clock above (+5 min) and use the machine as much as you like. When you are done, stop renting.`, next: w.epoch - r.settled < 5 ? "adv" : "closeC" };
+          if (w.epoch > fundedUntil(w)) return { t: `Your wallet has run out of money. ${PROVIDER} is still guaranteed the safety margin (${mins(w.L)}), but nothing more — so it should stop the service now.`, next: "closeP" };
+          return { t: `The meter is running: ${usd(r.rate)} every 30 s. Use the service as much as you like (it's not charged per use), and let time pass with the clock above. When you're done, stop renting.`, next: w.epoch - r.settled < 4 ? "adv" : "closeC" };
         case "closed": return w.epoch < r.end
-          ? { t: `Stopped. The meter can still count the safety margin: at most ${L} more ticks (${mins} min) — that is the most you can pay after stopping. Move the clock forward, then pay the provider.`, next: "adv" }
-          : { t: "Now pay the provider: the bank transfers exactly what the meter shows and frees the rest of your money.", next: "settle" };
-        case "done": return { t: "Done. The provider was paid for the time used (plus at most the short tail after closing), and the rest of your money is free again. Try the scenario \"Client low on funds\" (the \"Scenario\" menu on the left) to see what happens when your money runs out.", next: null };
+          ? { t: `Stopped. The meter can count at most the safety margin (${mins(w.L)}) more — that's the most you can ever pay after stopping. Move the clock forward, then pay the provider.`, next: "adv" }
+          : { t: `Now pay the provider: Filecoin Pay transfers exactly what the meter shows and frees the rest of your money.`, next: "settle" };
+        case "done": return { t: `Done. The provider was paid for the time used plus at most the short safety margin, and the rest of your money is free again. Try the other scenario or the other service to compare.`, next: null };
       }
     } else {
       const late = w.job && w.epoch > w.job.deadline;
       switch (w.phase) {
-        case "idle": return { t: "Order a job: \"compute embeddings of my documents\". The agreed price is set aside at the bank (escrow) — like paying a print shop into a locked box.", next: "post" };
+        case "idle": return { t: `Choose a job below. When you order it, the price is locked in Filecoin Pay — the provider can't take it yet, and you can't spend it.`, next: "post" };
         case "posted": return late
-          ? { t: "The deadline passed and nothing was delivered. Anyone can expire the job: your money comes back.", next: "expire" }
-          : { t: `The money is locked. The provider runs the job next to your data and must put the result in your box before the deadline (in ${w.job.deadline - w.epoch} ticks). To see the refund case instead, move the clock past the deadline.`, next: "commit" };
-        case "paid": return { t: "Delivered: the result is a new file in your data set, and the bank paid the provider at that moment. Note: the bank checks that it was delivered on time, not its quality.", next: null };
-        case "expired": return { t: "Refunded: the job was not delivered in time, so the money set aside went back to you.", next: null };
+          ? { t: `The deadline passed without a result. Anyone can cancel the job: the locked money goes back to your wallet.`, next: "expire" }
+          : (w.scenario === "late"
+            ? { t: `In this scenario the provider never gets to your job. Move the clock past the deadline (${mins(w.job.deadline - w.epoch)} left) and watch what happens to your money.`, next: "adv" }
+            : { t: `${PROVIDER} is working through your files, one piece at a time (see the table on the right). Move the clock forward to let it work.`, next: "adv" });
+        case "computed": return late
+          ? { t: `Too late: the result was ready but not delivered before the deadline. The job can be cancelled and you get your money back.`, next: "expire" }
+          : { t: `All input pieces have been read and processed. The provider now delivers the result into your data set — and gets paid at that moment.`, next: "commit" };
+        case "paid": return { t: `Delivered: the result is now part of your data set (highlighted on the right) and the provider was paid. Filecoin Pay checks that it was delivered on time, not its quality.`, next: null };
+        case "expired": return { t: `Refunded: nothing was delivered in time, so your money came back.`, next: null };
       }
     }
     return { t: "", next: null };
   }
 
-  function render() {
+  // ---- rendering ----
+  let worlds = { session: makeWorld("session", "normal"), job: makeWorld("job", "normal") };
+  let mode = "session", timer = null;
+  const W = () => worlds[mode];
+  const kv = rows => `<dl class="kv">${rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("")}</dl>`;
+
+  function advance(n) {
     const w = W();
-    $("epoch").textContent = `epoch #${w.epoch} · the chain ticks every 30 s (1 epoch)`;
-    const secs = (w.epoch - START) * 30;
-    $("elapsed").textContent = `${Math.floor(secs / 60)} min ${secs % 60} s`;
-    const st = story(w);
-    $("actions").innerHTML = `<div class="story" role="status"><span class="lbl">What is happening</span>${st.t}</div>` + (w.kind === "session" ? renderSessionActions(w) : renderJobActions(w));
+    for (let i = 0; i < n; i++) { w.epoch++; settleAccount(w); if (w.kind === "job") J.tick(w); }
+    render();
+  }
+
+  function svcList(w, list, locked) {
+    return `<div class="svcs" role="radiogroup" aria-label="Services">${list.map(s => `
+      <label class="svc ${s.key === w.svc.key ? "sel" : ""} ${locked ? "locked" : ""}">
+        <input type="radio" name="svc" value="${s.key}" ${s.key === w.svc.key ? "checked" : ""} ${locked ? "disabled" : ""}>
+        <span class="nm">${s.name}</span>
+        <span class="pr">${w.kind === "session" ? `${fmt(s.rate)} / 30 s` : usd(s.price)}</span>
+        <span class="ds">${s.desc}${w.kind === "session" ? ` About ${(s.rate * 120 / U).toFixed(2)} USDFC per hour.` : ""}</span>
+      </label>`).join("")}</div>`;
+  }
+
+  function actionsSession(w) {
+    const ph = w.phase, dis = b => b ? "" : "disabled";
+    return `
+      <h2>Rent a service</h2>
+      ${svcList(w, SESSION_SVCS, ph !== "idle")}
+      <details class="set"><summary>Settings: scenario and safety margin</summary><div class="params">
+        <label class="f" for="scenario">Scenario
+          <select id="scenario"><option value="normal" ${w.scenario === "normal" ? "selected" : ""}>Wallet well funded (5 USDFC)</option><option value="low" ${w.scenario === "low" ? "selected" : ""}>Wallet low on money (0.4 USDFC)</option></select></label>
+        <label class="f" for="L">Safety margin (30-s steps)
+          <input id="L" type="number" min="1" step="1" value="${w.L}" ${dis(ph === "idle")}></label>
+      </div><p class="muted" style="margin:8px 0 0">The safety margin (Filecoin Pay calls it the <i>lockup period</i>) is money set aside from your wallet when the meter starts: ${w.L} steps = ${mins(w.L)} of service. It guarantees the provider gets paid for that long even if your wallet runs dry, and it's the most you can pay after you stop.</p></details>
+      <ol class="steps">
+        <li class="step"><span class="n">1</span><div><div class="who">You</div>Rent the service you picked.<div class="row"><button class="b primary" data-a="open" ${dis(ph === "idle")}>Rent it</button></div></div></li>
+        <li class="step"><span class="n">2</span><div><div class="who">Provider</div>Starts the service next to your files. The meter starts now.<div class="row"><button class="b primary" data-a="ready" ${dis(ph === "opened")}>Service is ready</button></div></div></li>
+        <li class="step"><span class="n">3</span><div><div class="who">You</div>Use it as much as you like while time passes.<div class="row"><button class="b" data-a="use" ${dis(ph === "billing")}>${w.svc.action}</button><button class="b" data-a="topup" ${dis(ph !== "done")}>Add 1 USDFC</button></div></div></li>
+        <li class="step"><span class="n">4</span><div><div class="who">You or the provider</div>Stop the service.<div class="row"><button class="b" data-a="closeC" ${dis(ph === "billing")}>I stop</button><button class="b" data-a="closeP" ${dis(ph === "billing")}>Provider stops</button></div></div></li>
+        <li class="step"><span class="n">5</span><div><div class="who">Anyone</div>Pay the provider what the meter shows.<div class="row"><button class="b" data-a="settle" ${dis(ph === "billing" || ph === "closed")}>Pay the provider</button></div></div></li>
+      </ol>`;
+  }
+
+  function actionsJob(w) {
+    const ph = w.phase, dis = b => b ? "" : "disabled";
+    const late = w.job && w.epoch > w.job.deadline;
+    return `
+      <h2>Order a job</h2>
+      ${svcList(w, JOB_SVCS, ph !== "idle")}
+      <details class="set"><summary>Settings: scenario and deadline</summary><div class="params">
+        <label class="f" for="scenario">Scenario
+          <select id="scenario"><option value="normal" ${w.scenario === "normal" ? "selected" : ""}>Provider delivers on time</option><option value="late" ${w.scenario === "late" ? "selected" : ""}>Provider misses the deadline</option></select></label>
+        <label class="f" for="window">Deadline (30-s steps from ordering)
+          <input id="window" type="number" min="1" step="1" value="${w.window}" ${dis(ph === "idle")}></label>
+      </div></details>
+      <ol class="steps">
+        <li class="step"><span class="n">1</span><div><div class="who">You</div>Order the job. The price is locked in Filecoin Pay.<div class="row"><button class="b primary" data-a="post" ${dis(ph === "idle")}>Order it</button></div></div></li>
+        <li class="step"><span class="n">2</span><div><div class="who">Provider</div>Works through the input pieces, next to your files (move the clock).</div></li>
+        <li class="step"><span class="n">3</span><div><div class="who">Provider</div>Delivers the result into your data set, and gets paid at that moment.<div class="row"><button class="b primary" data-a="commit" ${dis(ph === "computed" && !late)}>Deliver the result</button></div></div></li>
+        <li class="step"><span class="n">4</span><div><div class="who">Anyone</div>If the deadline passes with no result: cancel, and your money comes back.<div class="row"><button class="b" data-a="expire" ${dis((ph === "posted" || ph === "computed") && late)}>Cancel and refund</button></div></div></li>
+      </ol>`;
+  }
+
+  function railBox(w) {
+    const r = w.rail, session = w.kind === "session";
+    const title = session ? "The meter" : "Locked for the job";
+    if (!r) return `<h3>${title} <span class="pill idle">not started</span></h3><p class="muted" style="margin:0">${session ? "Opens when you rent a service." : "Filecoin Pay locks the price when you order a job."}</p>`;
+    const pill = r.status === "active" ? (session ? (r.rate > 0 ? `<span class="pill on">running</span>` : `<span class="pill idle">waiting for the service</span>`) : `<span class="pill on">money locked</span>`)
+      : r.status === "terminated" ? `<span class="pill term">stopped</span>` : `<span class="pill idle">closed and paid</span>`;
+    const rows = session
+      ? [["Price every 30 s", usd(r.rate)], ["Safety margin", `${r.period} steps · ${mins(r.period)}`], ["Owed to the provider, not paid yet", usd(owed(w))]]
+      : [["Locked", usd(r.fixed)], ["Deadline", w.job ? (w.epoch > w.job.deadline ? "passed" : `in ${mins(w.job.deadline - w.epoch)}`) : "—"]];
+    let b = "";
+    if (session) {
+      const fu = fundedUntil(w);
+      if (r.status === "active" && r.rate > 0 && w.epoch > fu) b = `<div class="banner warn"><b>Your wallet ran out of money.</b> The provider is still guaranteed the safety margin (${mins(r.period)}) and nothing more. It should stop the service and collect what it's owed.</div>`;
+      else if (r.status === "active" && r.rate > 0) b = `<div class="banner ok">If you stop now, you pay at most <b>${usd(r.rate * r.period)}</b> more. At this price your wallet lasts about <b>${mins(Math.max(0, fu - w.epoch))}</b>.</div>`;
+      else if (r.status === "terminated") b = `<div class="banner info">Stopped. At most ${mins(Math.max(0, r.end - w.epoch))} more can be counted; nothing can be charged after that.</div>`;
+    } else if (w.phase === "paid") b = `<div class="banner ok">Result delivered, provider paid.</div>`;
+    else if (w.phase === "expired") b = `<div class="banner info">No result in time: your money came back.</div>`;
+    return `<h3>${title} ${pill}</h3>${kv(rows)}${b}`;
+  }
+
+  function pieceStatus(w, p) {
+    if (p.out) return `<span class="st new">new result</span>`;
+    if (w.kind === "session") {
+      if (w.phase === "billing" || w.phase === "opened") {
+        if (w.lastReads && w.lastReads.includes(p.id)) return `<span class="st use">just read</span>`;
+        return w.svc.reads.includes(p.id) ? `<span class="st wait">available to the service</span>` : `<span class="st wait">not used</span>`;
+      }
+      return `<span class="st wait">stored</span>`;
+    }
+    const pr = w.progress[p.id];
+    if (!pr || w.phase === "idle") return `<span class="st wait">${w.phase === "idle" && w.svc.inputs.includes(p.id) ? "input for this job" : "stored"}</span>`;
+    return pr === "read" ? `<span class="st read">✓ read and checked</span>` : pr === "busy" ? `<span class="st busy">processing…</span>` : `<span class="st wait">queued</span>`;
+  }
+
+  function datasetBox(w) {
+    const n = w.pieces.length, outs = w.pieces.filter(p => p.out).length;
+    return `<h3>Your data set #42 <span class="muted">stored by ${PROVIDER}</span></h3>
+      <div class="dsmeta"><span><b>${n}</b> pieces${outs ? ` (${outs} new)` : ""}</span><span><b>2</b> copies with two providers</span><span>proven <b>daily</b></span></div>
+      <p class="muted" style="margin:0">Each piece is a file or folder with a unique ID (its piece CID) computed from its content. The provider proves daily that it still holds every piece, and a job's result becomes a new piece in the same data set.</p>
+      <div class="ptab"><table class="pieces"><thead><tr><th>#</th><th>Piece</th><th>Size</th><th>Piece ID</th><th>Now</th></tr></thead><tbody>
+      ${w.pieces.map(p => `<tr class="${p.out ? "out" : ""}"><td class="num">${p.id}</td><td>${p.name}</td><td class="num">${p.size}</td><td class="cid">${p.cid}</td><td>${pieceStatus(w, p)}</td></tr>`).join("")}
+      </tbody></table></div>`;
+  }
+
+  function render() {
+    const w = W(), st = story(w);
+    $("elapsed").textContent = mins(w.epoch - START).replace(/^0 s$/, "0 min 0 s");
+    $("epoch").textContent = `Filecoin moves in 30-second steps (epochs) · epoch #${w.epoch}`;
+    $("actions").innerHTML = `<div class="story" role="status"><span class="lbl">What is happening</span>${st.t}</div>` + (w.kind === "session" ? actionsSession(w) : actionsJob(w));
+    const c = w.client, avail = c.funds - c.lc;
+    $("acc-client").innerHTML = `<h3>Your wallet <span class="muted">money in Filecoin Pay</span></h3>${kv([["Total", usd(c.funds)], ["Set aside (can't spend)", usd(c.lc)], ["Free to spend", usd(avail)]])}
+      <div class="meter" title="Share set aside"><span style="width:${c.funds ? Math.min(100, 100 * c.lc / c.funds).toFixed(1) : 0}%"></span></div>`;
+    $("acc-provider").innerHTML = `<h3>${PROVIDER} <span class="muted">the provider</span></h3>${kv([["Earned", usd(w.provider.funds)], ["Network fee (0.5%)", usd(w.fees)],
+      [w.kind === "session" ? "Times used" : "Job", w.kind === "session" ? String(w.uses) : ({ idle: "—", posted: "in progress", computed: "ready to deliver", paid: "delivered", expired: "cancelled" })[w.phase]]])}`;
+    $("rail").innerHTML = railBox(w);
+    $("dataset").innerHTML = datasetBox(w);
+    $("log").innerHTML = w.log.map(l => `<div class="ent ${l.cls}"><span class="t">${mins(l.epoch - START).replace(/^0 s$/, "0:00")}</span><span class="p">${l.plain}</span><span class="x">${l.tech}</span></div>`).join("");
+
     document.querySelectorAll("button.b.next").forEach(b => b.classList.remove("next"));
     if (st.next === "adv") $("adv10").classList.add("next");
     else if (st.next) { const nb = document.querySelector(`[data-a="${st.next}"]`); if (nb && !nb.disabled) nb.classList.add("next"); }
 
-    const c = w.client, avail = available(w);
-    const totalLock = Math.max(1, c.funds);
-    $("acc-client").innerHTML = `<h3>Your money <span class="muted">at the bank</span></h3>${kv([
-      ["In your account", usd(c.funds)], ["Set aside (can't spend)", usd(c.lc)], ["Free to spend", usd(avail)]])}
-      <div class="meter" title="Share of funds locked"><span style="width:${Math.min(100, 100 * c.lc / totalLock).toFixed(1)}%"></span></div>`;
-    $("acc-provider").innerHTML = `<h3>The provider <span class="muted">at the bank</span></h3>${kv([
-      ["Has been paid", usd(w.provider.funds)], ["Network fee (0.5%)", usd(w.fees)],
-      [w.kind === "session" ? "Questions answered" : "Job", w.kind === "session" ? String(w.requests) : (w.phase === "idle" ? "—" : w.phase)]])}`;
-    $("rail").innerHTML = railBox(w);
-    $("dataset").innerHTML = `<h3>Your files at the provider <span class="muted">stored and proven daily</span></h3>
-      <ul class="pieces">${w.pieces.map(p => `<li><span>${p.kind === "output" ? `<span class="tag">new output</span> ` : ""}${p.name}</span><code>${p.cid}</code></li>`).join("")}</ul>`;
-    $("log").innerHTML = w.log.map(l => `<div class="${l.cls}"><span class="e">[#${l.epoch}]</span> ${l.text}</div>`).join("");
-
-    const ps = $("preset");
-    if (ps) ps.onchange = () => { stop(); worlds.session = makeWorld("session", ps.value); render(); };
-    const bindNum = (id, key, scale) => { const el = $(id); if (el) el.onchange = () => {
-      const v = Math.max(scale === 1 ? 1 : 1, Math.round(parseFloat(el.value || "0") * scale)); w.params[key] = v; render(); }; };
-    bindNum("rate", "rate", U); bindNum("L", "L", 1); bindNum("price", "price", U); bindNum("window", "window", 1);
+    document.querySelectorAll('input[name="svc"]').forEach(i => i.onchange = () => {
+      const list = w.kind === "session" ? SESSION_SVCS : JOB_SVCS; w.svc = list.find(s => s.key === i.value); w.lastReads = null; render(); });
+    const sc = $("scenario"); if (sc) sc.onchange = () => { stop(); const key = w.svc.key; worlds[mode] = makeWorld(mode, sc.value); const list = mode === "session" ? SESSION_SVCS : JOB_SVCS; worlds[mode].svc = list.find(s => s.key === key); render(); };
+    const Li = $("L"); if (Li) Li.onchange = () => { w.L = Math.max(1, Math.round(+Li.value || 1)); render(); };
+    const Wi = $("window"); if (Wi) Wi.onchange = () => { w.window = Math.max(1, Math.round(+Wi.value || 1)); render(); };
     document.querySelectorAll("[data-a]").forEach(b => b.onclick = () => act(b.dataset.a));
   }
 
   function act(a) {
     const w = W();
-    ({
-      open: () => S.open(w), ready: () => S.ready(w), query: () => S.query(w),
-      closeC: () => S.close(w, "client"), closeP: () => S.close(w, "provider"),
-      settle: () => settleRail(w), topup: () => S.topUp(w),
-      post: () => J.post(w), commit: () => J.commit(w), expire: () => J.expire(w)
-    })[a]();
+    ({ open: () => S.open(w), ready: () => S.ready(w), use: () => S.use(w), closeC: () => S.close(w, "you"), closeP: () => S.close(w, "provider"),
+       settle: () => settleRail(w), topup: () => S.topUp(w), post: () => J.post(w), commit: () => J.commit(w), expire: () => J.expire(w) })[a]();
     render();
   }
 
   function stop() { if (timer) { clearInterval(timer); timer = null; } $("play").textContent = "▶ Let time run"; }
-  $("play").onclick = () => {
-    if (timer) return stop();
-    timer = setInterval(() => advance(1), 700);
-    $("play").textContent = "⏸ Pause";
-  };
+  $("play").onclick = () => { if (timer) return stop(); timer = setInterval(() => advance(1), 700); $("play").textContent = "⏸ Pause"; };
   $("adv1").onclick = () => advance(1);
   $("adv10").onclick = () => advance(10);
-  $("reset").onclick = () => { stop(); worlds[mode] = makeWorld(mode, W().presetKey); render(); };
-
-  function setMode(m) {
-    stop(); mode = m;
-    $("tab-session").setAttribute("aria-selected", String(m === "session"));
-    $("tab-job").setAttribute("aria-selected", String(m === "job"));
-    render();
-  }
+  $("reset").onclick = () => { stop(); const key = W().svc.key, sc = W().scenario; worlds[mode] = makeWorld(mode, sc); const list = mode === "session" ? SESSION_SVCS : JOB_SVCS; worlds[mode].svc = list.find(s => s.key === key); render(); };
+  function setMode(m) { stop(); mode = m; $("tab-session").setAttribute("aria-selected", String(m === "session")); $("tab-job").setAttribute("aria-selected", String(m === "job")); render(); }
   $("tab-session").onclick = () => setMode("session");
   $("tab-job").onclick = () => setMode("job");
-
   render();
 })();
 </script>
