@@ -124,7 +124,8 @@ footer{color:var(--ink-3);font-size:.85rem;display:flex;flex-direction:column;ga
   const FILES = [["product-manuals", "2.1 GB"], ["support-tickets", "840 MB"], ["meeting-notes", "150 MB"]];
 
   // live state
-  let st = { story: null, i: 0, ticks: 0, asked: 0, timer: null, jobTicks: 0 };
+  let st = { story: null, i: 0, ticks: 0, asked: 0, timer: null, jobTicks: 0, wA: WALLET, pA: 0, nA: 1, wB: WALLET, pB: 0, nB: 1 };
+  const fresh = () => ({ story: null, i: 0, ticks: 0, asked: 0, timer: null, jobTicks: 0, wA: WALLET, pA: 0, nA: 1, wB: WALLET, pB: 0, nB: 1 });
 
   function scene(o) {
     const files = (o.files || FILES.map(f => ({ n: f[0], s: f[1] }))).map(f => `<li class="${f.c || ""}"><span>${f.n}</span><span class="sz">${f.s}</span></li>`).join("");
@@ -150,10 +151,10 @@ footer{color:var(--ink-3);font-size:.85rem;display:flex;flex-direction:column;ga
       scene: { you: WALLET, pay: 0, payLabel: "nothing held yet", prov: 0 }
     }),
     () => ({
-      title: "You rent the AI assistant — right next to your files",
+      title: st.nA > 1 ? `You rent the AI assistant again (session ${st.nA})` : "You rent the AI assistant — right next to your files",
       text: `<p>The provider runs the assistant <b>on its own machines, where your files already are</b>. The price is like a taxi meter: <b>2 USDFC per hour</b>, counted every 30 seconds.</p>
              <p>When it starts, Filecoin Pay sets aside a small <b>deposit</b> (${money(DEPOSIT)} USDFC, five minutes' worth). It is there only in case your wallet runs dry — if you stop normally, you get it back.</p>`,
-      scene: { you: WALLET - DEPOSIT, pay: DEPOSIT, payLabel: "deposit set aside", f1: { t: "deposit", cls: "on" }, prov: 0, provNote: "Starting the AI assistant next to your files…", hl: "pay" }
+      scene: { you: st.wA - DEPOSIT, pay: DEPOSIT, payLabel: "deposit set aside", f1: { t: "deposit", cls: "on" }, prov: st.pA, provNote: "Starting the AI assistant next to your files…", hl: "pay" }
     }),
     () => {
       const q = [["What is our refund policy?", "Refunds within 30 days, per the product manuals (section 4)."], ["What were last month's top complaints?", "Late deliveries and the X200 pump manual, from 38 support tickets."], ["When is the launch?", "October 14, decided in the Sept 3 meeting notes."]];
@@ -166,7 +167,7 @@ footer{color:var(--ink-3);font-size:.85rem;display:flex;flex-direction:column;ga
         extra: `<div class="live"><div class="stat clock"><div class="l">Time used</div><div class="v">${clock(st.ticks)}</div></div><div class="stat"><div class="l">Cost so far</div><div class="v">${cost().toFixed(4)}</div></div></div>
                 ${shown.map(([qq, aa]) => `<div class="bubble"><div class="q">You: ${qq}</div><div class="a">Assistant: ${aa}</div></div>`).join("")}
                 <div class="nav"><button class="b" id="ask" ${st.asked >= q.length ? "disabled" : ""}>Ask a question</button><button class="b primary" id="stop">Stop</button></div>`,
-        scene: { you: WALLET - DEPOSIT - cost(), pay: DEPOSIT + 0, payLabel: "deposit set aside", f1: { t: `${RATE}/30 s`, cls: "on" }, f2: { t: "counted for the provider", cls: "on" }, prov: 0, provNote: `<b>Owed so far: ${cost().toFixed(4)}</b> — paid when you stop.`, hl: "prov" },
+        scene: { you: st.wA - DEPOSIT - cost(), pay: DEPOSIT + 0, payLabel: "deposit set aside", f1: { t: `${RATE}/30 s`, cls: "on" }, f2: { t: "counted for the provider", cls: "on" }, prov: st.pA, provNote: `<b>Owed so far: ${cost().toFixed(4)}</b> — paid when you stop.`, hl: "prov" },
         hideNext: true
       };
     },
@@ -176,15 +177,16 @@ footer{color:var(--ink-3);font-size:.85rem;display:flex;flex-direction:column;ga
         title: "You pressed Stop — the meter stopped right away",
         text: `<p>Filecoin Pay paid the provider for <b>exactly ${duration(st.ticks)}</b> of use: ${c.toFixed(4)} USDFC (minus a 0.5% network fee). Not a second more.</p>
                <p>Your deposit came back to your wallet.</p>`,
-        scene: { you: WALLET - c, pay: 0, payLabel: "nothing held", f1: { t: "deposit returned", cls: "back" }, f2: { t: `${c.toFixed(4)} paid`, cls: "on" }, prov: c - f, provNote: "Paid for the time used.", hl: "you" }
+        scene: { you: st.wA - c, pay: 0, payLabel: "nothing held", f1: { t: "deposit returned", cls: "back" }, f2: { t: `${c.toFixed(4)} paid`, cls: "on" }, prov: st.pA + c - f, provNote: "Paid for the time used.", hl: "you" },
+        again: "Rent again"
       };
     },
     () => ({
       title: "That's it",
       text: `<p><b>You rented an AI model next to your own files, paid by the half-minute, and stopped whenever you wanted.</b> Your files never left the provider, and nobody could charge you more than the time you used.</p>
              <p>One question remains: why the deposit?</p>`,
-      scene: { you: WALLET - cost(), pay: 0, payLabel: "nothing held", prov: cost() * 0.995 },
-      bonus: { label: "What if my wallet runs dry?", go: 5 }
+      scene: { you: st.wA - cost(), pay: 0, payLabel: "nothing held", prov: st.pA + cost() * 0.995 },
+      bonus: { label: "What if my wallet runs dry?", go: 5 }, again: "Rent again"
     }),
     () => ({
       title: "If your wallet runs dry, the deposit pays the provider",
@@ -213,10 +215,10 @@ footer{color:var(--ink-3);font-size:.85rem;display:flex;flex-direction:column;ga
       scene: { you: WALLET, pay: 0, payLabel: "nothing held yet", prov: 0 }
     }),
     () => ({
-      title: "You order the job: 0.50 USDFC, done within 10 minutes",
+      title: st.nB > 1 ? `You order another job (job ${st.nB}): 0.50 USDFC, within 10 minutes` : "You order the job: 0.50 USDFC, done within 10 minutes",
       text: `<p>Filecoin Pay <b>locks the 0.50</b> right away: the provider can't take it yet, and you can't spend it.</p>
              <p>The <b>deadline</b> is recorded on Filecoin: 10 minutes from now.</p>`,
-      scene: { you: WALLET - JOB_PRICE, pay: JOB_PRICE, payLabel: "locked for the job", f1: { t: "price locked", cls: "on" }, prov: 0, provNote: "Job received. Deadline in 10:00.", hl: "pay" }
+      scene: { you: st.wB - JOB_PRICE, pay: JOB_PRICE, payLabel: "locked for the job", f1: { t: "price locked", cls: "on" }, prov: st.pB, provNote: "Job received. Deadline in 10:00.", hl: "pay" }
     }),
     () => {
       const done = st.jobTicks >= JOB_STEPS;
@@ -228,7 +230,7 @@ footer{color:var(--ink-3);font-size:.85rem;display:flex;flex-direction:column;ga
           : `<p>It reads your files one by one, directly from its own storage, and builds the index.</p>`,
         extra: `<div class="live"><div class="stat clock"><div class="l">Time since order</div><div class="v">${clock(Math.min(st.jobTicks, JOB_STEPS))}</div></div><div class="stat"><div class="l">Deadline</div><div class="v">10:00</div></div></div>
                 <div class="progress"><span style="width:${Math.min(100, Math.round(100 * st.jobTicks / JOB_STEPS))}%"></span></div>`,
-        scene: { you: WALLET - JOB_PRICE, pay: JOB_PRICE, payLabel: "locked for the job", prov: 0, provNote: done ? "Result ready." : "Working…", files: jobFiles(), hl: "prov" },
+        scene: { you: st.wB - JOB_PRICE, pay: JOB_PRICE, payLabel: "locked for the job", prov: st.pB, provNote: done ? "Result ready." : "Working…", files: jobFiles(), hl: "prov" },
         nextDisabled: !done
       };
     },
@@ -236,14 +238,14 @@ footer{color:var(--ink-3);font-size:.85rem;display:flex;flex-direction:column;ga
       title: "Delivered on time, so the provider is paid",
       text: `<p>The result (<b>search-index</b>) is added to your PDP data set as a new piece, stored and proven like the rest of your files.</p>
              <p><b>How does Filecoin Pay know it was on time?</b> Every action on Filecoin is stamped with the moment it happens. The contract compares the delivery stamp (${clock(JOB_STEPS)}) with the deadline (10:00) — like a postmark on a letter. Before the deadline, it releases the 0.50 to the provider.</p>`,
-      scene: { you: WALLET - JOB_PRICE, pay: 0, payLabel: "released", f2: { t: "0.50 paid", cls: "on" }, prov: JOB_PRICE * 0.995, provNote: "Paid on delivery.", files: [...jobFiles().slice(0, 3).map(f => ({ ...f, c: f.c === "done" ? "done" : "" })), { n: "search-index (new)", s: "310 MB", c: "new" }], hl: "prov" }
+      scene: { you: st.wB - JOB_PRICE, pay: 0, payLabel: "released", f2: { t: "0.50 paid", cls: "on" }, prov: st.pB + JOB_PRICE * 0.995, provNote: "Paid on delivery.", files: [...jobFiles().slice(0, 3).map(f => ({ ...f, c: f.c === "done" ? "done" : "" })), { n: "search-index (new)", s: "310 MB", c: "new" }], hl: "prov" }
     }),
     () => ({
       title: "That's it",
       text: `<p><b>You ordered work on your own files, paid once, and only because it was delivered on time.</b> Your files never left the provider.</p>
              <p>And if the provider had been late?</p>`,
-      scene: { you: WALLET - JOB_PRICE, pay: 0, payLabel: "nothing held", prov: JOB_PRICE * 0.995, files: [...FILES.map(f => ({ n: f[0], s: f[1] })), { n: "search-index (new)", s: "310 MB", c: "new" }] },
-      bonus: { label: "What if the provider is late?", go: 5 }
+      scene: { you: st.wB - JOB_PRICE, pay: 0, payLabel: "nothing held", prov: st.pB + JOB_PRICE * 0.995, files: [...FILES.map(f => ({ n: f[0], s: f[1] })), { n: "search-index (new)", s: "310 MB", c: "new" }] },
+      bonus: { label: "What if the provider is late?", go: 5 }, again: "Order another job"
     }),
     () => ({
       title: "If it's late, your money comes back",
@@ -260,7 +262,7 @@ footer{color:var(--ink-3);font-size:.85rem;display:flex;flex-direction:column;ga
 
   function home() {
     stopTimer();
-    st = { story: null, i: 0, ticks: 0, asked: 0, timer: null, jobTicks: 0 };
+    st = fresh();
     document.getElementById("app").innerHTML = `
       <header style="display:flex;flex-direction:column;gap:10px">
         <div class="eyebrow">Filecoin Onchain Cloud · prototype</div>
@@ -290,7 +292,8 @@ footer{color:var(--ink-3);font-size:.85rem;display:flex;flex-direction:column;ga
         ${s.callout || ""}
         <div class="nav">
           <button class="b" id="back" ${st.i === 0 ? "disabled" : ""}>Back</button><span class="sp"></span>
-          ${s.bonus ? `<button class="b" id="bonus">${s.bonus.label}</button><button class="b primary" id="other">Try the other story</button>` : ""}
+          ${s.again ? `<button class="b primary" id="again">${s.again}</button>` : ""}
+          ${s.bonus ? `<button class="b" id="bonus">${s.bonus.label}</button><button class="b" id="other">Try the other story</button>` : ""}
           ${!s.bonus && !s.hideNext && st.i < mainSteps - 1 ? `<button class="b primary" id="next" ${s.nextDisabled ? "disabled" : ""}>Next</button>` : ""}
           ${st.i >= mainSteps ? `<button class="b primary" id="other">Try the other story</button>` : ""}
         </div>
@@ -301,7 +304,12 @@ footer{color:var(--ink-3);font-size:.85rem;display:flex;flex-direction:column;ga
     on("back", () => { st.i = st.i >= mainSteps ? mainSteps - 1 : st.i - 1; if (st.story === "A" && st.i <= 2) { st.ticks = 0; st.asked = 0; } if (st.story === "B" && st.i <= 2) st.jobTicks = 0; show(); });
     on("next", () => { st.i++; show(); });
     on("bonus", () => { st.i = s.bonus.go; show(); });
-    on("other", () => { const o = st.story === "A" ? "B" : "A"; st = { story: o, i: 0, ticks: 0, asked: 0, timer: null, jobTicks: 0 }; show(); });
+    on("other", () => { const o = st.story === "A" ? "B" : "A"; st = fresh(); st.story = o; show(); });
+    on("again", () => {
+      if (st.story === "A") { const c = cost(); st.wA -= c; st.pA += c * 0.995; st.nA++; st.ticks = 0; st.asked = 0; }
+      else { st.wB -= JOB_PRICE; st.pB += JOB_PRICE * 0.995; st.nB++; st.jobTicks = 0; }
+      st.i = 1; show();
+    });
     on("ask", () => { st.asked++; show(); });
     on("stop", () => { if (st.ticks === 0) st.ticks = 1; st.i++; show(); });
     if (s.live === "meter") st.timer = setInterval(() => { st.ticks++; show(); }, 700);
