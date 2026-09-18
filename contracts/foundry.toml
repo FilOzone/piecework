@@ -1,0 +1,17 @@
+[profile.default]
+src = "src"
+test = "test"
+out = "out"
+libs = ["lib", "lib/filecoin-pay/lib"]
+cache_path = "cache"
+solc = "0.8.30"
+optimizer = true
+optimizer_runs = 200
+via_ir = true
+remappings = [
+    "filecoin-pay/=lib/filecoin-pay/",
+    "forge-std/=lib/filecoin-pay/lib/forge-std/src/",
+    "@openzeppelin/contracts/=lib/filecoin-pay/lib/openzeppelin-contracts/contracts/",
+    "@prb-math/=lib/filecoin-pay/lib/prb-math/src/",
+    "fvm-solidity/=lib/filecoin-pay/lib/fvm-solidity/src/",
+]

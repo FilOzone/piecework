@@ -1,0 +1,3 @@
+[submodule "contracts/lib/filecoin-pay"]
+	path = contracts/lib/filecoin-pay
+	url = https://github.com/FilOzone/filecoin-pay.git
