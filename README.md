@@ -13,7 +13,8 @@ Correctness of results is the client's responsibility, as with commercial GPU cl
 
 | Path | What |
 |---|---|
-| `demo/index.html` | Interactive browser simulation of both flows (no chain, no wallet). |
+| `demo/index.html` | Guided walkthrough of both flows (no chain, no wallet). |
+| `demo/explore.html` | Detailed simulator: several services, data set pieces, every Filecoin Pay step. |
 | `contracts/src/IComputeService.sol` | Proposed contract interface (not implemented yet). |
 | `contracts/test/ComputeGuarantees.t.sol` | Tests of the Filecoin Pay behaviour the protocol relies on (17 tests). |
 | `contracts/lib/filecoin-pay` | FilOzone/filecoin-pay, pinned at `04ded6a`, used read-only as a dependency. |
