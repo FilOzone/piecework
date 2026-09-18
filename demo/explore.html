@@ -344,7 +344,8 @@ footer{color:var(--ink-3);font-size:.85rem;display:flex;flex-direction:column;ga
     },
     commit(w) {
       const s = w.svc;
-      s.outputs.forEach(([name, size], i) => w.pieces.push({ id: w.pieces.length + 1, name, size, cid: ["bafkzcibq3n…t7ro", "bafkzcibu1c…d4sk", "bafkzcibw9e…n2hz"][i], out: true }));
+      const k = w.pieces.filter(p => p.out).length;
+      s.outputs.forEach(([name, size], i) => { const taken = w.pieces.some(p => p.name === name); w.pieces.push({ id: w.pieces.length + 1, name: taken ? name.replace(/(\.[a-z0-9]+)?$/, m => ` (${k + 1})` + m) : name, size, cid: ["bafkzcibq3n…t7ro", "bafkzcibu1c…d4sk", "bafkzcibw9e…n2hz"][i].replace("…", (k ? String(k) : "") + "…"), out: true }); });
       log(w, "", `${PROVIDER} added the result to your data set: ${s.outputs.map(o => o[0]).join(", ")}.`, `PDPVerifier.addPieces(#42, [${s.outputs.length} piece CIDs])`);
       const f = fee(s.price);
       w.client.funds -= s.price; w.client.lc -= s.price; w.rail.fixed -= s.price; w.provider.funds += s.price - f; w.fees += f;
@@ -534,7 +535,7 @@ footer{color:var(--ink-3);font-size:.85rem;display:flex;flex-direction:column;ga
     $("log").innerHTML = w.log.map(l => `<div class="ent ${l.cls}"><span class="t">${l.epoch ? mins(l.epoch) : "start"}</span><span class="p">${l.plain}</span><span class="x">${l.tech}</span></div>`).join("");
     document.querySelectorAll("button.b.next").forEach(b => b.classList.remove("next"));
     if (st.next) { const nb = document.querySelector(`[data-a="${st.next}"]`); if (nb && !nb.disabled) nb.classList.add("next"); }
-    document.querySelectorAll('input[name="svc"]').forEach(i => i.onchange = () => { worlds[mode] = makeWorld(mode, w.scenario, i.value); render(); });
+    document.querySelectorAll('input[name="svc"]').forEach(i => i.onchange = () => { w.svc = (w.kind === "session" ? SESSION_SVCS : JOB_SVCS).find(s => s.key === i.value); w.progress = {}; render(); });
     const sc = $("scenario"); if (sc) sc.onchange = () => { worlds[mode] = makeWorld(mode, sc.value, w.svc.key); render(); };
     const Li = $("L"); if (Li) Li.onchange = () => { w.L = Math.max(1, Math.round(+Li.value || 1)); render(); };
     const Wi = $("window"); if (Wi) Wi.onchange = () => { w.window = Math.max(1, Math.round(+Wi.value || 1)); render(); };
@@ -543,7 +544,7 @@ footer{color:var(--ink-3);font-size:.85rem;display:flex;flex-direction:column;ga
 
   function act(a) {
     const w = W();
-    ({ open: () => S.open(w), use: () => S.use(w), stop: () => S.stopByYou(w), post: () => J.post(w), expire: () => J.expire(w), again: () => { worlds[mode] = makeWorld(mode, w.scenario, w.svc.key); } })[a]();
+    ({ open: () => S.open(w), use: () => S.use(w), stop: () => S.stopByYou(w), post: () => J.post(w), expire: () => J.expire(w), again: () => { Object.assign(w, { rail: null, phase: "idle", job: null, progress: {}, uses: 0, started: 0, stopped: 0, wait: 0, lastReads: null }); settleAccount(w); log(w, "", `Starting a new ${w.kind === "session" ? "rental" : "job"} from your remaining balance (${usd(w.client.funds - w.client.lc)} free to spend).`, `no on-chain action yet`); } })[a]();
     render();
   }
 
