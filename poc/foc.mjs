@@ -104,7 +104,7 @@ export async function registerProvider(ctx, provider, C, ABI, serviceURL) {
     ipniPiece: false, ipniIpfs: false,
   });
   const r = await write(ctx, provider, C.registry, ABI.ServiceProviderRegistry, "registerProvider",
-    [provider, "PieceWork demo provider", "Compute over PDP data (proof of concept)", 0, keys, values], parseEther("5"));
+    [provider, "PieceWork_demo", "Compute over PDP data (proof of concept, not a storage service)", 0, keys, values], parseEther("5"));
   const providerId = await ctx.pub.readContract({ address: C.registry, abi: ABI.ServiceProviderRegistry,
     functionName: "getProviderIdByAddress", args: [provider] });
   return { providerId, receipt: r };
