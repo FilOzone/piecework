@@ -138,8 +138,9 @@ footer{color:var(--ink-3);font-size:.85rem;display:flex;flex-direction:column;ga
 
 <div class="wrap">
   <header>
-    <div class="eyebrow">Prototype · Filecoin Onchain Cloud</div>
+    <div class="eyebrow">Prototype · Filecoin Onchain Cloud · full experience</div>
     <h1>PieceWork<span class="tag">Compute where your data already lives</span></h1>
+    <p class="lede" style="margin-top:6px">New here? <a href="https://claude.ai/artifact/5Yo8q412LUwEZM9SmFuWst" target="_blank" rel="noopener">Start with the 2-minute explainer</a>.</p>
     <p class="lede">Your files are stored on Filecoin by a storage provider, who proves every day that it still has them. With PieceWork the same provider can also <b>work on your files right where they are</b> — no downloading, no moving data — and you pay from your wallet through <b>Filecoin Pay</b>, a payment contract that enforces the rules for both sides.</p>
   </header>
 
@@ -156,7 +157,6 @@ footer{color:var(--ink-3);font-size:.85rem;display:flex;flex-direction:column;ga
       <button class="tab" role="tab" id="tab-session" aria-selected="true">Rent a service <small>· pay for time</small></button>
       <button class="tab" role="tab" id="tab-job" aria-selected="false">Order a job <small>· pay per job</small></button>
     </div>
-    <button class="b" id="reset">Start over</button>
   </div>
 
   <div class="grid">
@@ -284,7 +284,7 @@ footer{color:var(--ink-3);font-size:.85rem;display:flex;flex-direction:column;ga
       const need = w.svc.rate * w.L;
       if (!fullyFunded(w) || w.client.funds < w.client.lc + need) {
         w.phase = "failed";
-        log(w, "err", `The service could not start: your wallet needs at least ${usd(need)} free for the safety margin. Start over and pick a cheaper service or add money.`,
+        log(w, "err", `The service could not start: your wallet needs at least ${usd(need)} free for the safety margin. Try again with a cheaper service.`,
           `PieceWork.sessionReady() reverts: FilecoinPay.modifyRailPayment needs a fully funded payer`);
         return;
       }
@@ -396,7 +396,7 @@ footer{color:var(--ink-3);font-size:.85rem;display:flex;flex-direction:column;ga
         case "done": return w.stopped && w.scenario !== "low"
           ? { t: `Done. You paid for ${mins(w.stopped - w.started)} of service and nothing more; the rest of your money is free again. Try the scenario "Wallet low on money" (Settings) to see what protects the provider.`, next: null }
           : { t: `Done. The provider was paid for the time your money covered plus the safety margin, and nothing more. The margin is what makes it safe for providers to serve without asking you to prepay.`, next: null };
-        case "failed": return { t: `The service could not start (see the log below). Press Start over.`, next: null };
+        case "failed": return { t: `The service could not start (see the log below). Use the button below to try again.`, next: null };
       }
     } else {
       const late = w.job && w.epoch > w.job.deadline;
@@ -524,7 +524,7 @@ footer{color:var(--ink-3);font-size:.85rem;display:flex;flex-direction:column;ga
 
   function render() {
     const w = W(), st = story(w);
-    $("actions").innerHTML = `<div class="story" role="status"><span class="lbl">What is happening</span>${st.t}</div>` + (w.kind === "session" ? actionsSession(w) : actionsJob(w));
+    $("actions").innerHTML = `<div class="story" role="status"><span class="lbl">What is happening</span>${st.t}${["done", "paid", "expired", "failed"].includes(w.phase) ? `<div style="margin-top:10px"><button class="b primary" data-a="again">${w.kind === "session" ? "Rent again" : "Order another job"}</button></div>` : ""}</div>` + (w.kind === "session" ? actionsSession(w) : actionsJob(w));
     const c = w.client, avail = c.funds - c.lc;
     $("acc-client").innerHTML = `<h3>Your wallet <span class="muted">money in Filecoin Pay</span></h3>${kv([["Total", usd(c.funds)], ["Set aside (can't spend)", usd(c.lc)], ["Free to spend", usd(avail)]])}
       <div class="meter" title="Share set aside"><span style="width:${c.funds ? Math.min(100, 100 * c.lc / c.funds).toFixed(1) : 0}%"></span></div>`;
@@ -543,11 +543,10 @@ footer{color:var(--ink-3);font-size:.85rem;display:flex;flex-direction:column;ga
 
   function act(a) {
     const w = W();
-    ({ open: () => S.open(w), use: () => S.use(w), stop: () => S.stopByYou(w), post: () => J.post(w), expire: () => J.expire(w) })[a]();
+    ({ open: () => S.open(w), use: () => S.use(w), stop: () => S.stopByYou(w), post: () => J.post(w), expire: () => J.expire(w), again: () => { worlds[mode] = makeWorld(mode, w.scenario, w.svc.key); } })[a]();
     render();
   }
 
-  $("reset").onclick = () => { const w = W(); worlds[mode] = makeWorld(mode, w.scenario, w.svc.key); render(); };
   function setMode(m) { mode = m; $("tab-session").setAttribute("aria-selected", String(m === "session")); $("tab-job").setAttribute("aria-selected", String(m === "job")); render(); }
   $("tab-session").onclick = () => setMode("session");
   $("tab-job").onclick = () => setMode("job");

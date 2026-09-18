@@ -99,7 +99,8 @@ button.b{font:600 1rem var(--body);border:1px solid var(--line);background:var(-
 button.b.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
 button.b:disabled{opacity:.4;cursor:not-allowed}
 button.b:hover:not(:disabled){border-color:var(--accent)}
-button:focus-visible,.choice:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+a.b{display:inline-block;text-decoration:none;text-align:center}
+button:focus-visible,.choice:focus-visible,a.b:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .progress{height:8px;border-radius:99px;background:var(--line);overflow:hidden}
 .progress span{display:block;height:100%;background:var(--accent);transition:width .35s}
 footer{color:var(--ink-3);font-size:.85rem;display:flex;flex-direction:column;gap:4px}
@@ -265,7 +266,7 @@ footer{color:var(--ink-3);font-size:.85rem;display:flex;flex-direction:column;ga
     st = fresh();
     document.getElementById("app").innerHTML = `
       <header style="display:flex;flex-direction:column;gap:10px">
-        <div class="eyebrow">Filecoin Onchain Cloud · prototype</div>
+        <div class="eyebrow">Filecoin Onchain Cloud · prototype · 2-minute explainer</div>
         <h1>PieceWork</h1>
         <p class="lede"><b>Compute where your data already lives.</b> The storage provider that keeps your files on Filecoin (in a PDP data set, proven daily) can also work on them — right where they are — and Filecoin Pay makes sure everyone is paid fairly.</p>
       </header>
@@ -273,8 +274,9 @@ footer{color:var(--ink-3);font-size:.85rem;display:flex;flex-direction:column;ga
         <button class="choice" data-s="A"><span class="k">Pay for time</span><h3>Rent an AI assistant for your documents</h3><p>Like a taxi meter: pay every 30 seconds while you use it, stop whenever you want.</p><span class="go">Start · 5 short steps →</span></button>
         <button class="choice" data-s="B"><span class="k">Pay per job</span><h3>Order a job on your files</h3><p>Like a print shop: pay once, and only if the result is delivered on time.</p><span class="go">Start · 5 short steps →</span></button>
       </div>
+      <div class="nav"><span style="color:var(--ink-2)">Two short stories explain the idea. Then try it yourself.</span><span class="sp"></span><a class="b primary" href="${EXPLORER}" target="_blank" rel="noopener">Try the full experience →</a></div>
       <section class="card" style="display:flex;flex-direction:column;gap:8px"><h3 style="font-size:1.05rem">Good to know</h3><div class="text" style="max-width:none"><p><b>AI agents can use it too.</b> An agent can rent a service or order a job on your behalf through an API, paying from your Filecoin Pay balance within the limits you set.</p><p><b>Quality is not checked — yet.</b> Like commercial GPU clouds, the contract guarantees delivery on time and a fair charge, not the quality of the result. Proofs of correct execution can be added later: zero-knowledge proofs for simple jobs, secure hardware (TEEs) for AI workloads.</p></div></section>
-      <footer><span>A simulation: no real money, no wallet needed. The payment rules follow the real Filecoin Pay contract.</span><span>Want every detail? <a href="${EXPLORER}" target="_blank" rel="noopener">Open the detailed simulator</a>.</span></footer>`;
+      <footer><span>A simulation: no real money, no wallet needed. The payment rules follow the real Filecoin Pay contract.</span><span>Ready to try it yourself? <a href="${EXPLORER}" target="_blank" rel="noopener">Open the full experience</a> — pick services, watch your files and every payment.</span></footer>`;
     document.querySelectorAll("[data-s]").forEach(b => b.onclick = () => { st.story = b.dataset.s; st.i = 0; show(); });
   }
 
@@ -294,12 +296,12 @@ footer{color:var(--ink-3);font-size:.85rem;display:flex;flex-direction:column;ga
         <div class="nav">
           <button class="b" id="back" ${st.i === 0 ? "disabled" : ""}>Back</button><span class="sp"></span>
           ${s.again ? `<button class="b primary" id="again">${s.again}</button>` : ""}
-          ${s.bonus ? `<button class="b" id="bonus">${s.bonus.label}</button><button class="b" id="other">${st.story === "A" ? "Go to pay per job" : "Go to pay for time"}</button>` : ""}
+          ${s.bonus ? `<a class="b" href="${EXPLORER}" target="_blank" rel="noopener">Try the full experience →</a><button class="b" id="bonus">${s.bonus.label}</button><button class="b" id="other">${st.story === "A" ? "Go to pay per job" : "Go to pay for time"}</button>` : ""}
           ${!s.bonus && !s.hideNext && st.i < mainSteps - 1 ? `<button class="b primary" id="next" ${s.nextDisabled ? "disabled" : ""}>Next</button>` : ""}
           ${st.i >= mainSteps ? `<button class="b primary" id="other">${st.story === "A" ? "Go to pay per job" : "Go to pay for time"}</button>` : ""}
         </div>
       </section>
-      <footer><span>A simulation: no real money. The payment rules follow the real Filecoin Pay contract. <a href="${EXPLORER}" target="_blank" rel="noopener">Detailed simulator</a>.</span></footer>`;
+      <footer><span>A simulation: no real money. The payment rules follow the real Filecoin Pay contract. <a href="${EXPLORER}" target="_blank" rel="noopener">Try the full experience</a>.</span></footer>`;
     const on = (id, fn) => { const e = document.getElementById(id); if (e) e.onclick = fn; };
     on("home", home);
     on("back", () => { st.i = st.i >= mainSteps ? mainSteps - 1 : st.i - 1; if (st.story === "A" && st.i <= 2) { st.ticks = 0; st.asked = 0; } if (st.story === "B" && st.i <= 2) st.jobTicks = 0; show(); });
