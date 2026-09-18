@@ -201,13 +201,13 @@ footer{color:var(--ink-3);font-size:.85rem;display:flex;flex-direction:column;ga
     { id: 4, name: "launch-event.mp4", size: "3.4 GiB", cid: "bafkzcibk5r…7vyd" }
   ]);
   const SESSION_SVCS = [
-    { key: "assistant", name: "AI assistant over your documents", desc: "An AI model that the provider runs on its own machine, next to your files, so it can answer questions about them. Needs a GPU.", rate: 16667, reads: [1, 2, 3], action: "Ask a question",
+    { key: "assistant", name: "AI assistant over your files", desc: "An AI model that the provider runs on its own machine, next to your files, so it can answer questions about them. Needs a GPU.", rate: 16667, reads: [1, 2, 3], action: "Ask a question",
       uses: [["What is our refund policy?", [1, 2]], ["Summarize last month's top complaints", [2]], ["What did we decide about the launch date?", [3]], ["Which manual covers the X200 pump?", [1]]] },
     { key: "workspace", name: "Data analysis workspace", desc: "A workspace on the provider's machine where you (or your data team) run your own analysis directly on your files — charts, counts, statistics — without downloading them. Runs on a CPU.", rate: 4167, reads: [1, 2, 3, 4], action: "Run an analysis",
       uses: [["Count tickets by product", [2]], ["Plot tickets per week", [2]], ["Extract frames from the launch video", [4]], ["Word frequency across meeting notes", [3]]] }
   ];
   const JOB_SVCS = [
-    { key: "index", name: "Index documents for AI search", desc: "Reads your documents and builds a search index an AI can use (embeddings).", price: 500000, inputs: [1, 2], outputs: [["search-index.parquet", "310 MiB"]] },
+    { key: "index", name: "Index files for AI search", desc: "Reads your files and builds a search index an AI can use (embeddings).", price: 500000, inputs: [1, 2], outputs: [["search-index.parquet", "310 MiB"]] },
     { key: "video", name: "Make streaming versions of a video", desc: "Converts your video into three sizes for smooth playback.", price: 1200000, inputs: [4], outputs: [["launch-event-1080p.mp4", "1.9 GiB"], ["launch-event-720p.mp4", "980 MiB"], ["launch-event-480p.mp4", "420 MiB"]] },
     { key: "summary", name: "Summarize meeting notes", desc: "Produces a one-page summary of all your meeting notes.", price: 200000, inputs: [3], outputs: [["meeting-summary.md", "12 KiB"]] }
   ];

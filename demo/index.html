@@ -146,9 +146,9 @@ footer{color:var(--ink-3);font-size:.85rem;display:flex;flex-direction:column;ga
   const A = [
     () => ({
       title: "Your files are already stored on Filecoin",
-      text: `<p>You keep your company documents on Filecoin with a <b>storage provider</b>, in a <b>PDP data set</b>: with PDP (Proof of Data Possession), the provider proves on-chain, every day, that it still holds every file.</p>
+      text: `<p>You keep your company files on Filecoin with a <b>storage provider</b>, in a <b>PDP data set</b>: with PDP (Proof of Data Possession), the provider proves on-chain, every day, that it still holds every file.</p>
              <p>You have already <b>deposited ${money(WALLET)} USDFC</b> (a dollar stablecoin) from your crypto wallet into <b>Filecoin Pay</b>, the payment contract between you and providers — like topping up a prepaid account. Providers can only be paid from it according to rules you agreed to.</p>
-             <p>Now you'd like an <b>AI assistant</b> that can answer questions about these documents — without downloading them anywhere.</p>`,
+             <p>Now you'd like an <b>AI assistant</b> that can answer questions about these files — without downloading them anywhere.</p>`,
       scene: { you: WALLET, pay: 0, payLabel: "nothing held yet", prov: 0 }
     }),
     () => ({
@@ -210,7 +210,7 @@ footer{color:var(--ink-3);font-size:.85rem;display:flex;flex-direction:column;ga
   };
   const B = [
     () => ({
-      title: "You need a search index of your documents",
+      title: "You need a search index of your files",
       text: `<p>You want an AI to be able to search your manuals and support tickets. That means building a <b>search index</b> — a job that reads ~3 GB of files.</p>
              <p>Instead of downloading everything, you ask the <b>storage provider</b> — which keeps these files in your PDP data set — to do it where the files already are, and pay <b>once</b> when it's done. You pay from the ${money(WALLET)} USDFC you have deposited in <b>Filecoin Pay</b>.</p>`,
       scene: { you: WALLET, pay: 0, payLabel: "nothing held yet", prov: 0 }
@@ -271,7 +271,7 @@ footer{color:var(--ink-3);font-size:.85rem;display:flex;flex-direction:column;ga
         <p class="lede"><b>Compute where your data already lives.</b> The storage provider that keeps your files on Filecoin (in a PDP data set, proven daily) can also work on them — right where they are — and Filecoin Pay makes sure everyone is paid fairly.</p>
       </header>
       <div class="choices">
-        <button class="choice" data-s="A"><span class="k">Pay for time</span><h3>Rent an AI assistant for your documents</h3><p>Like a taxi meter: pay every 30 seconds while you use it, stop whenever you want.</p><span class="go">Start · 5 short steps →</span></button>
+        <button class="choice" data-s="A"><span class="k">Pay for time</span><h3>Rent an AI assistant for your files</h3><p>Like a taxi meter: pay every 30 seconds while you use it, stop whenever you want.</p><span class="go">Start · 5 short steps →</span></button>
         <button class="choice" data-s="B"><span class="k">Pay per job</span><h3>Order a job on your files</h3><p>Like a print shop: pay once, and only if the result is delivered on time.</p><span class="go">Start · 5 short steps →</span></button>
       </div>
       <div class="nav"><span style="color:var(--ink-2)">Two short stories explain the idea. Then try it yourself.</span><span class="sp"></span><a class="b primary" href="${EXPLORER}" target="_blank" rel="noopener">Try the full experience →</a></div>
