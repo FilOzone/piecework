@@ -2,8 +2,10 @@
 //
 // One program that:
 //   1. starts a private local blockchain (anvil, 1 block = 1 epoch = 1 second here; 30 s on Filecoin),
-//   2. installs the real FilecoinPayV1 (FilOzone/filecoin-pay @ 04ded6a), a test luca_usdfc token,
-//      MockPDP (stand-in for PDPVerifier) and our ComputeService,
+//   2. installs the real FOC contracts at the versions deployed on calibnet and mainnet
+//      (FWSS v1.4.0 with its PDPVerifier, provider registry, session keys, Filecoin Pay v1.0.0; see foc.mjs),
+//      a test token luca_usdfc, and our ComputeService; the client's data set is a real FWSS data set,
+//      created with the client's signature, with real piece CIDs (CommPv2) computed from the files,
 //   3. plays the storage provider: holds the client's data set, starts services, runs jobs in
 //      containers (Docker), stores outputs as new pieces and gets paid through Filecoin Pay,
 //   4. serves the demo page on http://localhost:8080, whose buttons send real transactions.
@@ -22,6 +24,7 @@ import {
   createPublicClient, createWalletClient, http as rpc, parseUnits, formatUnits, keccak256, toHex, BaseError, getAddress,
 } from "viem";
 import { foundry } from "viem/chains";
+import * as FOC from "./foc.mjs";
 
 const execFile = promisify(execFileCb);
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -130,11 +133,11 @@ async function startChain() {
   A = { deployer, client, provider };
 }
 
-async function send(account, address, abi, functionName, args = [], what = functionName) {
+async function send(account, address, abi, functionName, args = [], what = functionName, value) {
   return serial(account, async () => {
     // dry run first: if the contract would refuse, we get its reason instead of a failed transaction
-    const { request } = await pub.simulateContract({ account, address, abi: withErrors(abi), functionName, args });
-    const hash = await wallet.writeContract({ ...request, abi, chain: foundry, gas: 5_000_000n }); // estimates can be too low (nested Filecoin Pay calls)
+    const { request } = await pub.simulateContract({ account, address, abi: withErrors(abi), functionName, args, value });
+    const hash = await wallet.writeContract({ ...request, abi, chain: foundry, gas: 15_000_000n }); // estimates can be too low (nested Filecoin Pay calls)
     const rcpt = await pub.waitForTransactionReceipt({ hash });
     if (rcpt.status !== "success") throw new Error(`${what} reverted`);
     return { what, fn: functionName, tx: hash, block: Number(rcpt.blockNumber), receipt: rcpt };
@@ -153,46 +156,80 @@ async function deploy(name, args = []) {
 async function installContracts() {
   say("Compiling contracts…");
   await execFile("forge", ["build"], { cwd: CONTRACTS, env: { ...process.env, PATH: ENV_PATH } });
-  C = {};
-  C.usdfc = await deploy("MockERC20", ["luca_usdfc (local test token standing in for USDFC)", "luca_usdfc"]);
-  C.payments = await deploy("FilecoinPayV1");
-  C.pdp = await deploy("MockPDP");
-  C.cs = await deploy("ComputeService", [C.payments, C.usdfc, C.pdp, "0x0000000000000000000000000000000000000000"]); // no session-key registry locally
-  await send(A.deployer, C.usdfc, ABI.MockERC20, "mint", [A.client, PARAMS.walletStart]);
+  await execFile("forge", ["build"], { cwd: path.join(HERE, "..", "integration"), env: { ...process.env, PATH: ENV_PATH } });
+  const usdfc = await deploy("MockERC20", ["luca_usdfc (local test token standing in for USDFC)", "luca_usdfc"]);
+  const foc = await FOC.deployLocal({ pub, wallet, chain: foundry, deployer: A.deployer, usdfc });
+  C = foc.C;
+  Object.assign(ABI, foc.ABI);
+  // the client's wallet (for compute) plus what it already pays for storage
+  await send(A.deployer, C.usdfc, ABI.MockERC20, "mint", [A.client, PARAMS.walletStart + STORAGE_BUDGET]);
   say("Installed:", C);
 }
 
 // ---------------------------------------------------------------- provider: data set
 
-let dataSetId;
+// Before the demo starts, the client already stores its files with this provider (a real FWSS data set):
+//   the client deposits a storage budget and approves FWSS; the provider registers in the registry,
+//   creates the data set with the client's signature and adds the files as pieces (client-signed).
+const STORAGE_BUDGET = U(1);
+const STORAGE_BUFFER = U("0.05"); // free funds left for storage fees when outputs are added
+let dataSetId, clientDataSetId;
+const pieces = {}; // pieceId -> { name, cid, kind }
+const signerFor = (account) => ({ signTypedData: (args) => wallet.signTypedData({ account, ...args }) });
+
 async function createDataSet() {
   fs.rmSync(RUN, { recursive: true, force: true });
   fs.mkdirSync(STORAGE, { recursive: true });
-  const r = await send(A.provider, C.pdp, ABI.MockPDP, "createDataSet");
-  dataSetId = await read(C.pdp, ABI.MockPDP, "nextDataSetId") - 1n;
+  const chainId = foundry.id;
+  // client: storage budget in Filecoin Pay, FWSS approved as operator
+  await send(A.client, C.usdfc, ABI.MockERC20, "approve", [C.payments, STORAGE_BUDGET]);
+  await send(A.client, C.payments, ABI.FilecoinPayV1, "deposit", [C.usdfc, A.client, STORAGE_BUDGET]);
+  await send(A.client, C.payments, ABI.FilecoinPayV1, "setOperatorApproval", [C.usdfc, C.fwss, true, U(1), U(1), 1n << 40n]);
+  // provider: register (PDP offering), then create the client's data set with the client's signature
+  await FOC.registerProvider({ pub, wallet, chain: foundry }, A.provider, C, ABI, `http://localhost:${WEB_PORT}`);
+  clientDataSetId = FOC.randomNonce();
+  const sig = await FOC.signCreateDataSet(signerFor(A.client), { chainId, fwss: C.fwss, clientDataSetId, payee: A.provider });
+  dataSetId = BigInt(await read(C.pdp, ABI.PDPVerifier, "getNextDataSetId"));
+  const deposit = await read(C.pdp, ABI.PDPVerifier, "FIL_CLEANUP_DEPOSIT");
+  const r = await send(A.provider, C.pdp, ABI.PDPVerifier, "createDataSet",
+    [C.fwss, FOC.createDataSetExtraData(A.client, clientDataSetId, sig)], "create data set", deposit);
   const src = path.join(HERE, "data", "dataset");
   for (const f of fs.readdirSync(src).sort()) {
     fs.copyFileSync(path.join(src, f), path.join(STORAGE, f));
-    await addPiece(f, "input");
+    await addPiece(f, "input", A.client);
+  }
+  // keep only the storage reserve plus a small buffer in Filecoin Pay; the rest goes back (so the wallet shows
+  // exactly PARAMS.walletStart and "money runs out" is quick to demo)
+  const [, , available] = await read(C.payments, ABI.FilecoinPayV1, "getAccountInfoIfSettled", [C.usdfc, A.client]);
+  const extra = available - STORAGE_BUFFER;
+  if (extra > 0n) {
+    await send(A.client, C.payments, ABI.FilecoinPayV1, "withdraw", [C.usdfc, extra]);
+    await send(A.client, C.usdfc, ABI.MockERC20, "transfer", [A.deployer, extra]);
   }
   return r;
 }
-const pieceKind = {}; // pieceId -> "input" | "output"
-async function addPiece(name, kind) {
-  const bytes = fs.readFileSync(path.join(STORAGE, name));
-  const cid = "sha256-" + crypto.createHash("sha256").update(bytes).digest("hex").slice(0, 24);
-  const pieceId = await read(C.pdp, ABI.MockPDP, "getNextPieceId", [dataSetId]);
-  const r = await send(A.provider, C.pdp, ABI.MockPDP, "addPiece", [dataSetId, name, cid], `add piece ${name}`);
-  pieceKind[pieceId] = kind;
-  return { pieceId, cid, ...r };
+
+// Add a file of the provider's storage as a new piece of the client's data set.
+// `signer` signs the FWSS AddPieces message: the client for its own files, the provider for job outputs
+// (accepted by FWSS only through ComputeService's authorizer, while a job is open).
+async function addPiece(name, kind, signer) {
+  const cid = await FOC.pieceCid(fs.readFileSync(path.join(STORAGE, name)));
+  const nonce = FOC.randomNonce();
+  const sig = await FOC.signAddPieces(signerFor(signer), { chainId: foundry.id, fwss: C.fwss, clientDataSetId, nonce, cids: [cid.hex] });
+  const pieceId = await read(C.pdp, ABI.PDPVerifier, "getNextPieceId", [dataSetId]);
+  const r = await send(A.provider, C.pdp, ABI.PDPVerifier, "addPieces",
+    [dataSetId, "0x0000000000000000000000000000000000000000", [{ data: cid.hex }], FOC.addPiecesExtraData(nonce, sig)], `add piece ${name}`);
+  pieces[pieceId] = { name, cid: cid.text, kind };
+  return { pieceId, cid: cid.text, ...r };
 }
 async function listFiles() {
-  const n = await read(C.pdp, ABI.MockPDP, "getNextPieceId", [dataSetId]);
+  const n = await read(C.pdp, ABI.PDPVerifier, "getNextPieceId", [dataSetId]);
   const out = [];
   for (let i = 0n; i < n; i++) {
-    const [name, cid, live] = await read(C.pdp, ABI.MockPDP, "getPiece", [dataSetId, i]);
-    const size = fs.existsSync(path.join(STORAGE, name)) ? fs.statSync(path.join(STORAGE, name)).size : 0;
-    out.push({ pieceId: Number(i), name, cid, live, size, kind: pieceKind[i] ?? "input" });
+    const live = await read(C.pdp, ABI.PDPVerifier, "pieceLive", [dataSetId, i]);
+    const p = pieces[i] ?? { name: `piece ${i}`, cid: "", kind: "input" };
+    const size = fs.existsSync(path.join(STORAGE, p.name)) ? fs.statSync(path.join(STORAGE, p.name)).size : 0;
+    out.push({ pieceId: Number(i), name: p.name, cid: p.cid, live, size, kind: p.kind });
   }
   return out;
 }
@@ -307,8 +344,8 @@ async function runJob(jobId, spec, inputPieceIds, deadline) {
   fs.mkdirSync(path.join(dir, "in"), { recursive: true });
   fs.mkdirSync(path.join(dir, "out"), { recursive: true });
   for (const id of inputPieceIds) {
-    const [name] = await read(C.pdp, ABI.MockPDP, "getPiece", [dataSetId, id]);
-    if (spec.inputs(name)) fs.copyFileSync(path.join(STORAGE, name), path.join(dir, "in", name));
+    const name = pieces[id]?.name;
+    if (name && spec.inputs(name)) fs.copyFileSync(path.join(STORAGE, name), path.join(dir, "in", name));
   }
   J.stage = "running";
   plog(`Job #${jobId}: running the program in a container on your files (no network, read-only inputs)…`);
@@ -325,7 +362,12 @@ async function runJob(jobId, spec, inputPieceIds, deadline) {
   while (fs.existsSync(path.join(STORAGE, out))) out = spec.output.replace(/(\.[^.]+)$/, ` (${k++})$1`);
   fs.copyFileSync(path.join(dir, "out", spec.output), path.join(STORAGE, out));
   J.stage = "storing";
-  const p = await addPiece(out, "output");
+  let p;
+  try { p = await addPiece(out, "output", A.provider); }
+  catch (e) {
+    J.stage = "blocked";
+    return plog(`Job #${jobId}: FWSS refused to add the result to your data set (${reason(e)}). Did you let the compute service deliver results into your data set? (step 1)`);
+  }
   J.output = { name: out, pieceId: Number(p.pieceId), cid: p.cid };
   plog(`Job #${jobId}: result "${out}" added to your data set as piece #${p.pieceId}.`, p);
   const r = await send(A.provider, C.cs, ABI.ComputeService, "commitOutputs", [jobId, [p.pieceId]]);
@@ -379,6 +421,8 @@ const client = {
       await send(A.client, C.payments, ABI.FilecoinPayV1, "setOperatorApproval",
         [C.usdfc, C.cs, true, rateAllowance, lockupAllowance, maxLockupPeriod],
         `Let the compute service open payments for you, up to ${fmt(rateAllowance)} luca_usdfc/epoch and ${fmt(lockupAllowance)} luca_usdfc on hold`),
+      await send(A.client, C.fwss, ABI.FilecoinWarmStorageService, "setDataSetAuthorizer", [dataSetId, C.cs],
+        `Let providers deliver job results into your data set #${dataSetId}, only while you have a job open with them`),
     ];
   },
   async deposit({ amount }) {
@@ -468,7 +512,8 @@ function serve() {
       if (req.method === "GET" && url.pathname === "/api/state") return json(200, await state());
       if (req.method === "GET" && url.pathname.startsWith("/api/file/")) {
         const id = BigInt(url.pathname.split("/").pop());
-        const [name] = await read(C.pdp, ABI.MockPDP, "getPiece", [dataSetId, id]);
+        const name = pieces[id]?.name;
+        if (!name) { res.writeHead(404); return res.end("unknown piece"); }
         res.writeHead(200, { "content-type": "text/plain; charset=utf-8" });
         return res.end(fs.readFileSync(path.join(STORAGE, name)));
       }
@@ -507,7 +552,7 @@ async function main() {
   await startChain();
   await installContracts();
   const r = await createDataSet();
-  plog(`I hold your data set #${dataSetId} (${(await listFiles()).length} files, proofs of possession simulated: I act as an honest provider that proves every period).`, r);
+  plog(`I hold your data set #${dataSetId} on FWSS (${(await listFiles()).length} files; storage paid through Filecoin Pay; proofs of possession simulated: I act as an honest provider that proves every period).`, r);
   lastBlock = await pub.getBlockNumber();
   eventLoop();
   serve();

@@ -174,7 +174,7 @@ body.down .offline{display:block}
 
   <footer>
     <div>Local chain: 1 block = 1 epoch = 1 second here (30 seconds on Filecoin). luca_usdfc is a local test token with no value, standing in for USDFC (the dollar stablecoin used by Filecoin Pay).</div>
-    <div>Real: Filecoin Pay (FilOzone/filecoin-pay @ 04ded6a), ComputeService, the containers. Stand-ins: PDP is simulated by a small contract, piece ids are content hashes. Proofs of possession are not run: the provider is assumed to be a real, honest provider that proves every period (the "PDP proof ✓" line is simulated).</div>
+    <div>Real: the FOC contracts at the versions deployed on calibnet and mainnet (Filecoin Pay v1.0.0, PDPVerifier, FWSS v1.4.0, provider registry), ComputeService, the client's signatures, piece CIDs computed from the files, the containers. Stand-ins: the token, and proofs of possession, which are not run: the provider is assumed to be an honest provider that proves every period (the "PDP proof ✓" line is simulated).</div>
   </footer>
 </div>
 
@@ -206,7 +206,7 @@ body.down .offline{display:block}
   }
 
   const STORY = {
-    setup: () => "Your money is in Filecoin Pay, and you allowed the compute service to open payments for you, within the limits you set. Nothing is paid yet.",
+    setup: () => "Your money is in Filecoin Pay; you allowed the compute service to open payments for you, within the limits you set, and to let providers add job results to your data set while a job is open. Nothing is paid yet.",
     deposit: () => "Added to your balance in Filecoin Pay.",
     withdraw: () => "Your free balance went back to your wallet.",
     openSession: () => "You asked for a session. Filecoin Pay puts the safety margin on hold. The provider is starting the service next to your files; billing starts when it is ready.",
@@ -230,11 +230,11 @@ body.down .offline{display:block}
         <div class="note">Wallet (outside Filecoin Pay): ${m(c.wallet)} luca_usdfc${c.fundedUntil ? `<br>Funded until block ${c.fundedUntil}` : ""}</div></div>
       <div class="flow ${f1?.cls ?? ""}"><span class="arr">→</span><span>${f1?.t ?? ""}</span></div>
       <div class="actor pay"><div class="who">${icon.pay}On hold in Filecoin Pay</div>
-        <div class="big">${m(c.onHold)}</div><div class="unit">luca_usdfc held (safety margin or job price)</div></div>
+        <div class="big">${m(c.onHold)}</div><div class="unit">luca_usdfc held (safety margin, job price, and your storage reserve)</div></div>
       <div class="flow ${running ? "on" : ""}"><span class="arr">→</span><span>${running ? "paid as time passes" : ""}</span></div>
       <div class="actor prov"><div class="who">${icon.prov}Storage provider</div>
         <div class="big">${m(p.earned)}</div><div class="unit">luca_usdfc earned (in Filecoin Pay)</div>
-        <div class="note">Holds your PDP data set #${S.dataSetId}. Click a file to open it. <span style="color:var(--money)">Green</span> = results added by jobs.</div>
+        <div class="note">Holds your data set #${S.dataSetId} (FWSS, proven with PDP). Click a file to open it. <span style="color:var(--money)">Green</span> = results added by jobs.</div>
         <div class="note"><span class="pill">PDP proof ✓</span> last proven at block ${Math.floor(S.block / PROVING_PERIOD) * PROVING_PERIOD}, next at ${(Math.floor(S.block / PROVING_PERIOD) + 1) * PROVING_PERIOD} <span class="muted">(simulated: we assume an honest provider that proves every period)</span></div>
         <ul class="files">${files}</ul></div>
     </div>`;
@@ -243,10 +243,10 @@ body.down .offline{display:block}
   function moneyPanel() {
     const c = S.client, started = n(c.inFilecoinPay) > 0 || S.clientLog.length > 0;
     if (!started) return `<h2>Step 1 · Put money in Filecoin Pay</h2>
-      <p class="muted">Three transactions: allow Filecoin Pay to take the amount from your wallet, deposit it, and let the compute service open payments for you (at most ${m(0.01)} luca_usdfc per second and ${m(3)} luca_usdfc on hold).</p>
+      <p class="muted">Four transactions: allow Filecoin Pay to take the amount from your wallet, deposit it, let the compute service open payments for you (at most ${m(0.01)} luca_usdfc per second and ${m(3)} luca_usdfc on hold), and let providers add job results to your data set, only while you have a job open with them.</p>
       <div class="row">
         <button class="b primary" data-act="setup" data-amount="2" ${busy ? "disabled" : ""}>Deposit 2 luca_usdfc</button>
-        <button class="b" data-act="setup" data-amount="0.08" ${busy ? "disabled" : ""}>Deposit only 0.08 (to see what happens when money runs out)</button>
+        <button class="b" data-act="setup" data-amount="0.03" ${busy ? "disabled" : ""}>Deposit only 0.03 (to see what happens when money runs out)</button>
       </div>`;
     return `<div class="row" style="justify-content:space-between"><h2>Your money</h2><div class="row">
         <button class="b" data-act="deposit" data-amount="1" ${busy ? "disabled" : ""}>Add 1 luca_usdfc</button>
@@ -313,7 +313,7 @@ body.down .offline{display:block}
     $("scene").innerHTML = scene();
     const st = $("story");
     st.className = "story" + (message?.err ? " err" : "");
-    st.textContent = message?.text ?? (S.clientLog.length ? "" : "Your files are already stored: you have a PDP data set held by the storage provider (right). Start by putting money in Filecoin Pay.");
+    st.textContent = message?.text ?? (S.clientLog.length ? "" : "Your files are already stored: you have a data set with this storage provider (right), on FWSS, paid through Filecoin Pay. Start by putting money in Filecoin Pay for compute.");
     st.hidden = !st.textContent;
     $("money").innerHTML = moneyPanel();
     const ready = S.clientLog.length > 0;

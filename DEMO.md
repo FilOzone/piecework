@@ -11,10 +11,10 @@ To stop afterwards: close the Terminal window. Every start is a fresh chain: bal
 
 ## What to say and click
 
-**0 · The setup (15 s).** "Everything here runs on a local blockchain on my laptop, with the real Filecoin Pay contract and our ComputeService contract. The money is a test token, luca_usdfc. The storage provider on the right already holds my PDP data set: four files. It's a real program that runs jobs in containers next to my files."
+**0 · The setup (15 s).** "Everything here runs on a local blockchain on my laptop, with the real FOC contracts, the same versions as on calibnet and mainnet: Filecoin Pay, PDP, Warm Storage. Plus our ComputeService contract. The money is a test token, luca_usdfc. The storage provider on the right already holds my data set: four files, real PDP pieces. It's a real program that runs jobs in containers next to my files. Proofs are simulated: we assume an honest provider."
 
 **1 · Put money in (20 s).** Click **Deposit 2 luca_usdfc**.
-"Three transactions: allow, deposit, and let ComputeService open payments for me, within limits I set. Look at the log at the bottom: every line is a transaction."
+"Four transactions: allow, deposit, let ComputeService open payments for me within limits I set, and let providers add job results to my data set, but only while I have a job open with them. Look at the log at the bottom: every line is a transaction."
 
 **2 · Pay for time (1 min).** Tab **Pay for time** → **Start the search assistant**.
 "The provider starts a service next to my data; billing starts only when it's ready. The safety margin is on hold, not spent."
@@ -29,16 +29,16 @@ When it says *delivered and paid*, click **search-index.txt** (it's green on the
 "Deadline passed on-chain, no result, so the price comes back to me. Nobody has to trust anybody for that."
 
 **5 · What's real (20 s).** Point at the footer.
-"Real: Filecoin Pay, ComputeService, the containers, every transaction. Simulated: PDP proofs (we assume an honest provider that proves), piece IDs, the token, and time runs fast: 1 second here is 30 seconds on Filecoin."
+"Real: the FOC contracts, ComputeService, my signatures, the piece IDs, the containers, every transaction. Simulated: PDP proofs (we assume an honest provider that proves), the token, and time runs fast: 1 second here is 30 seconds on Filecoin."
 
 ## Likely questions
 
 | Question | Answer |
 |---|---|
-| Is this on Filecoin? | Not yet: a local chain with the real contracts. Next step is calibnet (the public test network), where ComputeService is the only new contract. |
+| Is this on Filecoin? | Not yet: a local chain with the same contracts as on Filecoin. Next step is calibnet (the public test network), where ComputeService is the only new contract. |
 | Who checks the result is correct? | Nobody, by design, like GPU clouds. Verification (e.g. Zen's zk proofs) can be added later as a job type. |
 | How does the provider put results in my data set? | I attach ComputeService as my data set's authorizer in FWSS; it lets the provider add pieces only while I have a job open with it. Tested against the real FWSS v1.4.0. |
-| What if my money runs out during a session? | Deposit only 0.08 and start a session: when money runs out, the provider stops and collects the safety margin, never more. |
+| What if my money runs out during a session? | Deposit only 0.03 and start a session: when money runs out, the provider stops and collects the safety margin, never more. |
 | Relation to Rod's Compute over FOC? | Same architecture (compute where the data is, paid via Filecoin Pay); PieceWork drops redundant execution, so any workload runs, and adds pay-for-time sessions. |
 
 ## If something goes wrong

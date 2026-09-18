@@ -2,6 +2,11 @@
   "name": "foc-compute-poc",
   "private": true,
   "type": "module",
-  "scripts": { "start": "node start.mjs" },
-  "dependencies": { "viem": "^2.21.0" }
+  "scripts": {
+    "start": "node start.mjs"
+  },
+  "dependencies": {
+    "@filoz/synapse-core": "^0.9.0",
+    "viem": "^2.21.0"
+  }
 }
