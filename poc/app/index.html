@@ -1,0 +1,379 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PieceWork Live</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚙️</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700;800&family=Source+Sans+3:wght@400;600&family=JetBrains+Mono:wght@500;600&display=swap">
+<style>
+
+:root{
+  --ground:#EEF3F8; --surface:#FFFFFF; --surface-2:#F5F8FC; --line:#D5DFEA;
+  --ink:#0E1A2B; --ink-2:#4A5A70; --ink-3:#7A889B;
+  --accent:#0A74E8; --accent-ink:#FFFFFF; --accent-soft:#E1EEFD;
+  --money:#0B8F7F; --money-soft:#DDF3EF;
+  --warn:#A86200; --warn-soft:#FDF0DA;
+  --mono:"JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --body:"Source Sans 3", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --display:"Archivo", "Source Sans 3", system-ui, sans-serif;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --ground:#0A111C; --surface:#111B2A; --surface-2:#0E1724; --line:#243349;
+    --ink:#E4ECF6; --ink-2:#A6B4C7; --ink-3:#7485A0;
+    --accent:#4C9DFF; --accent-ink:#06121F; --accent-soft:#132A47;
+    --money:#3CC7B3; --money-soft:#0F2E2B;
+    --warn:#F0AE4A; --warn-soft:#33250F;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#0A111C; --surface:#111B2A; --surface-2:#0E1724; --line:#243349;
+  --ink:#E4ECF6; --ink-2:#A6B4C7; --ink-3:#7485A0;
+  --accent:#4C9DFF; --accent-ink:#06121F; --accent-soft:#132A47;
+  --money:#3CC7B3; --money-soft:#0F2E2B;
+  --warn:#F0AE4A; --warn-soft:#33250F;
+  color-scheme: dark;
+}
+*{box-sizing:border-box}
+body{background:var(--ground);color:var(--ink);font:17px/1.55 var(--body);margin:0;padding:28px 16px 48px}
+.wrap{max-width:940px;margin:0 auto;display:flex;flex-direction:column;gap:22px}
+h1,h2,h3{font-family:var(--display);margin:0;text-wrap:balance}
+h1{font-size:clamp(2.1rem,5vw,3rem);font-weight:800;letter-spacing:-.02em;line-height:1.05}
+h2{font-size:clamp(1.35rem,3vw,1.7rem);font-weight:700;letter-spacing:-.01em}
+.eyebrow{font:600 .75rem/1 var(--body);letter-spacing:.08em;text-transform:uppercase;color:var(--accent)}
+.lede{color:var(--ink-2);max-width:62ch;margin:0}
+a{color:var(--accent)}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px}
+.choices{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px}
+.choice{text-align:left;font:inherit;color:inherit;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:20px;cursor:pointer;display:flex;flex-direction:column;gap:8px}
+.choice:hover{border-color:var(--accent)}
+.choice .k{font:600 .75rem var(--body);letter-spacing:.08em;text-transform:uppercase;color:var(--accent)}
+.choice h3{font-size:1.25rem}
+.choice p{margin:0;color:var(--ink-2)}
+.choice .go{margin-top:6px;font-weight:600;color:var(--accent)}
+.scene{display:grid;grid-template-columns:1fr auto 1fr auto 1fr;align-items:stretch;gap:10px}
+.actor{border:1px solid var(--line);border-radius:12px;padding:14px;background:var(--surface-2);display:flex;flex-direction:column;gap:6px;min-width:0}
+.actor .who{display:flex;align-items:center;gap:8px;font:600 .8rem var(--body);letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3)}
+.actor .who svg{width:20px;height:20px;flex:none;color:var(--ink-2)}
+.actor .big{font:600 1.6rem var(--mono);font-variant-numeric:tabular-nums;line-height:1.1}
+.actor .unit{font:500 .8rem var(--mono);color:var(--ink-3)}
+.actor .note{color:var(--ink-2);font-size:.9rem}
+.actor.hl{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.actor.pay .big{color:var(--warn)}
+.actor.prov .big{color:var(--money)}
+.flow{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;min-width:74px;text-align:center;font-size:.78rem;color:var(--ink-3)}
+.flow .arr{font:700 1.4rem var(--body);color:var(--line)}
+.flow.on .arr{color:var(--money)}
+.flow.on{color:var(--money);font-weight:600}
+.flow.back .arr{color:var(--accent)}
+.flow.back{color:var(--accent);font-weight:600}
+@media (max-width:720px){
+  .scene{grid-template-columns:1fr}
+  .flow{flex-direction:row;min-width:0;gap:8px}
+  .flow .arr{transform:rotate(90deg)}
+}
+.files{list-style:none;margin:4px 0 0;padding:0;display:flex;flex-direction:column;gap:3px;font-size:.86rem}
+.files li{display:flex;justify-content:space-between;gap:8px}
+.files .sz{font:.78rem var(--mono);color:var(--ink-3);white-space:nowrap}
+.files li.new{color:var(--money);font-weight:600}
+.files li.busy{color:var(--warn)}
+.files li.done::after{content:" ✓";color:var(--money)}
+.text{display:flex;flex-direction:column;gap:10px;max-width:68ch}
+.text p{margin:0;color:var(--ink-2)}
+.text b{color:var(--ink)}
+.live{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+.stat{border-radius:10px;padding:10px 14px;background:var(--surface-2);border:1px solid var(--line)}
+.stat .l{font-size:.8rem;color:var(--ink-3)}
+.stat .v{font:600 1.35rem var(--mono);font-variant-numeric:tabular-nums}
+.stat.clock .v{color:var(--accent)}
+.stat.late .v{color:var(--warn)}
+.bubble{border-radius:12px;padding:10px 14px;background:var(--accent-soft);font-size:.95rem}
+.bubble .q{font-weight:600}
+.bubble .a{color:var(--ink-2)}
+.callout{border-radius:12px;padding:12px 16px;background:var(--money-soft);color:var(--ink)}
+.callout.warn{background:var(--warn-soft)}
+.nav{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.nav .sp{flex:1}
+.dots{display:flex;gap:6px}
+.dots span{width:8px;height:8px;border-radius:50%;background:var(--line)}
+.dots span.on{background:var(--accent)}
+button.b{font:600 1rem var(--body);border:1px solid var(--line);background:var(--surface);color:var(--ink);padding:10px 16px;border-radius:9px;cursor:pointer}
+button.b.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+button.b:disabled{opacity:.4;cursor:not-allowed}
+button.b:hover:not(:disabled){border-color:var(--accent)}
+a.b{display:inline-block;text-decoration:none;text-align:center}
+button:focus-visible,.choice:focus-visible,a.b:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.progress{height:8px;border-radius:99px;background:var(--line);overflow:hidden}
+.progress span{display:block;height:100%;background:var(--accent);transition:width .35s}
+footer{color:var(--ink-3);font-size:.85rem;display:flex;flex-direction:column;gap:4px}
+@media (prefers-reduced-motion:reduce){.progress span{transition:none}}
+
+.top{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;flex-wrap:wrap}
+.chain{font:500 .85rem var(--mono);color:var(--ink-3);text-align:right}
+.chain b{color:var(--money)}
+.pill{display:inline-block;font:600 .72rem var(--body);letter-spacing:.06em;text-transform:uppercase;padding:3px 8px;border-radius:99px;background:var(--money-soft);color:var(--money)}
+.pill.warn{background:var(--warn-soft);color:var(--warn)}
+.pill.off{background:var(--surface-2);color:var(--ink-3);border:1px solid var(--line)}
+.tabs{display:flex;gap:8px;flex-wrap:wrap}
+.tabs button{font:600 1rem var(--body);padding:10px 16px;border-radius:9px;border:1px solid var(--line);background:var(--surface);color:var(--ink);cursor:pointer}
+.tabs button.on{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.panel{display:flex;flex-direction:column;gap:14px}
+.files li a{color:inherit;text-decoration:none;border-bottom:1px dotted var(--ink-3);cursor:pointer}
+.files .pid{font:.72rem var(--mono);color:var(--ink-3);margin-right:6px}
+.story{border-left:4px solid var(--accent);padding:10px 16px;background:var(--accent-soft);border-radius:0 12px 12px 0}
+.story.err{border-color:var(--warn);background:var(--warn-soft)}
+.log{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px;max-height:340px;overflow:auto}
+.log li{display:grid;grid-template-columns:78px 1fr;gap:10px;font-size:.9rem;padding:6px 0;border-bottom:1px solid var(--line)}
+.log .who{font:600 .7rem var(--body);letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);padding-top:3px}
+.log .who.you{color:var(--accent)} .log .who.prov{color:var(--money)}
+.log code{font:500 .78rem var(--mono);color:var(--ink-3);word-break:break-all}
+.jobs{display:flex;flex-direction:column;gap:10px}
+.job{border:1px solid var(--line);border-radius:12px;padding:12px 14px;background:var(--surface-2);display:flex;flex-direction:column;gap:6px}
+.job .h{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center}
+input.q{font:inherit;padding:10px 12px;border-radius:9px;border:1px solid var(--line);background:var(--surface);color:var(--ink);flex:1;min-width:180px}
+select{font:inherit;padding:10px 12px;border-radius:9px;border:1px solid var(--line);background:var(--surface);color:var(--ink)}
+pre.viewer{white-space:pre-wrap;font:500 .82rem/1.5 var(--mono);background:var(--surface-2);border:1px solid var(--line);border-radius:10px;padding:12px;max-height:260px;overflow:auto;margin:0}
+.muted{color:var(--ink-3);font-size:.88rem}
+.offline{display:none}
+body.down .offline{display:block}
+</style>
+<body>
+<div class="wrap">
+  <div class="top">
+    <div>
+      <div class="eyebrow">PieceWork · live proof of concept</div>
+      <h1>Compute on your PDP data set</h1>
+      <p class="lede">Every button sends a real transaction to a blockchain running on this computer, with the real Filecoin Pay contract. The storage provider really runs programs, in containers, next to your files.</p>
+    </div>
+    <div class="chain" id="chain">connecting…</div>
+  </div>
+
+  <div class="card offline"><b>The demo is not running.</b> Start it again from the project folder (<code>npm start</code> in <code>poc/</code>), then reload this page.</div>
+
+  <div id="scene"></div>
+  <div class="story" id="story"></div>
+
+  <div class="card panel" id="money"></div>
+
+  <div class="tabs"><button id="tab-time" class="on">Pay for time</button><button id="tab-job">Pay per job</button></div>
+  <div class="card panel" id="time"></div>
+  <div class="card panel" id="job" hidden></div>
+
+  <div class="card panel">
+    <h2>What is recorded on the chain</h2>
+    <p class="muted">Newest first. Each line is a transaction: what it means, then the contract function and transaction id.</p>
+    <ul class="log" id="log"></ul>
+  </div>
+
+  <div class="card panel" id="viewer" hidden></div>
+
+  <footer>
+    <div>Local chain: 1 block = 1 epoch = 1 second here (30 seconds on Filecoin). USDFC here is a test token with no value.</div>
+    <div>Real: Filecoin Pay (FilOzone/filecoin-pay @ 04ded6a), ComputeService, the containers. Stand-ins: PDP is simulated by a small contract (no proofs), piece ids are content hashes.</div>
+  </footer>
+</div>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const n = (x) => Number(x);
+  const m = (x) => n(x).toFixed(3);
+  const icon = {
+    you: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/></svg>`,
+    pay: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="6" width="18" height="14" rx="2"/><path d="M3 10h18M8 15h3"/></svg>`,
+    prov: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="3" width="16" height="7" rx="1.5"/><rect x="4" y="14" width="16" height="7" rx="1.5"/><path d="M8 6.5h.01M8 17.5h.01"/></svg>`,
+  };
+
+  let S = null, busy = false, tab = "time", message = null, answers = null, lastQ = "", pick = "index";
+
+  async function call(action, body = {}) {
+    if (busy) return;
+    busy = true; message = { text: "Sending transaction…" }; render();
+    try {
+      const r = await fetch(`/api/${action}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }).then((r) => r.json());
+      if (r.ok === false || r.error) message = { err: true, text: r.error };
+      else message = { text: STORY[action]?.(r) ?? "Done." };
+      return r;
+    } catch (e) { message = { err: true, text: String(e) }; }
+    finally { busy = false; await refresh(); }
+  }
+
+  const STORY = {
+    setup: () => "Your money is in Filecoin Pay, and you allowed the compute service to open payments for you, within the limits you set. Nothing is paid yet.",
+    deposit: () => "Added to your balance in Filecoin Pay.",
+    withdraw: () => "Your free balance went back to your wallet.",
+    openSession: () => "You asked for a session. Filecoin Pay puts the safety margin on hold. The provider is starting the service next to your files; billing starts when it is ready.",
+    closeSession: () => "You stopped. The rate was set to 0 and the payment ended at this epoch: you pay exactly the seconds you used, and the safety margin is released.",
+    postJob: () => "Job ordered. The price is on hold in Filecoin Pay. The provider is paid only if it adds the result to your data set before the deadline.",
+    expire: () => "The deadline passed without a result, so the job was cancelled and the money on hold came back to you.",
+  };
+
+  function scene() {
+    const c = S.client, p = S.provider;
+    const running = S.sessions.find((s) => s.status === "running");
+    const waitingJob = S.jobs.find((j) => j.status === "waiting");
+    const files = S.files.map((f) => {
+      const cls = f.kind === "output" ? "new" : "";
+      return `<li class="${cls}"><span><span class="pid">#${f.pieceId}</span><a data-file="${f.pieceId}">${esc(f.name)}</a></span><span class="sz">${f.size} B</span></li>`;
+    }).join("");
+    const f1 = running ? { cls: "on", t: `streaming ${m(running.rate)}/s` } : waitingJob ? { cls: "", t: "price on hold" } : null;
+    return `<div class="scene">
+      <div class="actor ${message && !message.err ? "" : ""}"><div class="who">${icon.you}You</div>
+        <div class="big">${m(c.available)}</div><div class="unit">USDFC free in Filecoin Pay</div>
+        <div class="note">Wallet (outside Filecoin Pay): ${m(c.wallet)} USDFC${c.fundedUntil ? `<br>Funded until block ${c.fundedUntil}` : ""}</div></div>
+      <div class="flow ${f1?.cls ?? ""}"><span class="arr">→</span><span>${f1?.t ?? ""}</span></div>
+      <div class="actor pay"><div class="who">${icon.pay}On hold in Filecoin Pay</div>
+        <div class="big">${m(c.onHold)}</div><div class="unit">USDFC held (safety margin or job price)</div></div>
+      <div class="flow ${running ? "on" : ""}"><span class="arr">→</span><span>${running ? "paid as time passes" : ""}</span></div>
+      <div class="actor prov"><div class="who">${icon.prov}Storage provider</div>
+        <div class="big">${m(p.earned)}</div><div class="unit">USDFC earned (in Filecoin Pay)</div>
+        <div class="note">Holds your PDP data set #${S.dataSetId}. Click a file to open it. <span style="color:var(--money)">Green</span> = results added by jobs.</div>
+        <ul class="files">${files}</ul></div>
+    </div>`;
+  }
+
+  function moneyPanel() {
+    const c = S.client, started = n(c.inFilecoinPay) > 0 || S.clientLog.length > 0;
+    if (!started) return `<h2>Step 1 · Put money in Filecoin Pay</h2>
+      <p class="muted">Three transactions: allow Filecoin Pay to take the amount from your wallet, deposit it, and let the compute service open payments for you (at most ${m(0.01)} USDFC per second and ${m(3)} USDFC on hold).</p>
+      <div class="row">
+        <button class="b primary" data-act="setup" data-amount="2" ${busy ? "disabled" : ""}>Deposit 2 USDFC</button>
+        <button class="b" data-act="setup" data-amount="0.08" ${busy ? "disabled" : ""}>Deposit only 0.08 (to see what happens when money runs out)</button>
+      </div>`;
+    return `<div class="row" style="justify-content:space-between"><h2>Your money</h2><div class="row">
+        <button class="b" data-act="deposit" data-amount="1" ${busy ? "disabled" : ""}>Add 1 USDFC</button>
+        <button class="b" data-act="withdraw" data-amount="all" ${busy || n(c.available) === 0 ? "disabled" : ""}>Take free money back to wallet</button></div></div>`;
+  }
+
+  function timePanel() {
+    const P = S.params;
+    const running = S.sessions.find((s) => s.status === "running");
+    const opening = S.sessions.find((s) => s.status === "opening");
+    const past = S.sessions.filter((s) => s.status === "closed").slice(-3).reverse();
+    let body = "";
+    if (running) {
+      const secs = S.block - running.startBlock;
+      body = `<div class="live">
+          <div class="stat clock"><div class="l">Running for</div><div class="v">${secs} s</div></div>
+          <div class="stat"><div class="l">Cost so far</div><div class="v">${m(running.usedSoFar)}</div></div>
+          <div class="stat"><div class="l">Rate</div><div class="v">${m(running.rate)}/s</div></div></div>
+        <form class="row" id="askform"><input class="q" id="q" placeholder="Search your files, e.g. data set, revenue, customer" value="${esc(lastQ)}"><button class="b" ${busy ? "disabled" : ""}>Ask</button></form>
+        ${answers ? `<pre class="viewer">${answers.length ? answers.map(esc).join("\n") : "No match in your files."}</pre>` : ""}
+        <div class="row"><button class="b primary" data-act="closeSession" data-id="${running.id}" ${busy ? "disabled" : ""}>Stop</button>
+        <span class="muted">Session #${running.id}, payment rail #${running.railId}. Billing started at block ${running.startBlock}.</span></div>`;
+    } else if (opening) {
+      body = `<p><span class="pill warn">starting</span> The provider is starting the service next to your files…</p>`;
+    } else {
+      body = `<div class="row"><button class="b primary" data-act="openSession" ${busy ? "disabled" : ""}>Start the search assistant</button>
+        <span class="muted">${m(P.rate)} USDFC per second. Safety margin on hold while it runs: ${m(P.margin)} (${P.lockupPeriod} s).</span></div>`;
+    }
+    const hist = past.map((s) => `<li><span>Session #${s.id}: ${s.rateStopped ? `stopped by you after ${s.stopBlock - s.startBlock} s` : s.startBlock ? "ended when your money ran out" : "never started"}</span><span class="sz">${m(s.usedSoFar)} USDFC</span></li>`).join("");
+    return `<h2>Pay for time: rent a search assistant over your files</h2>
+      <p class="muted">Like renting a machine in the cloud. You pay per second while it runs; when you stop, payment stops at that second.</p>
+      ${body}${hist ? `<ul class="files">${hist}</ul>` : ""}`;
+  }
+
+  function jobPanel() {
+    const J = S.params.jobs;
+    const list = S.jobs.slice().reverse().map((j) => {
+      const left = j.deadline - S.block;
+      const stage = { waiting: j.stage === "late" ? ["warn", "provider missed the deadline"] : ["warn", j.stage === "running" ? "running in a container" : j.stage === "storing" ? "storing the result" : "waiting for the provider"], paid: ["", "delivered and paid"], refunded: ["off", "cancelled, money back"] }[j.status] ?? ["off", j.status];
+      const canExpire = j.status === "waiting" && left < 0;
+      return `<div class="job"><div class="h"><b>#${j.id} · ${esc(j.name ?? "")}</b><span class="pill ${stage[0]}">${stage[1]}</span></div>
+        <div class="muted">Price ${m(j.price)} USDFC · deadline block ${j.deadline}${j.status === "waiting" ? (left >= 0 ? ` (${left} s left)` : " (passed)") : ""}</div>
+        ${j.output ? `<div>Result: <a data-file="${j.output.pieceId}" style="cursor:pointer">${esc(j.output.name)}</a> <span class="muted">piece #${j.output.pieceId} in your data set</span></div>` : ""}
+        ${canExpire ? `<div><button class="b primary" data-act="expire" data-id="${j.id}" ${busy ? "disabled" : ""}>Get my money back</button></div>` : ""}</div>`;
+    }).join("");
+    const opts = Object.entries(J).map(([k, j]) => `<option value="${k}" ${k === pick ? "selected" : ""}>${esc(j.name)} — ${m(j.price)} USDFC, deadline ${j.deadline} s</option>`).join("");
+    return `<h2>Pay per job: order a result</h2>
+      <p class="muted">The price is put on hold. The provider runs the program on your files and adds the result to your data set; it is paid only if it does so before the deadline.</p>
+      <div class="row"><select id="jobsel">${opts}</select><button class="b primary" id="order" ${busy ? "disabled" : ""}>Order</button></div>
+      <div class="jobs">${list || `<p class="muted">No jobs yet.</p>`}</div>`;
+  }
+
+  function logPanel() {
+    const items = [
+      ...S.clientLog.map((l) => ({ ...l, who: "you" })),
+      ...S.providerLog.map((l) => ({ ...l, who: "prov" })),
+    ].sort((a, b) => b.t - a.t);
+    return items.map((l) => `<li><span class="who ${l.who}">${l.who === "you" ? "You" : "Provider"}</span><span>${esc(l.text)}${l.fn ? `<br><code>${esc(l.fn)} · block ${l.block} · ${esc(l.tx)}</code>` : ""}</span></li>`).join("");
+  }
+
+  function render() {
+    if (!S) return;
+    $("chain").innerHTML = `<b>●</b> local chain · block ${S.block}<br>Filecoin Pay ${S.contracts.payments.slice(0, 10)}…<br>ComputeService ${S.contracts.cs.slice(0, 10)}…`;
+    $("scene").innerHTML = scene();
+    const st = $("story");
+    st.className = "story" + (message?.err ? " err" : "");
+    st.textContent = message?.text ?? (S.clientLog.length ? "" : "Your files are already stored: you have a PDP data set held by the storage provider (right). Start by putting money in Filecoin Pay.");
+    st.hidden = !st.textContent;
+    $("money").innerHTML = moneyPanel();
+    const ready = S.clientLog.length > 0;
+    for (const [id, f] of [["time", timePanel], ["job", jobPanel]]) {
+      const el = $(id);
+      el.hidden = tab !== id;
+      if (tab === id && !(id === "time" && document.activeElement?.id === "q")) el.innerHTML = ready ? f() : `<p class="muted">First put money in Filecoin Pay (above).</p>`;
+      else if (tab === id && id === "time") { // keep the question box while typing; refresh the rest
+        const tmp = document.createElement("div"); tmp.innerHTML = f();
+        el.querySelectorAll(".stat .v").forEach((v, i) => { const nv = tmp.querySelectorAll(".stat .v")[i]; if (nv) v.textContent = nv.textContent; });
+      }
+    }
+    $("tab-time").className = tab === "time" ? "on" : "";
+    $("tab-job").className = tab === "job" ? "on" : "";
+    $("log").innerHTML = logPanel();
+  }
+
+  async function refresh() {
+    try {
+      S = await fetch("/api/state").then((r) => r.json());
+      document.body.classList.remove("down");
+    } catch { document.body.classList.add("down"); }
+    render();
+  }
+
+  document.addEventListener("click", async (e) => {
+    const t = e.target.closest("[data-act],[data-file],#order,#tab-time,#tab-job");
+    if (!t) return;
+    if (t.id === "tab-time" || t.id === "tab-job") { tab = t.id.slice(4); message = null; return render(); }
+    if (t.id === "order") return call("postJob", { job: pick });
+    if (t.dataset.file !== undefined) {
+      const f = S.files.find((x) => x.pieceId === n(t.dataset.file));
+      const text = await fetch(`/api/file/${t.dataset.file}`).then((r) => r.text());
+      const v = $("viewer");
+      v.hidden = false;
+      v.innerHTML = `<div class="row" style="justify-content:space-between"><h2>${esc(f?.name)}</h2><button class="b" id="closeviewer">Close</button></div>
+        <div class="muted">Piece #${f?.pieceId} in data set #${S.dataSetId} · ${esc(f?.cid)} · ${f?.kind === "output" ? "result added by a job" : "your original file"}</div><pre class="viewer">${esc(text)}</pre>`;
+      $("closeviewer").onclick = () => { v.hidden = true; };
+      return v.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+    const a = t.dataset.act;
+    if (a === "setup" || a === "deposit" || a === "withdraw") return call(a, { amount: t.dataset.amount });
+    if (a === "openSession") { answers = null; return call(a); }
+    if (a === "closeSession") { answers = null; return call(a, { sessionId: n(t.dataset.id) }); }
+    if (a === "expire") return call(a, { jobId: n(t.dataset.id) });
+  });
+  document.addEventListener("change", (e) => { if (e.target.id === "jobsel") pick = e.target.value; });
+  document.addEventListener("submit", async (e) => {
+    if (e.target.id !== "askform") return;
+    e.preventDefault();
+    const running = S.sessions.find((s) => s.status === "running");
+    lastQ = $("q").value.trim();
+    if (!running || !lastQ) return;
+    const r = await fetch("/api/ask", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ sessionId: running.id, question: lastQ }) }).then((r) => r.json());
+    answers = r.lines ?? [r.error];
+    message = { text: "The question ran inside the provider's container, next to your files. Billing continues per second until you stop." };
+    $("q").blur(); render();
+  });
+
+  refresh();
+  setInterval(() => { if (!busy) refresh(); }, 1000);
+})();
+</script>
+</body>
+</html>

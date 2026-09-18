@@ -361,7 +361,8 @@ async function eventLoop() {
 // ---------------------------------------------------------------- client actions ("you")
 
 function clog(what, results) {
-  for (const r of results) clientLog.push({ t: Date.now(), text: r.what, fn: r.fn, tx: r.tx, block: r.block });
+  const t = Date.now();
+  for (const [i, r] of results.entries()) clientLog.push({ t: t + i, text: r.what, fn: r.fn, tx: r.tx, block: r.block });
 }
 async function requireFree(amount, what) {
   const [, , available] = await read(C.payments, ABI.FilecoinPayV1, "getAccountInfoIfSettled", [C.usdfc, A.client]);
