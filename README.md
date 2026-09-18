@@ -13,7 +13,7 @@ Correctness of results is the client's responsibility, as with commercial GPU cl
 
 `poc/` runs everything on one Mac: a local blockchain, the **real Filecoin Pay contract**, our `ComputeService`, and a storage provider that runs programs in containers next to the client's files. Every button on the page is a real transaction.
 
-**Start:** double-click `poc/Start demo.command` (or `cd poc && npm start`). The page opens at http://localhost:8080. Close the window to stop; each start is a fresh chain.
+**Demo script:** [DEMO.md](DEMO.md). **Start:** double-click `poc/Start demo.command` (or `cd poc && npm start`). The page opens at http://localhost:8080. Close the window to stop; each start is a fresh chain.
 
 **Needs:** [Foundry](https://getfoundry.sh), [Node.js](https://nodejs.org) 20+, [Docker Desktop](https://www.docker.com/products/docker-desktop/), and the git submodule (`git clone --recurse-submodules`).
 

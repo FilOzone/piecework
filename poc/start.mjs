@@ -2,7 +2,7 @@
 //
 // One program that:
 //   1. starts a private local blockchain (anvil, 1 block = 1 epoch = 1 second here; 30 s on Filecoin),
-//   2. installs the real FilecoinPayV1 (FilOzone/filecoin-pay @ 04ded6a), a test USDFC token,
+//   2. installs the real FilecoinPayV1 (FilOzone/filecoin-pay @ 04ded6a), a test luca_usdfc token,
 //      MockPDP (stand-in for PDPVerifier) and our ComputeService,
 //   3. plays the storage provider: holds the client's data set, starts services, runs jobs in
 //      containers (Docker), stores outputs as new pieces and gets paid through Filecoin Pay,
@@ -35,7 +35,7 @@ const ENV_PATH = `${process.env.PATH}:${process.env.HOME}/.foundry/bin:/usr/loca
 
 // ---------------------------------------------------------------- parameters
 
-const U = (x) => parseUnits(String(x), 18); // USDFC has 18 decimals
+const U = (x) => parseUnits(String(x), 18); // luca_usdfc has 18 decimals
 const fmt = (x) => Number(formatUnits(x, 18)).toFixed(4);
 
 const PARAMS = {
@@ -154,7 +154,7 @@ async function installContracts() {
   say("Compiling contracts…");
   await execFile("forge", ["build"], { cwd: CONTRACTS, env: { ...process.env, PATH: ENV_PATH } });
   C = {};
-  C.usdfc = await deploy("MockERC20", ["USDFC (local test token)", "USDFC"]);
+  C.usdfc = await deploy("MockERC20", ["luca_usdfc (local test token standing in for USDFC)", "luca_usdfc"]);
   C.payments = await deploy("FilecoinPayV1");
   C.pdp = await deploy("MockPDP");
   C.cs = await deploy("ComputeService", [C.payments, C.usdfc, C.pdp, "0x0000000000000000000000000000000000000000"]); // no session-key registry locally
@@ -271,7 +271,7 @@ async function providerTick(block) {
     let done = false;
     try { await read(C.payments, ABI.FilecoinPayV1, "getRail", [railId]); } catch { done = true; } // rail finalised
     if (collected[railId] > 0n && (done || block % 30 === 0)) {
-      plog(`Collected ${fmt(collected[railId])} USDFC from payment rail #${railId} (settled in Filecoin Pay).`, lastSettleTx[railId]);
+      plog(`Collected ${fmt(collected[railId])} luca_usdfc from payment rail #${railId} (settled in Filecoin Pay).`, lastSettleTx[railId]);
       collected[railId] = 0n;
     }
     if (done) toSettle.delete(railId);
@@ -296,7 +296,7 @@ async function onJobPosted({ jobId, provider, imageDigest, inputPieceIds, price,
   const spec = JOB_SCRIPTS[image];
   const name = Object.values(PARAMS.jobs).find((j) => j.image === image)?.name ?? image;
   jobInfo[jobId] = { name, image, stage: "received" };
-  plog(`New job #${jobId}: "${name}" for ${fmt(price)} USDFC, deadline block ${deadline}.`);
+  plog(`New job #${jobId}: "${name}" for ${fmt(price)} luca_usdfc, deadline block ${deadline}.`);
   if (!spec) return plog(`I don't run ${image}; ignoring job #${jobId}.`);
   runJob(jobId, spec, inputPieceIds, deadline).catch((e) => plog(`Job #${jobId} failed: ${reason(e)}`));
 }
@@ -366,26 +366,26 @@ function clog(what, results) {
 }
 async function requireFree(amount, what) {
   const [, , available] = await read(C.payments, ABI.FilecoinPayV1, "getAccountInfoIfSettled", [C.usdfc, A.client]);
-  if (available < amount) throw new Error(`Not enough free money in Filecoin Pay: ${fmt(available)} USDFC free, ${what} needs ${fmt(amount)}. Add money first.`);
+  if (available < amount) throw new Error(`Not enough free money in Filecoin Pay: ${fmt(available)} luca_usdfc free, ${what} needs ${fmt(amount)}. Add money first.`);
 }
 const client = {
-  // Move USDFC from your wallet into Filecoin Pay and let ComputeService act for you within limits.
+  // Move luca_usdfc from your wallet into Filecoin Pay and let ComputeService act for you within limits.
   async setup({ amount }) {
     const amt = U(amount);
     const { rateAllowance, lockupAllowance, maxLockupPeriod } = PARAMS.approval;
     return [
-      await send(A.client, C.usdfc, ABI.MockERC20, "approve", [C.payments, amt], `Allow Filecoin Pay to take ${amount} USDFC from your wallet`),
-      await send(A.client, C.payments, ABI.FilecoinPayV1, "deposit", [C.usdfc, A.client, amt], `Deposit ${amount} USDFC into Filecoin Pay`),
+      await send(A.client, C.usdfc, ABI.MockERC20, "approve", [C.payments, amt], `Allow Filecoin Pay to take ${amount} luca_usdfc from your wallet`),
+      await send(A.client, C.payments, ABI.FilecoinPayV1, "deposit", [C.usdfc, A.client, amt], `Deposit ${amount} luca_usdfc into Filecoin Pay`),
       await send(A.client, C.payments, ABI.FilecoinPayV1, "setOperatorApproval",
         [C.usdfc, C.cs, true, rateAllowance, lockupAllowance, maxLockupPeriod],
-        `Let the compute service open payments for you, up to ${fmt(rateAllowance)} USDFC/epoch and ${fmt(lockupAllowance)} USDFC on hold`),
+        `Let the compute service open payments for you, up to ${fmt(rateAllowance)} luca_usdfc/epoch and ${fmt(lockupAllowance)} luca_usdfc on hold`),
     ];
   },
   async deposit({ amount }) {
     const amt = U(amount);
     return [
-      await send(A.client, C.usdfc, ABI.MockERC20, "approve", [C.payments, amt], `Allow Filecoin Pay to take ${amount} USDFC`),
-      await send(A.client, C.payments, ABI.FilecoinPayV1, "deposit", [C.usdfc, A.client, amt], `Deposit ${amount} USDFC into Filecoin Pay`),
+      await send(A.client, C.usdfc, ABI.MockERC20, "approve", [C.payments, amt], `Allow Filecoin Pay to take ${amount} luca_usdfc`),
+      await send(A.client, C.payments, ABI.FilecoinPayV1, "deposit", [C.usdfc, A.client, amt], `Deposit ${amount} luca_usdfc into Filecoin Pay`),
     ];
   },
   async openSession() {
@@ -413,7 +413,7 @@ const client = {
   async withdraw({ amount }) {
     const [, , available] = await read(C.payments, ABI.FilecoinPayV1, "getAccountInfoIfSettled", [C.usdfc, A.client]);
     const amt = amount === "all" ? available : U(amount);
-    return [await send(A.client, C.payments, ABI.FilecoinPayV1, "withdraw", [C.usdfc, amt], `Withdraw ${fmt(amt)} USDFC back to your wallet`)];
+    return [await send(A.client, C.payments, ABI.FilecoinPayV1, "withdraw", [C.usdfc, amt], `Withdraw ${fmt(amt)} luca_usdfc back to your wallet`)];
   },
 };
 
@@ -507,7 +507,7 @@ async function main() {
   await startChain();
   await installContracts();
   const r = await createDataSet();
-  plog(`I hold your data set #${dataSetId} (${(await listFiles()).length} files, proven with PDP — simulated locally).`, r);
+  plog(`I hold your data set #${dataSetId} (${(await listFiles()).length} files, proofs of possession simulated: I act as an honest provider that proves every period).`, r);
   lastBlock = await pub.getBlockNumber();
   eventLoop();
   serve();

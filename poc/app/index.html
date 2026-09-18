@@ -173,8 +173,8 @@ body.down .offline{display:block}
   <div class="card panel" id="viewer" hidden></div>
 
   <footer>
-    <div>Local chain: 1 block = 1 epoch = 1 second here (30 seconds on Filecoin). USDFC here is a test token with no value.</div>
-    <div>Real: Filecoin Pay (FilOzone/filecoin-pay @ 04ded6a), ComputeService, the containers. Stand-ins: PDP is simulated by a small contract (no proofs), piece ids are content hashes.</div>
+    <div>Local chain: 1 block = 1 epoch = 1 second here (30 seconds on Filecoin). luca_usdfc is a local test token with no value, standing in for USDFC (the dollar stablecoin used by Filecoin Pay).</div>
+    <div>Real: Filecoin Pay (FilOzone/filecoin-pay @ 04ded6a), ComputeService, the containers. Stand-ins: PDP is simulated by a small contract, piece ids are content hashes. Proofs of possession are not run: the provider is assumed to be a real, honest provider that proves every period (the "PDP proof ✓" line is simulated).</div>
   </footer>
 </div>
 
@@ -190,6 +190,7 @@ body.down .offline{display:block}
     prov: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="3" width="16" height="7" rx="1.5"/><rect x="4" y="14" width="16" height="7" rx="1.5"/><path d="M8 6.5h.01M8 17.5h.01"/></svg>`,
   };
 
+  const PROVING_PERIOD = 30; // blocks; simulated here (on Filecoin, FWSS uses 2880 epochs = 1 day)
   let S = null, busy = false, tab = "time", message = null, answers = null, lastQ = "", pick = "index";
 
   async function call(action, body = {}) {
@@ -225,15 +226,16 @@ body.down .offline{display:block}
     const f1 = running ? { cls: "on", t: `streaming ${m(running.rate)}/s` } : waitingJob ? { cls: "", t: "price on hold" } : null;
     return `<div class="scene">
       <div class="actor ${message && !message.err ? "" : ""}"><div class="who">${icon.you}You</div>
-        <div class="big">${m(c.available)}</div><div class="unit">USDFC free in Filecoin Pay</div>
-        <div class="note">Wallet (outside Filecoin Pay): ${m(c.wallet)} USDFC${c.fundedUntil ? `<br>Funded until block ${c.fundedUntil}` : ""}</div></div>
+        <div class="big">${m(c.available)}</div><div class="unit">luca_usdfc free in Filecoin Pay</div>
+        <div class="note">Wallet (outside Filecoin Pay): ${m(c.wallet)} luca_usdfc${c.fundedUntil ? `<br>Funded until block ${c.fundedUntil}` : ""}</div></div>
       <div class="flow ${f1?.cls ?? ""}"><span class="arr">→</span><span>${f1?.t ?? ""}</span></div>
       <div class="actor pay"><div class="who">${icon.pay}On hold in Filecoin Pay</div>
-        <div class="big">${m(c.onHold)}</div><div class="unit">USDFC held (safety margin or job price)</div></div>
+        <div class="big">${m(c.onHold)}</div><div class="unit">luca_usdfc held (safety margin or job price)</div></div>
       <div class="flow ${running ? "on" : ""}"><span class="arr">→</span><span>${running ? "paid as time passes" : ""}</span></div>
       <div class="actor prov"><div class="who">${icon.prov}Storage provider</div>
-        <div class="big">${m(p.earned)}</div><div class="unit">USDFC earned (in Filecoin Pay)</div>
+        <div class="big">${m(p.earned)}</div><div class="unit">luca_usdfc earned (in Filecoin Pay)</div>
         <div class="note">Holds your PDP data set #${S.dataSetId}. Click a file to open it. <span style="color:var(--money)">Green</span> = results added by jobs.</div>
+        <div class="note"><span class="pill">PDP proof ✓</span> last proven at block ${Math.floor(S.block / PROVING_PERIOD) * PROVING_PERIOD}, next at ${(Math.floor(S.block / PROVING_PERIOD) + 1) * PROVING_PERIOD} <span class="muted">(simulated: we assume an honest provider that proves every period)</span></div>
         <ul class="files">${files}</ul></div>
     </div>`;
   }
@@ -241,13 +243,13 @@ body.down .offline{display:block}
   function moneyPanel() {
     const c = S.client, started = n(c.inFilecoinPay) > 0 || S.clientLog.length > 0;
     if (!started) return `<h2>Step 1 · Put money in Filecoin Pay</h2>
-      <p class="muted">Three transactions: allow Filecoin Pay to take the amount from your wallet, deposit it, and let the compute service open payments for you (at most ${m(0.01)} USDFC per second and ${m(3)} USDFC on hold).</p>
+      <p class="muted">Three transactions: allow Filecoin Pay to take the amount from your wallet, deposit it, and let the compute service open payments for you (at most ${m(0.01)} luca_usdfc per second and ${m(3)} luca_usdfc on hold).</p>
       <div class="row">
-        <button class="b primary" data-act="setup" data-amount="2" ${busy ? "disabled" : ""}>Deposit 2 USDFC</button>
+        <button class="b primary" data-act="setup" data-amount="2" ${busy ? "disabled" : ""}>Deposit 2 luca_usdfc</button>
         <button class="b" data-act="setup" data-amount="0.08" ${busy ? "disabled" : ""}>Deposit only 0.08 (to see what happens when money runs out)</button>
       </div>`;
     return `<div class="row" style="justify-content:space-between"><h2>Your money</h2><div class="row">
-        <button class="b" data-act="deposit" data-amount="1" ${busy ? "disabled" : ""}>Add 1 USDFC</button>
+        <button class="b" data-act="deposit" data-amount="1" ${busy ? "disabled" : ""}>Add 1 luca_usdfc</button>
         <button class="b" data-act="withdraw" data-amount="all" ${busy || n(c.available) === 0 ? "disabled" : ""}>Take free money back to wallet</button></div></div>`;
   }
 
@@ -271,9 +273,9 @@ body.down .offline{display:block}
       body = `<p><span class="pill warn">starting</span> The provider is starting the service next to your files…</p>`;
     } else {
       body = `<div class="row"><button class="b primary" data-act="openSession" ${busy ? "disabled" : ""}>Start the search assistant</button>
-        <span class="muted">${m(P.rate)} USDFC per second. Safety margin on hold while it runs: ${m(P.margin)} (${P.lockupPeriod} s).</span></div>`;
+        <span class="muted">${m(P.rate)} luca_usdfc per second. Safety margin on hold while it runs: ${m(P.margin)} (${P.lockupPeriod} s).</span></div>`;
     }
-    const hist = past.map((s) => `<li><span>Session #${s.id}: ${s.rateStopped ? `stopped by you after ${s.stopBlock - s.startBlock} s` : s.startBlock ? "ended when your money ran out" : "never started"}</span><span class="sz">${m(s.usedSoFar)} USDFC</span></li>`).join("");
+    const hist = past.map((s) => `<li><span>Session #${s.id}: ${s.rateStopped ? `stopped by you after ${s.stopBlock - s.startBlock} s` : s.startBlock ? "ended when your money ran out" : "never started"}</span><span class="sz">${m(s.usedSoFar)} luca_usdfc</span></li>`).join("");
     return `<h2>Pay for time: rent a search assistant over your files</h2>
       <p class="muted">Like renting a machine in the cloud. You pay per second while it runs; when you stop, payment stops at that second.</p>
       ${body}${hist ? `<ul class="files">${hist}</ul>` : ""}`;
@@ -286,11 +288,11 @@ body.down .offline{display:block}
       const stage = { waiting: j.stage === "late" ? ["warn", "provider missed the deadline"] : ["warn", j.stage === "running" ? "running in a container" : j.stage === "storing" ? "storing the result" : "waiting for the provider"], paid: ["", "delivered and paid"], refunded: ["off", "cancelled, money back"] }[j.status] ?? ["off", j.status];
       const canExpire = j.status === "waiting" && left < 0;
       return `<div class="job"><div class="h"><b>#${j.id} · ${esc(j.name ?? "")}</b><span class="pill ${stage[0]}">${stage[1]}</span></div>
-        <div class="muted">Price ${m(j.price)} USDFC · deadline block ${j.deadline}${j.status === "waiting" ? (left >= 0 ? ` (${left} s left)` : " (passed)") : ""}</div>
+        <div class="muted">Price ${m(j.price)} luca_usdfc · deadline block ${j.deadline}${j.status === "waiting" ? (left >= 0 ? ` (${left} s left)` : " (passed)") : ""}</div>
         ${j.output ? `<div>Result: <a data-file="${j.output.pieceId}" style="cursor:pointer">${esc(j.output.name)}</a> <span class="muted">piece #${j.output.pieceId} in your data set</span></div>` : ""}
         ${canExpire ? `<div><button class="b primary" data-act="expire" data-id="${j.id}" ${busy ? "disabled" : ""}>Get my money back</button></div>` : ""}</div>`;
     }).join("");
-    const opts = Object.entries(J).map(([k, j]) => `<option value="${k}" ${k === pick ? "selected" : ""}>${esc(j.name)} — ${m(j.price)} USDFC, deadline ${j.deadline} s</option>`).join("");
+    const opts = Object.entries(J).map(([k, j]) => `<option value="${k}" ${k === pick ? "selected" : ""}>${esc(j.name)} — ${m(j.price)} luca_usdfc, deadline ${j.deadline} s</option>`).join("");
     return `<h2>Pay per job: order a result</h2>
       <p class="muted">The price is put on hold. The provider runs the program on your files and adds the result to your data set; it is paid only if it does so before the deadline.</p>
       <div class="row"><select id="jobsel">${opts}</select><button class="b primary" id="order" ${busy ? "disabled" : ""}>Order</button></div>
