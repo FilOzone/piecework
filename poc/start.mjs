@@ -215,7 +215,10 @@ async function connectCalibnet() {
 
 // ST.clients[address] = { dataSetId, clientDataSetId, pieces: { id: {name, cid, kind} } }
 let ST = { clients: {}, lastBlock: 0 };
-let current = null; // the client the page is showing (local: the test wallet; calibnet: the connected MetaMask)
+let current = null; // local: the built-in test wallet (calibnet: each request names its client)
+const LOCAL_CLIENT = () => current;
+const dataSetTimes = []; // calibnet: when data sets were created (each costs the provider a FIL deposit)
+const MAX_NEW_DATASETS_PER_HOUR = 5;
 const cl = (addr = current) => (addr ? ST.clients[getAddress(addr)] : undefined);
 
 const sampleFiles = () => fs.readdirSync(path.join(HERE, "data", "dataset")).filter((f) => !f.startsWith(".")).sort();
@@ -479,7 +482,9 @@ async function eventLoop() {
 
 // ---------------------------------------------------------------- state for the page
 
-async function state() {
+async function state(who) {
+  if (CAL && who) { try { who = getAddress(who); } catch { who = null; } }
+  const current = CAL ? who : LOCAL_CLIENT(); // calibnet: each visitor sees its own wallet
   const block = Number(await pub.getBlockNumber());
   const out = {
     network: NETWORK, block, epochSeconds: NET.epochSeconds, token: NET.token, explorer: NET.explorer,
@@ -499,11 +504,11 @@ async function state() {
   out.client = { address: current, wallet: fmt(walletBal), inFilecoinPay: fmt(funds), available: fmt(available),
     onHold: fmt(funds - available), fundedUntil: fundedUntil > 10n ** 30n ? null : Number(fundedUntil),
     storageApproved: approval[0], computeApproved: csApproval[0] };
-  const c = cl();
+  const c = cl(current);
   out.dataSetId = c ? c.dataSetId : null;
   out.hasFiles = c ? Object.keys(c.pieces).length > 0 : false;
   if (c) out.authorizerSet = getAddress(await read(C.view, ABI.FilecoinWarmStorageServiceStateView, "getDataSetAuthorizer", [BigInt(c.dataSetId)]).catch(() => ZERO)) === C.cs;
-  out.files = await listFiles();
+  out.files = await listFiles(current);
   if (!C.cs) return out;
   const S = ["none", "opening", "running", "closed"], J = ["none", "waiting", "paid", "refunded"];
   for (const [id, info] of Object.entries(sessionInfo)) {
@@ -555,10 +560,11 @@ function serve() {
     try {
       const url = new URL(req.url, "http://x");
       if (req.method === "GET" && url.pathname === "/api/config") return json(200, await config());
-      if (req.method === "GET" && url.pathname === "/api/state") return json(200, await state());
+      if (req.method === "GET" && url.pathname === "/api/state") return json(200, await state(url.searchParams.get("client")));
       if (req.method === "GET" && url.pathname === "/api/sample-pieces") return json(200, (await samplePieces()).map(({ name, hex, text }) => ({ name, hex, text })));
       if (req.method === "GET" && url.pathname.startsWith("/api/file/")) {
-        const name = cl()?.pieces[Number(url.pathname.split("/").pop())]?.name;
+        const owner = CAL ? url.searchParams.get("client") : current;
+        const name = owner ? cl(owner)?.pieces[Number(url.pathname.split("/").pop())]?.name : undefined;
         if (!name || !fs.existsSync(path.join(STORAGE, name))) { res.writeHead(404); return res.end("unknown piece"); }
         res.writeHead(200, { "content-type": "text/plain; charset=utf-8" });
         return res.end(fs.readFileSync(path.join(STORAGE, name)));
@@ -576,7 +582,15 @@ function serve() {
           if (action === "wallet") return json(200, { result: await demoWalletRequest(a.method, a.params) });
           if (action === "clientlog") { clientLog.push({ t: Date.now(), text: a.what, fn: a.fn, tx: a.tx, block: a.block }); return json(200, { ok: true }); }
           if (action === "ask") return json(200, { lines: await ask(a.sessionId, a.question) });
+          if (action === "dataset/create") {
+            if (cl(a.client)) throw new Error("this wallet already has a data set with this provider");
+            const now = Date.now();
+            while (dataSetTimes.length && now - dataSetTimes[0] > 3600_000) dataSetTimes.shift();
+            if (dataSetTimes.length >= MAX_NEW_DATASETS_PER_HOUR) throw new Error("Too many new data sets in the last hour; try again later.");
+            dataSetTimes.push(now);
+          }
           if (action === "dataset/create") return json(200, { ok: true, ...(await createDataSetFor(a.client, a.clientDataSetId, a.signature)) });
+          if (action === "dataset/add" && Object.keys(cl(a.client)?.pieces ?? {}).length) throw new Error("your files are already stored");
           if (action === "dataset/add") return json(200, { ok: true, ...(await addSampleFilesFor(a.client, a.nonce, a.signature)) });
           return json(404, { error: "unknown action" });
         } catch (e) { return json(400, { ok: false, error: reason(e) }); }
@@ -607,12 +621,18 @@ async function demoWalletRequest(method, params) {
   if (method === "eth_sendTransaction") {
     const t = params[0];
     if (getAddress(t.from) !== demoAcct.address) throw new Error("wrong sender");
+    // the demo wallet only talks to the demo's contracts
+    const allowed = [C.usdfc, C.payments, C.fwss, C.cs].map((x) => getAddress(x));
+    if (!t.to || !allowed.includes(getAddress(t.to))) throw new Error("the demo wallet only sends to the demo's contracts");
+    if (t.value && BigInt(t.value) > 0n) throw new Error("the demo wallet does not send FIL");
     return serial(demoAcct, () => demoWallet.sendTransaction({ to: t.to, data: t.data, value: t.value ? BigInt(t.value) : 0n,
       gas: t.gas ? BigInt(t.gas) : undefined, chain: filecoinCalibration }));
   }
   if (method === "eth_signTypedData_v4") {
     const { domain, types, primaryType, message } = typeof params[1] === "string" ? JSON.parse(params[1]) : params[1];
     const { EIP712Domain, ...rest } = types;
+    if (getAddress(domain.verifyingContract) !== getAddress(C.fwss) || !["CreateDataSet", "AddPieces"].includes(primaryType))
+      throw new Error("the demo wallet only signs FWSS data set requests");
     return demoAcct.signTypedData({ domain: { ...domain, chainId: Number(domain.chainId) }, types: rest, primaryType, message: coerce(rest, primaryType, message) });
   }
   throw new Error(`unsupported wallet method ${method}`);

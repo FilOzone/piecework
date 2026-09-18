@@ -535,7 +535,7 @@ function render() {
 }
 
 async function refresh() {
-  try { S = await fetch("/api/state").then((r) => r.json()); document.body.classList.remove("down"); }
+  try { S = await fetch(`/api/state${me ? `?client=${me}` : ""}`).then((r) => r.json()); document.body.classList.remove("down"); }
   catch { document.body.classList.add("down"); }
   render();
 }
@@ -548,7 +548,7 @@ document.addEventListener("click", async (e) => {
   if (t.id === "tab-time" || t.id === "tab-job") { tab = t.id.slice(4); message = null; return render(); }
   if (t.dataset.file !== undefined) {
     const f = S.files.find((x) => x.pieceId === n(t.dataset.file));
-    const text = await fetch(`/api/file/${t.dataset.file}`).then((r) => r.text());
+    const text = await fetch(`/api/file/${t.dataset.file}?client=${me}`).then((r) => r.text());
     const v = $("viewer");
     v.hidden = false;
     v.innerHTML = `<div class="row" style="justify-content:space-between"><h2>${esc(f?.name)}</h2><button class="b" id="closeviewer">Close</button></div>
