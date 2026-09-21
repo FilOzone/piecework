@@ -513,12 +513,13 @@ function timePanel() {
         <div class="stat clock"><div class="l">Running for</div><div class="v">${dur(el)}</div></div>
         <div class="stat"><div class="l">Cost so far</div><div class="v">${m(running.usedSoFar)}</div></div>
         <div class="stat"><div class="l">Rate</div><div class="v">${m(running.rate)}/epoch</div></div></div>
-      <form class="row" id="askform"><input class="q" id="q" placeholder="Search your files, e.g. data set, revenue, customer" value="${esc(lastQ)}"><button class="b" ${busy ? "disabled" : ""}>Ask</button></form>
+      <div class="jobcard" style="border-color:var(--accent)"><b>Ask the assistant</b> <span class="muted">— it runs next to your files; ask as many questions as you like, you pay for time, not per question</span>
+      <form class="row" id="askform" style="margin-top:8px"><input class="q" id="q" placeholder="Type a word to search your files, e.g. revenue, customer, filecoin" value="${esc(lastQ)}"><button class="b primary" ${busy ? "disabled" : ""}>Ask</button></form></div>
       ${answers ? `<pre class="viewer">${answers.length ? answers.map(esc).join("\n") : "No match in your files."}</pre>` : ""}
       <div class="row"><button class="b primary" data-act="closeSession" data-id="${running.id}" ${busy ? "disabled" : ""}>Stop</button>
       <span class="muted">Session #${running.id}, payment rail #${running.railId}. Billing started at block ${running.startBlock}.</span></div>`;
   } else if (opening) {
-    body = `<p><span class="pill warn">starting</span> The provider is starting the service next to your files…</p>`;
+    body = `<p><span class="pill warn">starting</span> The provider is starting the service next to your files (about a minute on calibnet). When it is running, a box appears here to ask it questions; billing starts only then.</p>`;
   } else {
     body = `<div class="row"><button class="b primary" data-act="openSession" ${busy ? "disabled" : ""}>Start the search assistant</button>
       <span class="muted">${m(P.rate)} ${CFG.token} per epoch (${CFG.epochSeconds} s). Safety margin on hold while it runs: ${m(P.margin)} (${dur(secs(P.lockupPeriod))}).</span></div>`;
