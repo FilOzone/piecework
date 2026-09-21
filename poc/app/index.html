@@ -140,6 +140,15 @@ select{font:inherit;padding:10px 12px;border-radius:9px;border:1px solid var(--l
 pre.viewer{white-space:pre-wrap;font:500 .82rem/1.5 var(--mono);background:var(--surface-2);border:1px solid var(--line);border-radius:10px;padding:12px;max-height:260px;overflow:auto;margin:0}
 .muted{color:var(--ink-3);font-size:.88rem}
 .offline{display:none}
+.intro3{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
+.intro3 div{background:var(--surface-2);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+.intro3 b{display:block;margin-bottom:2px}
+table.ds{width:100%;border-collapse:collapse;font-size:.9rem}
+table.ds th,table.ds td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+table.ds th{font:600 .75rem var(--body);letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3)}
+table.ds td.mono{font:500 .78rem var(--mono);color:var(--ink-3);word-break:break-all}
+.ds-wrap{overflow-x:auto}
+.jobcard{border:1px solid var(--line);border-radius:10px;padding:10px 14px;background:var(--surface-2);font-size:.95rem}
 body.down .offline{display:block}
 </style>
 <body>
@@ -155,10 +164,12 @@ body.down .offline{display:block}
 
   <div class="card offline"><b>The demo is not running.</b> Start it again (double-click <code>Start demo.command</code> in <code>poc/</code>), then reload this page.</div>
 
+  <div class="card panel" id="intro"></div>
   <div class="card panel" id="wallet" hidden></div>
   <div id="scene"></div>
   <div class="story" id="story"></div>
 
+  <div class="card panel" id="dataset" hidden></div>
   <div class="card panel" id="money"></div>
 
   <div class="tabs"><button id="tab-time" class="on">Pay for time</button><button id="tab-job">Pay per job</button></div>
@@ -402,7 +413,33 @@ async function act(name, args = {}) {
 
 const secs = (blocks) => blocks * (CFG?.epochSeconds ?? 1);
 const dur = (s) => s < 90 ? `${s} s` : `${Math.round(s / 60)} min`;
-const txLink = (h) => CFG.explorer ? `<a href="${CFG.explorer}${h}" target="_blank" rel="noopener">${esc(h)}</a>` : esc(h);
+const txLink = (h, label) => CFG.explorer ? `<a href="${CFG.explorer}${h}" target="_blank" rel="noopener">${esc(label ?? h)}</a>` : esc(label ? `${label} (${h.slice(0, 10)}…)` : h);
+
+function introPanel() {
+  const cal = CFG.network === "calibnet";
+  return `<h2>How this demo works</h2>
+    <p class="muted">A storage provider that already stores your files (in a PDP data set on Filecoin) also sells <b>compute over them</b>, paid through <b>Filecoin Pay</b>. ${cal ? "Everything runs on Filecoin's Calibration test network, with test tokens." : "Everything runs on a local test chain, with test tokens."}</p>
+    <div class="intro3">
+      <div><b>1 · Who is who</b>You are the <b>client</b>. The <b>service provider</b> (SP) holds your data set and runs the programs. <b>ComputeService</b> is the smart contract that enforces the payment rules.</div>
+      <div><b>2 · Two ways to pay</b><b style="display:inline">Pay for time</b>: rent a service next to your files, billed per epoch until you stop. <b style="display:inline">Pay per job</b>: order a result; the price is held and paid only if the result lands in your data set before the deadline.</div>
+      <div><b>3 · What is real</b>Every step is a transaction${cal ? " (click any id to see it on Filfox)" : ""}: Filecoin Pay, PDP and Warm Storage contracts, your signatures, the containers. Simulated: proofs of possession (the SP is assumed honest). ${cal ? "Each step takes 30–60 s (one block every 30 s)." : ""}</div>
+    </div>`;
+}
+
+function datasetPanel() {
+  if (S.dataSetId === null || !S.files.length) return "";
+  const rows = S.files.map((f) => `<tr>
+      <td>#${f.pieceId}</td>
+      <td><a data-file="${f.pieceId}" style="cursor:pointer">${esc(f.name)}</a></td>
+      <td>${f.kind === "output" ? `<span class="pill">result${f.jobId ? ` of job #${f.jobId}` : ""}</span>` : "your file"}</td>
+      <td>${f.size} B</td>
+      <td class="mono" title="${esc(f.cid)}">${esc(f.cid.slice(0, 14))}…${esc(f.cid.slice(-6))}</td>
+      <td>${f.tx ? txLink(f.tx, "stored in this transaction") : "–"}</td></tr>`).join("");
+  return `<div class="row" style="justify-content:space-between"><h2>Your data set #${S.dataSetId}</h2>
+      <span class="muted">held by the service provider ${esc(CFG.provider.slice(0, 8))}…${S.dataSetTx ? ` · created in ${txLink(S.dataSetTx, "this transaction")}` : ""}</span></div>
+    <p class="muted">These are your files as stored on Filecoin: each one is a <b>piece</b> of your PDP data set, identified by its piece CID. Jobs read your files and add their results here as new pieces. Click a name to open the file.</p>
+    <div class="ds-wrap"><table class="ds"><tr><th>Piece</th><th>File</th><th>What</th><th>Size</th><th>Piece CID</th><th>On-chain</th></tr>${rows}</table></div>`;
+}
 
 function walletPanel() {
   if (CFG.network !== "calibnet") return "";
@@ -439,7 +476,7 @@ function scene() {
       <div class="big">${m(S.providerEarned)}</div><div class="unit">${CFG.token} earned (in Filecoin Pay)</div>
       <div class="note">${S.dataSetId !== null ? `Holds your data set #${S.dataSetId} (FWSS, proven with PDP). Click a file to open it. <span style="color:var(--money)">Green</span> = results added by jobs.` : "Does not hold files of yours yet."}</div>
       ${S.dataSetId !== null ? `<div class="note"><span class="pill">PDP proof ✓</span> last proven at block ${proven}, next at ${proven + PROVING_PERIOD} <span class="muted">(simulated: we assume an honest provider that proves every period)</span></div>` : ""}
-      <ul class="files">${files}</ul></div>
+      ${S.files.length ? `<div class="note">${S.files.length} files in your data set: see <b>Your data set</b> below.</div>` : ""}</div>
   </div>`;
 }
 
@@ -489,6 +526,7 @@ function timePanel() {
   const hist = past.map((s) => `<li><span>Session #${s.id}: ${s.rateStopped ? `stopped by you after ${dur(secs(s.stopBlock - s.startBlock))}` : s.startBlock ? "ended when your money ran out" : "never started"}</span><span class="sz">${m(s.usedSoFar)} ${CFG.token}</span></li>`).join("");
   return `<h2>Pay for time: rent a search assistant over your files</h2>
     <p class="muted">Like renting a machine in the cloud. You pay per epoch while it runs; when you stop, payment stops at that epoch.</p>
+    <div class="jobcard"><b>What it does.</b> ${esc(CFG.params.session.desc)} Try words like <code>revenue</code>, <code>customer</code>, <code>filecoin</code>.</div>
     ${body}${hist ? `<ul class="files">${hist}</ul>` : ""}`;
 }
 
@@ -507,6 +545,8 @@ function jobPanel() {
   return `<h2>Pay per job: order a result</h2>
     <p class="muted">The price is put on hold. The provider runs the program on your files and adds the result to your data set; it is paid only if it does so before the deadline.</p>
     <div class="row"><select id="jobsel">${opts}</select><button class="b primary" data-act="postJob" ${busy ? "disabled" : ""}>Order</button></div>
+    <div class="jobcard"><b>What this job does.</b> ${esc(CFG.params.jobs[pick].desc)}<br>
+      <span class="muted">Reads: ${esc(CFG.params.jobs[pick].reads)} · Writes: ${esc(CFG.params.jobs[pick].writes)} · Price: ${m(J[pick].price)} ${CFG.token}, paid only on delivery · Deadline: ${dur(secs(J[pick].deadline))}. The SP runs the program in a container next to your files (no network, your files read-only).</span></div>
     <div class="jobs">${list || `<p class="muted">No jobs yet.</p>`}</div>`;
 }
 
@@ -520,6 +560,9 @@ function render() {
   $("chain").innerHTML = `<b>●</b> ${CFG.network === "calibnet" ? "Filecoin Calibration" : "local chain"} · block ${S.block}<br>Filecoin Pay ${C().payments.slice(0, 10)}…<br>ComputeService ${(C().cs ?? "").slice(0, 10)}…`;
   const w = walletPanel();
   $("wallet").hidden = !w; $("wallet").innerHTML = w;
+  $("intro").innerHTML = introPanel();
+  const ds = datasetPanel();
+  $("dataset").hidden = !ds; $("dataset").innerHTML = ds;
   $("scene").innerHTML = scene();
   const st = $("story");
   st.className = "story" + (message?.err ? " err" : "");
@@ -568,7 +611,7 @@ document.addEventListener("click", async (e) => {
   if (a === "openSession" || a === "closeSession") answers = null;
   act(a, { amount: t.dataset.amount, id: t.dataset.id });
 });
-document.addEventListener("change", (e) => { if (e.target.id === "jobsel") pick = e.target.value; });
+document.addEventListener("change", (e) => { if (e.target.id === "jobsel") { pick = e.target.value; render(); } });
 document.addEventListener("submit", async (e) => {
   if (e.target.id !== "askform") return;
   e.preventDefault();

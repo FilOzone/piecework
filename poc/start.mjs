@@ -89,11 +89,15 @@ const NET = CAL
 
 const PARAMS = {
   walletStart: U(5), // local only
-  session: { name: "Search assistant over your files", image: "search:v1", ...NET.session },
+  session: { name: "Search assistant over your files", image: "search:v1", ...NET.session,
+    desc: "A small service the provider starts next to your files. While it runs you can ask it to search your files for a word; it answers with the matching lines. Think of it as a stand-in for an AI assistant over your documents: you pay for the time it runs, not per question." },
   jobs: {
-    index: { name: "Build a search index of my files", image: "indexer:v1", price: U("0.5"), deadline: NET.deadlines.index },
-    sales: { name: "Summarise my sales table", image: "sales-report:v1", price: U("0.2"), deadline: NET.deadlines.sales },
-    late: { name: "Build a search index (provider will be late)", image: "indexer-slow:v1", price: U("0.5"), deadline: NET.deadlines.late },
+    index: { name: "Build a search index of my files", image: "indexer:v1", price: U("0.5"), deadline: NET.deadlines.index,
+      desc: "Reads your text files and builds an index: every word, and which files contain it.", reads: "your .txt files", writes: "search-index.txt" },
+    sales: { name: "Summarise my sales table", image: "sales-report:v1", price: U("0.2"), deadline: NET.deadlines.sales,
+      desc: "Reads your sales table and adds up customers and revenue per region, plus the total.", reads: "sales-2026.csv", writes: "sales-summary.txt" },
+    late: { name: "Build a search index (provider will be late)", image: "indexer-slow:v1", price: U("0.5"), deadline: NET.deadlines.late,
+      desc: "Same program as the search index, but the provider deliberately misses the deadline, to show what happens then: nobody is paid, and a \"Get my money back\" button appears.", reads: "your .txt files", writes: "nothing (late)" },
   },
   approval: NET.approval,
 };
@@ -239,7 +243,7 @@ async function createDataSetFor(client, clientDataSetId, signature) {
   const deposit = await read(C.pdp, ABI.PDPVerifier, "FIL_CLEANUP_DEPOSIT");
   const r = await send(providerAcct, C.pdp, ABI.PDPVerifier, "createDataSet",
     [C.fwss, FOC.createDataSetExtraData(client, BigInt(clientDataSetId), signature)], "create data set", deposit);
-  ST.clients[client] = { dataSetId: Number(dataSetId), clientDataSetId: String(clientDataSetId), pieces: {} };
+  ST.clients[client] = { dataSetId: Number(dataSetId), clientDataSetId: String(clientDataSetId), pieces: {}, createTx: r.tx };
   saveState();
   plog(`Created your data set #${dataSetId} on FWSS (signed by you).`, r);
   return { dataSetId: Number(dataSetId), ...r };
@@ -254,7 +258,7 @@ async function addSampleFilesFor(client, nonce, signature) {
     [BigInt(c.dataSetId), ZERO, files.map((f) => ({ data: f.hex })), FOC.addPiecesExtraData(BigInt(nonce), signature)], "add your files");
   files.forEach((f, i) => {
     fs.copyFileSync(path.join(HERE, "data", "dataset", f.name), path.join(clientDir(client), f.name));
-    c.pieces[first + i] = { name: f.name, cid: f.text, kind: "input" };
+    c.pieces[first + i] = { name: f.name, cid: f.text, kind: "input", tx: r.tx };
   });
   saveState();
   plog(`Stored your ${files.length} files as pieces #${first}–#${first + files.length - 1} of data set #${c.dataSetId} (signed by you).`, r);
@@ -289,7 +293,7 @@ async function prepareLocalClient() {
 
 // Add a job output (a file in the provider's storage) to the client's data set, signed by the provider:
 // FWSS accepts it only through ComputeService's authorizer, while the client has a job open with this provider.
-async function addOutputPiece(client, name) {
+async function addOutputPiece(client, name, jobId) {
   const c = cl(client);
   const cid = await FOC.pieceCid(fs.readFileSync(path.join(clientDir(client), name)));
   const nonce = FOC.randomNonce();
@@ -298,7 +302,7 @@ async function addOutputPiece(client, name) {
   const pieceId = Number(await read(C.pdp, ABI.PDPVerifier, "getNextPieceId", [BigInt(c.dataSetId)]));
   const r = await send(providerAcct, C.pdp, ABI.PDPVerifier, "addPieces",
     [BigInt(c.dataSetId), ZERO, [{ data: cid.hex }], FOC.addPiecesExtraData(nonce, sig)], `add piece ${name}`);
-  c.pieces[pieceId] = { name, cid: cid.text, kind: "output" };
+  c.pieces[pieceId] = { name, cid: cid.text, kind: "output", tx: r.tx, jobId: Number(jobId) };
   saveState();
   return { pieceId, cid: cid.text, ...r };
 }
@@ -313,7 +317,7 @@ async function listFiles(client = current) {
     const p = c.pieces[i] ?? { name: `piece ${i}`, cid: "", kind: "input" };
     const f = path.join(clientDir(client), p.name);
     const size = fs.existsSync(f) ? fs.statSync(f).size : 0;
-    out.push({ pieceId: i, name: p.name, cid: p.cid, live, size, kind: p.kind });
+    out.push({ pieceId: i, name: p.name, cid: p.cid, live, size, kind: p.kind, tx: p.tx ?? null, jobId: p.jobId ?? null });
   }
   return out;
 }
@@ -451,7 +455,7 @@ async function runJob(jobId, client, spec, inputPieceIds, deadline) {
   fs.copyFileSync(path.join(dir, "out", spec.output), path.join(clientDir(client), out));
   J.stage = "storing";
   let p;
-  try { p = await addOutputPiece(client, out); }
+  try { p = await addOutputPiece(client, out, jobId); }
   catch (e) {
     J.stage = "blocked";
     return plog(`Job #${jobId}: FWSS refused to add the result to your data set (${reason(e)}). Did you let providers deliver results into your data set? (step 1)`);
@@ -461,6 +465,42 @@ async function runJob(jobId, client, spec, inputPieceIds, deadline) {
   const r = await send(providerAcct, C.cs, ABI.ComputeService, "commitOutputs", [jobId, [BigInt(p.pieceId)]]);
   J.stage = "paid";
   plog(`Job #${jobId}: result committed on-chain; Filecoin Pay released the price to me.`, r);
+}
+
+// ---------------------------------------------------------------- recovery after a restart (calibnet)
+
+// The chain is the source of truth: rebuild running sessions (restart their containers, keep settling)
+// and open jobs (so the page shows them and the client can get a refund) from ComputeService's state.
+async function recoverFromChain() {
+  const latest = await pub.getBlockNumber();
+  const readyBlock = async (id) => { // SessionReady carries the epoch billing started
+    for (let to = latest; to > latest - 20000n && to > 0n; to -= 2000n) {
+      const logs = await pub.getContractEvents({ address: C.cs, abi: ABI.ComputeService, eventName: "SessionReady",
+        args: { sessionId: BigInt(id) }, fromBlock: to - 1999n, toBlock: to }).catch(() => []);
+      if (logs.length) return Number(logs[0].args.epoch);
+    }
+    return undefined;
+  };
+  const nS = Number(await read(C.cs, ABI.ComputeService, "nextSessionId"));
+  for (let id = 1; id < nS; id++) {
+    const s = await read(C.cs, ABI.ComputeService, "sessions", [BigInt(id)]);
+    if (getAddress(s[1]) !== A.provider || Number(s[7]) !== 2) continue; // only running sessions of this provider
+    sessionInfo[id] = { client: s[0], railId: s[2], startBlock: await readyBlock(id) };
+    await execFile("docker", ["run", "-d", "--rm", "--name", container(id), "--network", "none",
+      "-v", `${clientDir(s[0])}:/data:ro`, "alpine:3.20", "sleep", "1d"], XENV).catch(() => {});
+    toSettle.add(s[2]);
+    plog(`Recovered running session #${id} after a restart; service restarted, billing continues until the client stops.`);
+  }
+  const nJ = Number(await read(C.cs, ABI.ComputeService, "nextJobId"));
+  for (let id = 1; id < nJ; id++) {
+    const j = await read(C.cs, ABI.ComputeService, "jobs", [BigInt(id)]);
+    if (getAddress(j[1]) !== A.provider) continue;
+    const image = IMAGE_BY_DIGEST[j[6]];
+    const name = Object.values(PARAMS.jobs).find((x) => x.image === image)?.name ?? image;
+    const out = Object.entries(cl(j[0])?.pieces ?? {}).find(([, p]) => p.jobId === id);
+    const stage = { 1: "received", 2: "paid", 3: "refunded" }[Number(j[8])];
+    jobInfo[id] = { client: j[0], name, image, stage, output: out ? { name: out[1].name, pieceId: Number(out[0]), cid: out[1].cid } : undefined };
+  }
 }
 
 // ---------------------------------------------------------------- event loop
@@ -514,6 +554,7 @@ async function state(who) {
     storageApproved: approval[0], computeApproved: csApproval[0], fil: fmt(await pub.getBalance({ address: current })) };
   const c = cl(current);
   out.dataSetId = c ? c.dataSetId : null;
+  out.dataSetTx = c?.createTx ?? null;
   out.hasFiles = c ? Object.keys(c.pieces).length > 0 : false;
   if (c) out.authorizerSet = getAddress(await read(C.view, ABI.FilecoinWarmStorageServiceStateView, "getDataSetAuthorizer", [BigInt(c.dataSetId)]).catch(() => ZERO)) === C.cs;
   out.files = await listFiles(current);
@@ -546,8 +587,8 @@ async function config() {
     accessMessage: accessMessage("{id}"),
     demoClient: demoAcct?.address ?? null,
     params: {
-      session: { image: digest(PARAMS.session.image), name: PARAMS.session.name, rate: PARAMS.session.rate.toString(), lockupPeriod: PARAMS.session.lockupPeriod.toString() },
-      jobs: Object.fromEntries(Object.entries(PARAMS.jobs).map(([k, j]) => [k, { name: j.name, image: digest(j.image), price: j.price.toString(), deadline: j.deadline.toString(), inputs: JOB_SCRIPTS[j.image].inputs.toString() }])),
+      session: { image: digest(PARAMS.session.image), name: PARAMS.session.name, desc: PARAMS.session.desc, rate: PARAMS.session.rate.toString(), lockupPeriod: PARAMS.session.lockupPeriod.toString() },
+      jobs: Object.fromEntries(Object.entries(PARAMS.jobs).map(([k, j]) => [k, { name: j.name, desc: j.desc, reads: j.reads, writes: j.writes, image: digest(j.image), price: j.price.toString(), deadline: j.deadline.toString(), inputs: JOB_SCRIPTS[j.image].inputs.toString() }])),
       approval: Object.fromEntries(Object.entries(PARAMS.approval).map(([k, v]) => [k, v.toString()])),
       storage: Object.fromEntries(Object.entries(NET.storage).map(([k, v]) => [k, v.toString()])),
     },
@@ -717,6 +758,7 @@ async function main() {
     const r = await prepareLocalClient();
     plog(`I hold your data set #${cl().dataSetId} on FWSS (${(await listFiles()).length} files; storage paid through Filecoin Pay; proofs of possession simulated: I act as an honest provider that proves every period).`, r);
   }
+  if (CAL) await recoverFromChain();
   lastBlock = await pub.getBlockNumber();
   eventLoop();
   serve();
