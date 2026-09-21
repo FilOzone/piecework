@@ -406,11 +406,13 @@ const txLink = (h) => CFG.explorer ? `<a href="${CFG.explorer}${h}" target="_bla
 
 function walletPanel() {
   if (CFG.network !== "calibnet") return "";
+  const low = me && S?.client && (n(S.client.fil) < 1 || n(S.client.wallet) + n(S.client.available) < 1)
+    ? `<p class="story err" style="margin:6px 0 0">This wallet is running low on test tokens (${m(S.client.fil)} tFIL, ${m(S.client.wallet)} ${CFG.token} in the wallet). ${usingDemo ? "Ask @lucaniz to top up the demo wallet." : "Top up from the calibnet faucets."}</p>` : "";
   const who = me ? `<p class="muted">You are the client: <code>${esc(me)}</code> (${usingDemo ? "demo wallet" : "your MetaMask"}). The storage provider is the demo program: <code>${esc(CFG.provider)}</code>.</p>` : "";
   const demo = CFG.demoClient ? `<button class="b ${me ? "" : "primary"}" id="usedemo">Use the demo wallet (no MetaMask)</button>` : "";
   const mm = window.ethereum ? `<button class="b" id="connect">Connect MetaMask</button>` : "";
   return `<div class="row" style="justify-content:space-between"><div><h2>${me ? "Who is who" : "Choose who plays the client"}</h2>
-    ${me ? who : `<p class="muted">Demo wallet: the demo program signs for you, with test tokens; just click. MetaMask: you sign every step yourself.</p>`}</div>
+    ${me ? who + low : `<p class="muted">Demo wallet: the demo program signs for you, with test tokens; just click. MetaMask: you sign every step yourself.</p>`}</div>
     <div class="row">${demo}${mm}</div></div>`;
 }
 
@@ -424,7 +426,7 @@ function scene() {
   return `<div class="scene">
     <div class="actor"><div class="who">${icon.you}You${me ? ` · ${me.slice(0, 6)}…${me.slice(-4)}` : ""}</div>
       <div class="big">${c ? m(c.available) : "–"}</div><div class="unit">${CFG.token} free in Filecoin Pay</div>
-      <div class="note">${c ? `Wallet (outside Filecoin Pay): ${m(c.wallet)} ${CFG.token}${c.fundedUntil ? `<br>Funded until block ${c.fundedUntil}` : ""}` : "Not connected"}</div></div>
+      <div class="note">${c ? `In your wallet, not yet deposited in Filecoin Pay: ${m(c.wallet)} ${CFG.token}${c.fundedUntil ? `<br>Funded until block ${c.fundedUntil}` : ""}` : "Not connected"}</div></div>
     <div class="flow ${f1?.cls ?? ""}"><span class="arr">→</span><span>${f1?.t ?? ""}</span></div>
     <div class="actor pay"><div class="who">${icon.pay}On hold in Filecoin Pay</div>
       <div class="big">${c ? m(c.onHold) : "–"}</div><div class="unit">${CFG.token} held (safety margin, job price, and your storage reserve)</div></div>

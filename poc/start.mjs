@@ -511,7 +511,7 @@ async function state(who) {
   const csApproval = C.cs ? await read(C.payments, ABI.FilecoinPayV1, "operatorApprovals", [C.usdfc, current, C.cs]) : [false];
   out.client = { address: current, wallet: fmt(walletBal), inFilecoinPay: fmt(funds), available: fmt(available),
     onHold: fmt(funds - available), fundedUntil: fundedUntil > 10n ** 30n ? null : Number(fundedUntil),
-    storageApproved: approval[0], computeApproved: csApproval[0] };
+    storageApproved: approval[0], computeApproved: csApproval[0], fil: fmt(await pub.getBalance({ address: current })) };
   const c = cl(current);
   out.dataSetId = c ? c.dataSetId : null;
   out.hasFiles = c ? Object.keys(c.pieces).length > 0 : false;
