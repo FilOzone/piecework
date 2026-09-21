@@ -54,6 +54,8 @@ What is real and what is a stand-in:
 
 ## On Filecoin Calibration (public test network)
 
+**Try it:** https://lucaniz.github.io/foc-compute-poc (live demo on calibnet; click "Use the demo wallet"). The link forwards to the demo served from Luca's laptop, so it can be offline.
+
 ComputeService is deployed on calibnet at [`0x04347c64F010f256f529aC94BC8Fe7A81abDf45A`](https://calibration.filfox.info/en/address/0x04347c64F010f256f529aC94BC8Fe7A81abDf45A) (redeployed 2026-09-21 with data set ownership checks; first version at `0xb16534a9…27b5F1`) (see `poc/calibnet.json`), next to FilOz's own calibnet deployment of Filecoin Pay, PDPVerifier and FWSS. The demo provider is registered in FilOz's provider registry as **PieceWork_demo** (id 41).
 
 **Start:** `cd poc && node start.mjs --calibnet`, then open http://localhost:8080. The page offers two ways to play the client:
