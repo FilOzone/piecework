@@ -27,6 +27,29 @@ interface IDataSetAuthorizer {
     ) external returns (bool authorized);
 }
 
+/// @notice The part of FWSS's view contract ComputeService needs: who owns (pays for) a data set, and which
+///         service provider holds it (FilecoinWarmStorageServiceStateView.getDataSet, filecoin-services at 4cbbea4, L82;
+///         struct FilecoinWarmStorageService.DataSetInfoView, L165).
+interface IDataSetView {
+    struct DataSetInfoView {
+        uint256 pdpRailId;
+        uint256 cacheMissRailId;
+        uint256 cdnRailId;
+        address payer;
+        address payee;
+        address serviceProvider;
+        uint256 commissionBps;
+        uint256 clientDataSetId;
+        uint256 pdpEndEpoch;
+        uint256 providerId;
+        uint96 pendingOneTimePayments;
+        uint96 lifecycleReserveBalance;
+        uint256 dataSetId;
+    }
+
+    function getDataSet(uint256 dataSetId) external view returns (DataSetInfoView memory);
+}
+
 /// @notice The part of SessionKeyRegistry the authorizer needs (FilOzone/SessionKeyRegistry).
 interface ISessionKeyRegistry {
     function authorizationExpiry(address user, address signer, bytes32 permission) external view returns (uint256);
@@ -82,6 +105,7 @@ contract ComputeService is IDataSetAuthorizer {
     IERC20 public immutable token;
     IPieceLiveness public immutable pdp;
     ISessionKeyRegistry public immutable sessionKeys; // address(0) = no session keys (local POC)
+    IDataSetView public immutable dataSets; // FWSS view: owner (payer) and service provider of each data set
 
     // FWSS operation id for adding pieces (SignatureVerificationLib.ADD_PIECES_TYPEHASH, filecoin-services at 4cbbea4, L29)
     bytes32 public constant ADD_PIECES_TYPEHASH = keccak256(
@@ -119,12 +143,29 @@ contract ComputeService is IDataSetAuthorizer {
     error DeadlineNotPassed();
     error DeadlineInPast();
     error OutputNotNew(uint256 pieceId);
+    error NotDataSetOwner(uint256 dataSetId, address caller);
+    error NotDataSetProvider(uint256 dataSetId, address provider);
 
-    constructor(FilecoinPayV1 payments_, IERC20 token_, IPieceLiveness pdp_, ISessionKeyRegistry sessionKeys_) {
+    constructor(
+        FilecoinPayV1 payments_,
+        IERC20 token_,
+        IPieceLiveness pdp_,
+        ISessionKeyRegistry sessionKeys_,
+        IDataSetView dataSets_
+    ) {
         payments = payments_;
         token = token_;
         pdp = pdp_;
         sessionKeys = sessionKeys_;
+        dataSets = dataSets_;
+    }
+
+    /// Only the owner (payer) of a data set can buy compute over it, and only from the service provider that
+    /// holds it: compute happens where the data is, on data the caller controls.
+    function _checkDataSet(uint256 dataSetId, address provider) internal view {
+        IDataSetView.DataSetInfoView memory d = dataSets.getDataSet(dataSetId);
+        if (d.payer != msg.sender) revert NotDataSetOwner(dataSetId, msg.sender);
+        if (d.serviceProvider != provider) revert NotDataSetProvider(dataSetId, provider);
     }
 
     // ================================================================ pay for time
@@ -135,6 +176,7 @@ contract ComputeService is IDataSetAuthorizer {
         external
         returns (uint256 sessionId)
     {
+        _checkDataSet(dataSetId, provider);
         uint256 railId = payments.createRail(token, msg.sender, provider, address(0), 0, address(0));
         payments.modifyRailLockup(railId, lockupPeriod, 0);
         sessionId = nextSessionId++;
@@ -183,6 +225,7 @@ contract ComputeService is IDataSetAuthorizer {
         uint256 deadline
     ) external returns (uint256 jobId) {
         if (deadline <= block.number) revert DeadlineInPast();
+        _checkDataSet(dataSetId, provider);
         for (uint256 i = 0; i < inputPieceIds.length; i++) {
             if (!pdp.pieceLive(dataSetId, inputPieceIds[i])) revert PieceNotLive(dataSetId, inputPieceIds[i]);
         }

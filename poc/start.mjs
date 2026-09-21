@@ -26,6 +26,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   createPublicClient, createWalletClient, http as rpc, parseUnits, formatUnits, keccak256, toHex, BaseError, getAddress,
+  verifyMessage, hexToString,
 } from "viem";
 import { foundry, filecoinCalibration } from "viem/chains";
 import { privateKeyToAccount, generatePrivateKey } from "viem/accounts";
@@ -46,7 +47,8 @@ const NETWORK = process.argv.includes("--calibnet") ? "calibnet" : "local";
 const CAL = NETWORK === "calibnet";
 // Working files live outside ~/Documents: macOS asks for extra permission before Docker can read Documents.
 const RUN = path.join(process.env.HOME, ".foc-compute-poc", NETWORK);
-const STORAGE = path.join(RUN, "storage"); // the provider's copy of the client's data set
+const STORAGE = path.join(RUN, "storage"); // the provider's copies of its clients' data sets, one folder per client
+const clientDir = (client) => { const d = path.join(STORAGE, getAddress(client)); fs.mkdirSync(d, { recursive: true }); return d; };
 const STATE_FILE = path.join(RUN, "state.json"); // calibnet: survives restarts
 const KEY_FILE = path.join(RUN, "provider.key"); // calibnet: provider key, owner-readable only
 const DEMO_KEY_FILE = path.join(RUN, "demo-client.key"); // calibnet: demo client key (test tokens only), owner-readable only
@@ -251,7 +253,7 @@ async function addSampleFilesFor(client, nonce, signature) {
   const r = await send(providerAcct, C.pdp, ABI.PDPVerifier, "addPieces",
     [BigInt(c.dataSetId), ZERO, files.map((f) => ({ data: f.hex })), FOC.addPiecesExtraData(BigInt(nonce), signature)], "add your files");
   files.forEach((f, i) => {
-    fs.copyFileSync(path.join(HERE, "data", "dataset", f.name), path.join(STORAGE, f.name));
+    fs.copyFileSync(path.join(HERE, "data", "dataset", f.name), path.join(clientDir(client), f.name));
     c.pieces[first + i] = { name: f.name, cid: f.text, kind: "input" };
   });
   saveState();
@@ -289,7 +291,7 @@ async function prepareLocalClient() {
 // FWSS accepts it only through ComputeService's authorizer, while the client has a job open with this provider.
 async function addOutputPiece(client, name) {
   const c = cl(client);
-  const cid = await FOC.pieceCid(fs.readFileSync(path.join(STORAGE, name)));
+  const cid = await FOC.pieceCid(fs.readFileSync(path.join(clientDir(client), name)));
   const nonce = FOC.randomNonce();
   const signer = CAL ? providerAcct : { signTypedData: (args) => wallet.signTypedData({ account: A.provider, ...args }) };
   const sig = await FOC.signAddPieces(signer, { chainId: NET.chain.id, fwss: C.fwss, clientDataSetId: BigInt(c.clientDataSetId), nonce, cids: [cid.hex] });
@@ -309,7 +311,8 @@ async function listFiles(client = current) {
   for (let i = 0; i < n; i++) {
     const live = await read(C.pdp, ABI.PDPVerifier, "pieceLive", [BigInt(c.dataSetId), BigInt(i)]);
     const p = c.pieces[i] ?? { name: `piece ${i}`, cid: "", kind: "input" };
-    const size = fs.existsSync(path.join(STORAGE, p.name)) ? fs.statSync(path.join(STORAGE, p.name)).size : 0;
+    const f = path.join(clientDir(client), p.name);
+    const size = fs.existsSync(f) ? fs.statSync(f).size : 0;
     out.push({ pieceId: i, name: p.name, cid: p.cid, live, size, kind: p.kind });
   }
   return out;
@@ -337,7 +340,7 @@ async function onSessionOpened({ sessionId, client, provider, railId, imageDiges
   plog(`Session #${sessionId} requested (${IMAGE_BY_DIGEST[imageDigest] ?? "unknown program"}). Starting the service next to your data…`);
   try {
     await execFile("docker", ["run", "-d", "--rm", "--name", container(sessionId), "--network", "none",
-      "-v", `${STORAGE}:/data:ro`, "alpine:3.20", "sleep", "1d"], XENV);
+      "-v", `${clientDir(client)}:/data:ro`, "alpine:3.20", "sleep", "1d"], XENV); // only this client's files
     const r = await send(providerAcct, C.cs, ABI.ComputeService, "sessionReady", [sessionId]);
     plog(`Service running. Billing starts now (block ${r.block}).`, r);
     toSettle.add(railId);
@@ -393,9 +396,14 @@ async function providerTick(block) {
   }
 }
 
-async function ask(sessionId, question) {
+// Session requests are served only to the session's client: the page signs, once per session, the message
+// below with the client's wallet (a signature, no transaction); the provider checks it against the session's client.
+export const accessMessage = (sessionId) => `PieceWork: access to session #${sessionId} on chain ${NET.chain.id}`;
+async function ask(sessionId, question, signature) {
   const s = await read(C.cs, ABI.ComputeService, "sessions", [BigInt(sessionId)]);
   if (Number(s[7]) !== 2) throw new Error("this session is not running");
+  const ok = signature && await verifyMessage({ address: s[0], message: accessMessage(sessionId), signature }).catch(() => false);
+  if (!ok) throw new Error("not signed by this session's client");
   const q = String(question).slice(0, 80);
   const { stdout } = await execFile("docker", ["exec", "-e", `Q=${q}`, container(sessionId), "sh", "-c",
     'grep -rin -- "$Q" /data | sed "s|^/data/||" | head -20'], XENV).catch((e) => ({ stdout: e.stdout ?? "" }));
@@ -426,7 +434,7 @@ async function runJob(jobId, client, spec, inputPieceIds, deadline) {
   fs.mkdirSync(path.join(dir, "out"), { recursive: true });
   for (const id of inputPieceIds) {
     const name = c.pieces[Number(id)]?.name;
-    if (name && spec.inputs(name)) fs.copyFileSync(path.join(STORAGE, name), path.join(dir, "in", name));
+    if (name && spec.inputs(name)) fs.copyFileSync(path.join(clientDir(client), name), path.join(dir, "in", name));
   }
   J.stage = "running";
   plog(`Job #${jobId}: running the program in a container on your files (no network, read-only inputs)…`);
@@ -439,8 +447,8 @@ async function runJob(jobId, client, spec, inputPieceIds, deadline) {
   await execFile("docker", ["run", "--rm", "--network", "none", "-v", `${dir}/in:/in:ro`, "-v", `${dir}/out:/out`,
     "alpine:3.20", "sh", "-c", spec.script], XENV);
   let out = spec.output, k = 2; // unique name in the data set
-  while (fs.existsSync(path.join(STORAGE, out))) out = spec.output.replace(/(\.[^.]+)$/, ` (${k++})$1`);
-  fs.copyFileSync(path.join(dir, "out", spec.output), path.join(STORAGE, out));
+  while (fs.existsSync(path.join(clientDir(client), out))) out = spec.output.replace(/(\.[^.]+)$/, ` (${k++})$1`);
+  fs.copyFileSync(path.join(dir, "out", spec.output), path.join(clientDir(client), out));
   J.stage = "storing";
   let p;
   try { p = await addOutputPiece(client, out); }
@@ -535,6 +543,7 @@ async function config() {
     network: NETWORK, chainId: NET.chain.id, chainName: NET.chain.name, rpc: NET.rpc, explorer: NET.explorer,
     epochSeconds: NET.epochSeconds, token: NET.token, contracts: C, provider: A.provider,
     localClient: CAL ? null : A.client,
+    accessMessage: accessMessage("{id}"),
     demoClient: demoAcct?.address ?? null,
     params: {
       session: { image: digest(PARAMS.session.image), name: PARAMS.session.name, rate: PARAMS.session.rate.toString(), lockupPeriod: PARAMS.session.lockupPeriod.toString() },
@@ -565,9 +574,9 @@ function serve() {
       if (req.method === "GET" && url.pathname.startsWith("/api/file/")) {
         const owner = CAL ? url.searchParams.get("client") : current;
         const name = owner ? cl(owner)?.pieces[Number(url.pathname.split("/").pop())]?.name : undefined;
-        if (!name || !fs.existsSync(path.join(STORAGE, name))) { res.writeHead(404); return res.end("unknown piece"); }
+        if (!name || !fs.existsSync(path.join(clientDir(owner), name))) { res.writeHead(404); return res.end("unknown piece"); }
         res.writeHead(200, { "content-type": "text/plain; charset=utf-8" });
-        return res.end(fs.readFileSync(path.join(STORAGE, name)));
+        return res.end(fs.readFileSync(path.join(clientDir(owner), name)));
       }
       if (req.method === "POST" && url.pathname.startsWith("/api/")) {
         let body = ""; for await (const ch of req) body += ch;
@@ -581,7 +590,7 @@ function serve() {
           }
           if (action === "wallet") return json(200, { result: await demoWalletRequest(a.method, a.params) });
           if (action === "clientlog") { clientLog.push({ t: Date.now(), text: a.what, fn: a.fn, tx: a.tx, block: a.block }); return json(200, { ok: true }); }
-          if (action === "ask") return json(200, { lines: await ask(a.sessionId, a.question) });
+          if (action === "ask") return json(200, { lines: await ask(a.sessionId, a.question, a.signature) });
           if (action === "dataset/create") {
             if (cl(a.client)) throw new Error("this wallet already has a data set with this provider");
             const now = Date.now();
@@ -635,6 +644,11 @@ async function demoWalletRequest(method, params) {
       throw new Error("the demo wallet only signs FWSS data set requests");
     return demoAcct.signTypedData({ domain: { ...domain, chainId: Number(domain.chainId) }, types: rest, primaryType, message: coerce(rest, primaryType, message) });
   }
+  if (method === "personal_sign") {
+    const text = params[0].startsWith("0x") ? hexToString(params[0]) : params[0];
+    if (!/^PieceWork: access to session #\d+ on chain \d+$/.test(text)) throw new Error("the demo wallet only signs session access");
+    return demoAcct.signMessage({ message: text });
+  }
   throw new Error(`unsupported wallet method ${method}`);
 }
 
@@ -659,7 +673,7 @@ async function calibnetCommand() {
   }
   if (process.argv.includes("--deploy")) {
     const a = FOC.artifact("ComputeService");
-    const args = [C.payments, C.usdfc, C.pdp, C.sessionKeys];
+    const args = [C.payments, C.usdfc, C.pdp, C.sessionKeys, C.view];
     const hash = await wallet.deployContract({ abi: a.abi, bytecode: a.bytecode, args, chain: filecoinCalibration });
     say("Deploy transaction sent:", hash, "— waiting for confirmation (about a minute)…");
     const r = await pub.waitForTransactionReceipt({ hash, timeout: 600_000 });
@@ -687,6 +701,11 @@ async function main() {
     await connectCalibnet();
     if (!C.cs) throw new Error("ComputeService is not deployed on calibnet yet. Run: node start.mjs --calibnet --deploy");
     ST = loadJSON(STATE_FILE, ST);
+    for (const [addr, c] of Object.entries(ST.clients)) // move files from the old shared folder into the client's own
+      for (const p of Object.values(c.pieces)) {
+        const old = path.join(STORAGE, p.name);
+        if (fs.existsSync(old) && fs.statSync(old).isFile() && !fs.existsSync(path.join(clientDir(addr), p.name))) fs.renameSync(old, path.join(clientDir(addr), p.name));
+      }
     const registered = await read(C.registry, ABI.ServiceProviderRegistry, "getProviderIdByAddress", [A.provider]);
     if (registered === 0n) throw new Error("The provider is not registered yet. Run: node start.mjs --calibnet --register");
     plog(`Provider ${A.provider} on calibnet (registry id ${registered}). Proofs of possession simulated: I act as an honest provider that proves every period.`);

@@ -203,6 +203,7 @@ const EIP712Types = {
 
 let CFG, chain, pub, wal, me = null, usingDemo = false;
 let S = null, busy = false, tab = "time", message = null, answers = null, lastQ = "", pick = "index";
+const accessSigs = {}; // session id -> signature proving the session is yours
 
 // ---------------------------------------------------------------- wallet and transactions
 
@@ -243,7 +244,7 @@ const demoProvider = {
   async request({ method, params }) {
     if (method === "eth_accounts" || method === "eth_requestAccounts") return [CFG.demoClient];
     if (method === "eth_chainId") return toHex(CFG.chainId);
-    if (method === "eth_sendTransaction" || method === "eth_signTypedData_v4") {
+    if (method === "eth_sendTransaction" || method === "eth_signTypedData_v4" || method === "personal_sign") {
       const r = await fetch("/api/wallet", { method: "POST", body: JSON.stringify({ method, params }, (k, v) => typeof v === "bigint" ? toHex(v) : v) }).then((r) => r.json());
       if (r.error) throw new Error(r.error);
       return r.result;
@@ -567,7 +568,13 @@ document.addEventListener("submit", async (e) => {
   const running = S.sessions.find((s) => s.status === "running");
   lastQ = $("q").value.trim();
   if (!running || !lastQ) return;
-  const r = await fetch("/api/ask", { method: "POST", body: JSON.stringify({ sessionId: running.id, question: lastQ }) }).then((r) => r.json());
+  // prove to the provider that you are this session's client: one signature per session (no transaction, no fee)
+  if (!accessSigs[running.id]) {
+    message = { text: CFG.network === "calibnet" && !usingDemo ? "Sign in MetaMask to prove to the provider that this session is yours (a signature, no fee; once per session)." : "Signing the session access (once per session)…" }; render();
+    try { accessSigs[running.id] = await wal.signMessage({ message: CFG.accessMessage.replace("{id}", running.id) }); }
+    catch (err) { message = { err: true, text: reason(err) }; return render(); }
+  }
+  const r = await fetch("/api/ask", { method: "POST", body: JSON.stringify({ sessionId: running.id, question: lastQ, signature: accessSigs[running.id] }) }).then((r) => r.json());
   answers = r.lines ?? [r.error];
   message = { text: "The question ran inside the provider's container, next to your files. Billing continues per epoch until you stop." };
   $("q").blur(); render();

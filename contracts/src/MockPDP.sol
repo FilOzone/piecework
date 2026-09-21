@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 pragma solidity ^0.8.27;
 
+import {IDataSetView} from "./ComputeService.sol";
+
 /// @title MockPDP (local POC only)
 /// @notice Stand-in for PDPVerifier on a local chain, where no real storage provider proves possession.
 ///         Keeps, per data set, a list of pieces (name + piece CID string) and whether each is live.
@@ -15,15 +17,17 @@ contract MockPDP {
     }
 
     mapping(uint256 => address) public dataSetOwner;          // the storage provider of the data set
+    mapping(uint256 => address) public dataSetPayer;          // the client who owns (pays for) the data set
     mapping(uint256 => Piece[]) internal pieces;               // pieceId = index
     uint256 public nextDataSetId = 1;
 
     event DataSetCreated(uint256 indexed setId, address indexed provider);
     event PieceAdded(uint256 indexed setId, uint256 indexed pieceId, string name, string pieceCid);
 
-    function createDataSet() external returns (uint256 setId) {
+    function createDataSet(address payer) external returns (uint256 setId) {
         setId = nextDataSetId++;
         dataSetOwner[setId] = msg.sender;
+        dataSetPayer[setId] = payer;
         emit DataSetCreated(setId, msg.sender);
     }
 
@@ -46,5 +50,12 @@ contract MockPDP {
     function getPiece(uint256 setId, uint256 pieceId) external view returns (string memory name, string memory pieceCid, bool live) {
         Piece storage p = pieces[setId][pieceId];
         return (p.name, p.pieceCid, p.live);
+    }
+
+    /// Same shape as FWSS's view `getDataSet` (only payer, serviceProvider and dataSetId are filled in).
+    function getDataSet(uint256 setId) external view returns (IDataSetView.DataSetInfoView memory v) {
+        v.payer = dataSetPayer[setId];
+        v.serviceProvider = dataSetOwner[setId];
+        v.dataSetId = setId;
     }
 }

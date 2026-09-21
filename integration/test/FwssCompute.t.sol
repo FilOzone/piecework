@@ -24,7 +24,7 @@ import {ServiceProviderRegistryStorage} from "fwss/ServiceProviderRegistryStorag
 import {SignatureVerificationLib} from "fwss/lib/SignatureVerificationLib.sol";
 import {PDPOffering} from "fwss-test/PDPOffering.sol";
 import {Errors} from "fwss/Errors.sol";
-import {ComputeService, IPieceLiveness, ISessionKeyRegistry} from "focc/ComputeService.sol";
+import {ComputeService, IPieceLiveness, ISessionKeyRegistry, IDataSetView} from "focc/ComputeService.sol";
 
 contract TestUSDFC is ERC20 {
     constructor() ERC20("USDFC", "USDFC") {}
@@ -88,9 +88,12 @@ contract FwssComputeTest is MockFVMTest {
                 )
             )
         );
-        fwss.setViewContract(address(new FilecoinWarmStorageServiceStateView(fwss)));
+        address fwssView = address(new FilecoinWarmStorageServiceStateView(fwss));
+        fwss.setViewContract(fwssView);
 
-        cs = new ComputeService(payments, usdfc, IPieceLiveness(address(pdp)), ISessionKeyRegistry(address(skr)));
+        cs = new ComputeService(
+            payments, usdfc, IPieceLiveness(address(pdp)), ISessionKeyRegistry(address(skr)), IDataSetView(fwssView)
+        );
 
         // provider registers (PDP product) and is approved by FWSS
         PDPOffering.Schema memory offer = PDPOffering.Schema({
@@ -261,7 +264,8 @@ contract FwssComputeTest is MockFVMTest {
         assertTrue(pdp.pieceLive(dataSetId, id));
     }
 
-    // A job opened by someone else on this data set does not open a window: the count is per data set payer.
+    // Someone else cannot order a job on this data set (checked against FWSS's real view of the payer),
+    // so they cannot open a window for the provider either.
     function test_otherClientsJobDoesNotOpenWindow() public {
         attachAuthorizer();
         address mallory = address(0xBAD);
@@ -270,6 +274,7 @@ contract FwssComputeTest is MockFVMTest {
         usdfc.approve(address(payments), 10 ether);
         payments.deposit(usdfc, mallory, 10 ether);
         payments.setOperatorApproval(usdfc, address(cs), true, 1 ether, 10 ether, 10000);
+        vm.expectRevert(abi.encodeWithSelector(ComputeService.NotDataSetOwner.selector, dataSetId, mallory));
         cs.postJob(provider, IMAGE, dataSetId, inputs(), P_PRICE, vm.getBlockNumber() + 100);
         vm.stopPrank();
         addPieces(PROVIDER_PK, piece("injected.txt"), Errors.Unauthorized.selector);

@@ -9,7 +9,7 @@ import {Test} from "forge-std/Test.sol";
 import {FilecoinPayV1} from "filecoin-pay/src/FilecoinPayV1.sol";
 import {PaymentsTestHelpers} from "filecoin-pay/test/helpers/PaymentsTestHelpers.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {ComputeService, IPieceLiveness, ISessionKeyRegistry} from "../src/ComputeService.sol";
+import {ComputeService, IPieceLiveness, ISessionKeyRegistry, IDataSetView} from "../src/ComputeService.sol";
 import {MockPDP} from "../src/MockPDP.sol";
 
 contract ComputeServiceTest is Test {
@@ -38,11 +38,11 @@ contract ComputeServiceTest is Test {
         PROVIDER = helper.USER2();
 
         pdp = new MockPDP();
-        cs = new ComputeService(payments, token, IPieceLiveness(address(pdp)), ISessionKeyRegistry(address(0)));
+        cs = new ComputeService(payments, token, IPieceLiveness(address(pdp)), ISessionKeyRegistry(address(0)), IDataSetView(address(pdp)));
 
         // The provider holds the client's data set with two input pieces (ids 0, 1).
         vm.startPrank(PROVIDER);
-        dataSetId = pdp.createDataSet();
+        dataSetId = pdp.createDataSet(CLIENT);
         pdp.addPiece(dataSetId, "notes.txt", "baga-input-1");
         pdp.addPiece(dataSetId, "papers.pdf", "baga-input-2");
         vm.stopPrank();
@@ -314,5 +314,24 @@ contract ComputeServiceTest is Test {
         vm.prank(CLIENT);
         vm.expectRevert();
         cs.postJob(PROVIDER, IMAGE, dataSetId, inputs(), P_PRICE, vm.getBlockNumber() + 100);
+    }
+
+    // Only the data set's owner can order compute over it...
+    function test_job_onlyDataSetOwner() public {
+        vm.prank(STRANGER);
+        vm.expectRevert(abi.encodeWithSelector(ComputeService.NotDataSetOwner.selector, dataSetId, STRANGER));
+        cs.postJob(PROVIDER, IMAGE, dataSetId, inputs(), P_PRICE, vm.getBlockNumber() + 100);
+        vm.prank(STRANGER);
+        vm.expectRevert(abi.encodeWithSelector(ComputeService.NotDataSetOwner.selector, dataSetId, STRANGER));
+        cs.openSession(PROVIDER, IMAGE, R, L, dataSetId);
+    }
+
+    // ...and only from the service provider that holds it.
+    function test_job_onlyDataSetProvider() public {
+        helper.makeDeposit(CLIENT, CLIENT, 1 ether);
+        approveCS();
+        vm.prank(CLIENT);
+        vm.expectRevert(abi.encodeWithSelector(ComputeService.NotDataSetProvider.selector, dataSetId, STRANGER));
+        cs.postJob(STRANGER, IMAGE, dataSetId, inputs(), P_PRICE, vm.getBlockNumber() + 100);
     }
 }

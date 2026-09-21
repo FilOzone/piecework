@@ -76,7 +76,7 @@ export async function deployLocal({ pub, wallet, chain, deployer, usdfc, log = (
   C.fwss = await proxy(fwssImpl, ABI.FilecoinWarmStorageService, "initialize", [2880n, 60n, deployer]);
   C.view = await deploy("FilecoinWarmStorageServiceStateView", [C.fwss]);
   await write({ pub, wallet, chain }, deployer, C.fwss, ABI.FilecoinWarmStorageService, "setViewContract", [C.view]);
-  C.cs = await deploy("ComputeService", [C.payments, usdfc, C.pdp, C.sessionKeys]);
+  C.cs = await deploy("ComputeService", [C.payments, usdfc, C.pdp, C.sessionKeys, C.view]);
   log("FOC contracts installed", C);
   return { C, ABI };
 }
