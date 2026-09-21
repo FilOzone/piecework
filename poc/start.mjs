@@ -631,6 +631,8 @@ function serve() {
     const json = (code, obj) => { res.writeHead(code, { "content-type": "application/json" }); res.end(JSON.stringify(obj, (k, v) => typeof v === "bigint" ? v.toString() : v)); };
     try {
       const url = new URL(req.url, "http://x");
+      // health check for the stable link's "is the demo up?" test (github.io origin, so CORS is open here)
+      if (req.method === "GET" && url.pathname === "/api/ping") { res.writeHead(200, { "content-type": "application/json", "access-control-allow-origin": "*" }); return res.end('{"ok":true}'); }
       if (req.method === "GET" && url.pathname === "/api/config") return json(200, await config());
       if (req.method === "GET" && url.pathname === "/api/state") return json(200, await state(url.searchParams.get("client")));
       if (req.method === "GET" && url.pathname === "/api/sample-pieces") return json(200, (await samplePieces()).map(({ name, hex, text }) => ({ name, hex, text })));
