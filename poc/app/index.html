@@ -248,7 +248,7 @@ async function init() {
     me = getAddress(CFG.localClient);
     wal = createWalletClient({ chain, transport: http(CFG.rpc), account: me });
   }
-  $("lede").textContent = "A working proof of concept: the storage provider that holds your data runs compute on it, paid through Filecoin Pay.";
+  $("lede").textContent = "A working proof of concept: the storage provider that holds your data runs programs on it, paid through Filecoin Pay.";
   $("eyebrow").textContent = `PieceWork · live proof of concept · ${CFG.network === "calibnet" ? "Filecoin Calibration" : "local chain"}`;
   $("footer").innerHTML = CFG.network === "calibnet"
     ? `<div>Filecoin Calibration network: 1 epoch = 30 seconds. USDFC and tFIL here are test tokens from faucets, with no value. Transactions are public: click an id to see it on Filfox.</div>
