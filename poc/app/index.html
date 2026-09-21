@@ -326,7 +326,7 @@ const WHY = {
   closeSession: "ComputeService sets the rate to 0 and ends the payment stream: billing stops at this epoch.",
   postJob: "ComputeService checks your input files are in your data set and puts the price on hold.",
   expire: "ComputeService checks the deadline has passed and releases the price back to you.",
-  withdraw: "Filecoin Pay moves your free balance back to your wallet.",
+  withdraw: "Filecoin Pay moves your available balance back to your wallet.",
 };
 
 async function tx(address, abi, functionName, args, what) {
@@ -356,7 +356,7 @@ async function free() {
 }
 async function requireFree(amount, what) {
   const f = await free();
-  if (f < amount) throw new Error(`Not enough free money in Filecoin Pay: ${m(formatUnits(f, 18))} ${CFG.token} free, ${what} needs ${m(formatUnits(amount, 18))}. Add money first.`);
+  if (f < amount) throw new Error(`Not enough available in Filecoin Pay: ${m(formatUnits(f, 18))} ${CFG.token} available, ${what} needs ${m(formatUnits(amount, 18))}. Add money first.`);
 }
 
 const ACTIONS = {
@@ -410,7 +410,7 @@ const ACTIONS = {
   async withdraw() {
     const amt = await free();
     await tx(C().payments, A().payments, "withdraw", [C().usdfc, amt], `Withdraw ${m(formatUnits(amt, 18))} ${CFG.token} back to your wallet`);
-    return "Your free balance went back to your wallet.";
+    return "Your available balance went back to your wallet.";
   },
   async openSession() {
     const s = CFG.params.session;
@@ -504,7 +504,7 @@ function walletPanel() {
   const FAUCET = { tFIL: "https://forest-explorer.chainsafe.dev/faucet/calibnet", USDFC: "https://forest-explorer.chainsafe.dev/faucet/calibnet_usdfc" };
   const lows = me && S?.client ? [["tFIL", S.client.fil], ["USDFC", S.client.wallet]].filter(([, v]) => n(v) < 5) : [];
   const low = lows.length ? `<div class="story err" style="margin:6px 0 0">${lows.map(([t, v]) =>
-      `<div><b>${t} below 5</b> (${m(v)} in this wallet): <a href="${FAUCET[t]}" target="_blank" rel="noopener">get free test ${t} from the faucet</a></div>`).join("")}
+      `<div><b>${t} below 5</b> (${m(v)} in this wallet): <a href="${FAUCET[t]}" target="_blank" rel="noopener">get test ${t} from the faucet</a></div>`).join("")}
       <div class="muted">Paste this address in the faucet: <code>${esc(me)}</code> <button class="b" id="copyaddr" style="padding:2px 8px">Copy</button></div></div>` : "";
   const who = me ? `<p class="muted">You are the client: <code>${esc(me)}</code> (${usingDemo ? "demo wallet" : "your MetaMask"}). The storage provider is the demo program: <code>${esc(CFG.provider)}</code>.</p>` : "";
   const demo = CFG.demoClient ? `<button class="b ${me ? "" : "primary"}" id="usedemo">Use the demo wallet (no MetaMask)</button>` : "";
@@ -523,8 +523,8 @@ function scene() {
   const proven = Math.floor(S.block / PROVING_PERIOD) * PROVING_PERIOD;
   return `<div class="scene">
     <div class="actor"><div class="who">${icon.you}You${me ? ` · ${me.slice(0, 6)}…${me.slice(-4)}` : ""}</div>
-      <div class="big">${c ? m(c.available) : "–"}</div><div class="unit">${CFG.token} free in Filecoin Pay</div>
-      <div class="note">${c ? `In your wallet, not yet deposited in Filecoin Pay: ${m(c.wallet)} ${CFG.token}${c.fundedUntil ? `<br>Funded until block ${c.fundedUntil}` : ""}` : "Not connected"}</div></div>
+      <div class="big">${c ? m(c.available) : ""}</div><div class="unit">${CFG.token} available in Filecoin Pay</div>
+      <div class="note">${c ? `In your wallet, not yet deposited in Filecoin Pay: ${m(c.wallet)} ${CFG.token}${c.fundedUntil ? `<br>Funded until block ${c.fundedUntil}` : ""}` : "Choose a wallet above (demo wallet or MetaMask) to see your balances."}</div></div>
     <div class="flow ${f1?.cls ?? ""}"><span class="arr">→</span><span>${f1?.t ?? ""}</span></div>
     <div class="actor pay"><div class="who">${icon.pay}On hold in Filecoin Pay</div>
       <div class="big">${c ? m(c.onHold) : "–"}</div><div class="unit">${CFG.token} held (safety margin, job price, and your storage reserve)</div></div>
@@ -555,7 +555,7 @@ function moneyPanel() {
     </div>${inlineWait()}`;
   return `<div class="row" style="justify-content:space-between"><h2>Your money</h2><div class="row">
     <button class="b" data-act="deposit" data-amount="1" ${busy ? "disabled" : ""}>Add 1 ${CFG.token}</button>
-    <button class="b" data-act="withdraw" ${busy || n(c.available) === 0 ? "disabled" : ""}>Take free money back to wallet</button></div></div>${lastPanel === "money" ? inlineWait() : ""}`;
+    <button class="b" data-act="withdraw" ${busy || n(c.available) === 0 ? "disabled" : ""}>Withdraw available funds to wallet</button></div></div>${lastPanel === "money" ? inlineWait() : ""}`;
 }
 
 // While a transaction is waiting for its block, show the status next to the buttons (not only at the top)
