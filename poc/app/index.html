@@ -244,7 +244,7 @@ async function init() {
     wal = createWalletClient({ chain, transport: http(CFG.rpc), account: me });
   }
   $("lede").textContent = CFG.network === "calibnet"
-    ? "Every button sends a real transaction on Filecoin's Calibration test network, from your MetaMask, to the FOC contracts FilOz deployed there and to our ComputeService. The storage provider really runs programs, in containers, next to your files."
+    ? "Every button sends a real transaction on Filecoin's Calibration network, from your MetaMask, to the FOC contracts FilOz deployed there and to our ComputeService. The storage provider really runs programs, in containers, next to your files."
     : "Every button sends a real transaction to a blockchain running on this computer, with the FOC contracts (same versions as on Filecoin). The storage provider really runs programs, in containers, next to your files.";
   $("eyebrow").textContent = `PieceWork · live proof of concept · ${CFG.network === "calibnet" ? "Filecoin Calibration" : "local chain"}`;
   $("footer").innerHTML = CFG.network === "calibnet"
@@ -460,10 +460,10 @@ const txLink = (h, label) => CFG.explorer ? `<a href="${CFG.explorer}${h}" targe
 function introPanel() {
   const cal = CFG.network === "calibnet";
   return `<h2>How this demo works</h2>
-    <p class="muted">A storage provider that already stores your files (in a PDP data set on Filecoin) also sells <b>compute over them</b>, paid through <b>Filecoin Pay</b>. ${cal ? "Everything runs on Filecoin's Calibration test network, with test tokens." : "Everything runs on a local test chain, with test tokens."}</p>
+    <p class="muted">A storage provider that already stores your files (in a PDP data set on Filecoin) also sells <b>compute over them</b>, paid through <b>Filecoin Pay</b>. ${cal ? "Everything runs on Filecoin's Calibration network, with test tokens." : "Everything runs on a local test chain, with test tokens."}</p>
     <div class="disclaimer"><span class="t">Disclaimer</span><ul>
       <li><b>Storage proofs are simulated.</b> The service provider is assumed honest; it does not submit proofs of possession.</li>
-      <li><b>Test network${cal ? "" : " (local)"}.</b> ${cal ? "Test tokens only. Each step takes 30–60&nbsp;seconds: Filecoin produces a block every 30&nbsp;seconds." : "Test tokens only. One block per second here; on Filecoin a block takes 30&nbsp;seconds."}</li>
+      <li><b>${cal ? "Calibration network" : "Local test chain"}.</b> ${cal ? "Test tokens only. Each step takes 30–60&nbsp;seconds: Filecoin produces a block every 30&nbsp;seconds." : "Test tokens only. One block per second here; on Filecoin a block takes 30&nbsp;seconds."}</li>
     </ul></div>
     <div class="intro3">
       <div><span class="t">Who is who</span><dl class="terms">
