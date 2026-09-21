@@ -223,7 +223,7 @@ const icon = {
   pay: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="6" width="18" height="14" rx="2"/><path d="M3 10h18M8 15h3"/></svg>`,
   prov: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="3" width="16" height="7" rx="1.5"/><rect x="4" y="14" width="16" height="7" rx="1.5"/><path d="M8 6.5h.01M8 17.5h.01"/></svg>`,
 };
-const PROVING_PERIOD = 30; // blocks; simulated here (FWSS uses 2880 epochs = 1 day)
+// PDP proving period in epochs, read from FWSS (getPDPConfig): 240 on Calibration, 2880 (24 h) on mainnet
 // FWSS EIP-712 types (@filoz/synapse-core typed-data, same as filecoin-pin)
 const EIP712Types = {
   MetadataEntry: [{ name: "key", type: "string" }, { name: "value", type: "string" }],
@@ -410,6 +410,7 @@ const ACTIONS = {
   },
   async deposit({ amount }) {
     const amt = U(amount);
+    if (n(S.client.wallet) < Number(amount)) throw new Error(`Your wallet has only ${m(S.client.wallet)} ${CFG.token}, less than the ${amount} to add. Get more ${CFG.token} from the faucet (link above), then try again.`);
     await tx(C().usdfc, A().erc20, "approve", [C().payments, amt], `Allow Filecoin Pay to take ${amount} ${CFG.token}`);
     await tx(C().payments, A().payments, "deposit", [C().usdfc, me, amt], `Deposit ${amount} ${CFG.token} into Filecoin Pay`);
     return "Added to your balance in Filecoin Pay.";
@@ -461,7 +462,7 @@ async function act(name, args = {}) {
 // ---------------------------------------------------------------- rendering
 
 const secs = (blocks) => blocks * (CFG?.epochSeconds ?? 1);
-const dur = (s) => s < 90 ? `${s} s` : `${Math.round(s / 60)} min`;
+const dur = (s) => s < 90 ? `${s} s` : s < 5400 ? `${Math.round(s / 60)} min` : `${Math.round(s / 3600)} h`;
 const txLink = (h, label) => CFG.explorer ? `<a href="${CFG.explorer}${h}" target="_blank" rel="noopener">${esc(label ?? h)}</a>` : esc(label ? `${label} (${h.slice(0, 10)}…)` : h);
 
 function introPanel() {
@@ -527,6 +528,7 @@ function scene() {
   const waitingJob = S.jobs.find((j) => j.status === "waiting");
   const files = S.files.map((f) => `<li class="${f.kind === "output" ? "new" : ""}"><span><span class="pid">#${f.pieceId}</span><a data-file="${f.pieceId}">${esc(f.name)}</a></span><span class="sz">${f.size} B</span></li>`).join("");
   const f1 = running ? { cls: "on", t: `streaming ${m(running.rate)}/epoch` } : waitingJob ? { cls: "", t: "price on hold" } : null;
+  const PROVING_PERIOD = CFG.pdp?.maxProvingPeriod ?? 240;
   const proven = Math.floor(S.block / PROVING_PERIOD) * PROVING_PERIOD;
   return `<div class="scene">
     <div class="actor"><div class="who">${icon.you}You${me ? ` · ${me.slice(0, 6)}…${me.slice(-4)}` : ""}</div>
@@ -539,7 +541,7 @@ function scene() {
     <div class="actor prov"><div class="who">${icon.prov}Storage provider</div>
       <div class="big">${m(S.providerEarned)}</div><div class="unit">${CFG.token} earned (in Filecoin Pay)</div>
       <div class="note">${S.dataSetId !== null ? `Holds your data set #${S.dataSetId} (FWSS, proven with PDP). Click a file to open it. <span style="color:var(--money)">Green</span> = results added by jobs.` : "Does not hold files of yours yet."}</div>
-      ${S.dataSetId !== null ? `<div class="note"><span class="pill">PDP proof ✓</span> last proven at block ${proven}, next at ${proven + PROVING_PERIOD} <span class="muted">(simulated: we assume an honest provider that proves every period)</span></div>` : ""}
+      ${S.dataSetId !== null ? `<div class="note"><span class="pill">PDP proof ✓</span> last proven at block ${proven}, next by block ${proven + PROVING_PERIOD}. The provider must prove it still holds your data once per proving period: ${PROVING_PERIOD} blocks (${dur(secs(PROVING_PERIOD))}) on ${CFG.network === "calibnet" ? "Calibration" : "this network"}, 2880 blocks (24 h) on mainnet. <span class="muted">(Simulated in this demo: we assume an honest provider that proves every period.)</span></div>` : ""}
       ${S.files.length ? `<div class="note">${S.files.length} files in your data set: see <b>Your data set</b> below.</div>` : ""}</div>
   </div>`;
 }
@@ -561,7 +563,7 @@ function moneyPanel() {
       ${CFG.network === "local" ? `<button class="b" data-act="setup" data-amount="0.03" ${busy ? "disabled" : ""}>Deposit only 0.03 (to see what happens when money runs out)</button>` : ""}
     </div>${inlineWait()}`;
   return `<div class="row" style="justify-content:space-between"><h2>Your money</h2><div class="row">
-    <button class="b" data-act="deposit" data-amount="1" ${busy ? "disabled" : ""}>Add 1 ${CFG.token}</button>
+    <button class="b" data-act="deposit" data-amount="1" ${busy || n(c.wallet) < 1 ? "disabled" : ""} title="${n(c.wallet) < 1 ? `Your wallet has less than 1 ${CFG.token}: get more from the faucet (link above)` : ""}">Add 1 ${CFG.token}</button>
     <button class="b" data-act="withdraw" ${busy || n(c.available) === 0 ? "disabled" : ""}>Withdraw available funds to wallet</button></div></div>
     <p class="muted" style="margin:.2em 0 0"><b>${m(c.available)} ${CFG.token} available</b> in your Filecoin Pay account, plus ${m(c.onHold)} on hold (open jobs and sessions, and your storage reserve). The compute service never holds your money: it can only put amounts on hold and pay providers, within the limits you approved. Add more when a job or session needs it; withdraw what is not on hold at any time.</p>${lastPanel === "money" ? inlineWait() : ""}`;
 }
@@ -581,7 +583,7 @@ const inlineWait = () => busy && message?.text
 function jobSteps(stage) {
   const order = ["received", "running", "storing", "paid"];
   const labels = ["Order on-chain, price on hold", "Provider runs the program in a container (seconds)",
-    "Provider adds the result to your data set (one block, ~30–60 s)", "Provider commits the result and is paid (one block, ~30–60 s)"];
+    "Provider adds the result to your data set (one block, ~30–60 s)", "Provider shows the contract the stored result and is paid (one block, ~30–60 s)"];
   // index of the step in progress: waiting for the SP or running → 1, storing → 2, committing → 3, paid → all done
   const now = { received: 1, running: 1, storing: 2, committing: 3, paid: 4 }[stage ?? "received"] ?? 1;
   const cls = (i) => i < now ? "done" : i === now ? "now" : "next";

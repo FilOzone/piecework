@@ -588,6 +588,16 @@ async function state(who) {
   return out;
 }
 
+// PDP proving period and challenge window, as set in FWSS on this network (getPDPConfig)
+let PDP_CONFIG = null;
+async function pdpConfig() {
+  if (!PDP_CONFIG) {
+    const r = await read(C.view, ABI.FilecoinWarmStorageServiceStateView, "getPDPConfig").catch(() => null);
+    if (r) PDP_CONFIG = { maxProvingPeriod: Number(r[0]), challengeWindowSize: Number(r[1]) };
+  }
+  return PDP_CONFIG ?? { maxProvingPeriod: 240, challengeWindowSize: 20 };
+}
+
 // What the page needs to send transactions from the client's wallet.
 async function config() {
   const pick = (abi, names) => abi.filter((x) => x.type === "error" || names.includes(x.name));
@@ -597,6 +607,7 @@ async function config() {
     localClient: CAL ? null : A.client,
     accessMessage: accessMessage("{id}"),
     demoClient: demoAcct?.address ?? null,
+    pdp: await pdpConfig(),
     params: {
       session: { image: digest(PARAMS.session.image), name: PARAMS.session.name, desc: PARAMS.session.desc, rate: PARAMS.session.rate.toString(), lockupPeriod: PARAMS.session.lockupPeriod.toString() },
       jobs: Object.fromEntries(Object.entries(PARAMS.jobs).map(([k, j]) => [k, { name: j.name, desc: j.desc, reads: j.reads, writes: j.writes, image: digest(j.image), price: j.price.toString(), deadline: j.deadline.toString(), inputs: JOB_SCRIPTS[j.image].inputs.toString() }])),
