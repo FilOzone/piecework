@@ -252,7 +252,7 @@ async function init() {
   $("lede").textContent = "A working proof of concept: the storage provider that holds your data also computes on it, paid through Filecoin Pay.";
   $("eyebrow").textContent = `PieceWork · live proof of concept · ${CFG.network === "calibnet" ? "Filecoin Calibration" : "local chain"}`;
   $("footer").innerHTML = CFG.network === "calibnet"
-    ? `<div>Filecoin Calibration network: 1 epoch = 30 seconds. USDFC and tFIL here are test tokens from faucets, with no value. Transactions are public: click an id to see it on Filfox.</div>
+    ? `<div>Filecoin Calibration network: 1 epoch = 30 seconds. USDFC and tFIL here are test tokens from faucets, with no value. Transactions are public: click an id to see it on the Blockscout explorer.</div>
        <div>Real: Filecoin Pay, PDPVerifier, FWSS (FilOz's calibnet deployment), ComputeService (<code>${esc(CFG.contracts.cs)}</code>), your signatures, piece CIDs computed from the files, the containers. Not run yet: proofs of possession (the demo provider does not run a prover; real proofs can be added later).</div>`
     : `<div>Local chain: 1 block = 1 epoch = 1 second here (30 seconds on Filecoin). luca_usdfc is a local test token with no value, standing in for USDFC.</div>
        <div>Real: the FOC contracts at the versions deployed on calibnet and mainnet (Filecoin Pay v1.0.0, PDPVerifier, FWSS v1.4.0, provider registry), ComputeService, the client's signatures, piece CIDs computed from the files, the containers. Stand-ins: the token. Not run yet: proofs of possession (the demo provider does not run a prover; real proofs can be added later).</div>`;
@@ -294,7 +294,7 @@ async function useDemoWallet() {
   me = getAddress(CFG.demoClient);
   wal = createWalletClient({ chain, transport: custom(demoProvider), account: me });
   await fetch("/api/connect", { method: "POST", body: JSON.stringify({ client: me }) });
-  message = { text: "You are using the demo wallet: the demo program signs as the client, with test tokens. Every step is still a real transaction on Filecoin Calibration (click a transaction id to see it on Filfox)." };
+  message = { text: "You are using the demo wallet: the demo program signs as the client, with test tokens. Every step is still a real transaction on Filecoin Calibration (click a transaction id to see it on the Blockscout explorer)." };
   await refresh();
 }
 
@@ -463,7 +463,9 @@ async function act(name, args = {}) {
 
 const secs = (blocks) => blocks * (CFG?.epochSeconds ?? 1);
 const dur = (s) => s < 90 ? `${s} s` : s < 5400 ? `${Math.round(s / 60)} min` : `${Math.round(s / 3600)} h`;
-const txLink = (h, label) => CFG.explorer ? `<a href="${CFG.explorer}${h}" target="_blank" rel="noopener">${esc(label ?? h)}</a>` : esc(label ? `${label} (${h.slice(0, 10)}…)` : h);
+// Filecoin message ids (bafy…) from older records open on Filfox; transaction hashes (0x…) on Blockscout
+const txUrl = (h) => h.startsWith("bafy") ? `https://calibration.filfox.info/en/message/${h}` : `${CFG.explorer}${h}`;
+const txLink = (h, label) => CFG.explorer ? `<a href="${txUrl(h)}" target="_blank" rel="noopener">${esc(label ?? h)}</a>` : esc(label ? `${label} (${h.slice(0, 10)}…)` : h);
 
 function introPanel() {
   const cal = CFG.network === "calibnet";
@@ -484,7 +486,7 @@ function introPanel() {
         <dt>Pay per job</dt><dd>Order a result. The price is held and paid only if the result lands in your data set before the deadline.</dd>
       </dl></div>
       <div><span class="t">What is real</span><dl class="terms">
-        <dt>Transactions</dt><dd>Every step is an on-chain transaction${cal ? ", linked to Filfox" : ""}.</dd>
+        <dt>Transactions</dt><dd>Every step is an on-chain transaction${cal ? ", linked to the Blockscout explorer" : ""}.</dd>
         <dt>Contracts</dt><dd>Filecoin Pay, PDP and Warm Storage (FilOz's deployment), plus ComputeService.</dd>
         <dt>Execution</dt><dd>Your signatures, and real workloads running in containers.</dd>
       </dl></div>
@@ -658,7 +660,7 @@ function logPanel() {
 function render() {
   if (!S || !CFG) return;
   const addr = (label, a) => CFG.explorer
-    ? `<a href="${CFG.explorer.replace("/message/", "/address/")}${a}" target="_blank" rel="noopener">${label} ↗</a>` : `${label} ${a.slice(0, 8)}…`;
+    ? `<a href="${CFG.explorer.replace("/tx/", "/address/")}${a}" target="_blank" rel="noopener">${label} ↗</a>` : `${label} ${a.slice(0, 8)}…`;
   $("chain").innerHTML = `<span class="live"><span class="dot"></span>Live on ${CFG.network === "calibnet" ? "Filecoin Calibration" : "a local test chain"}</span>
     <span class="sep">|</span><span>block ${S.block.toLocaleString("en")}</span>
     <span class="sep">|</span>${addr("Filecoin Pay", C().payments)}

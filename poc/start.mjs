@@ -73,7 +73,7 @@ const NET = CAL
   ? {
     chain: filecoinCalibration, rpc: "https://api.calibration.node.glif.io/rpc/v1",
     rpcBackup: "https://rpc.ankr.com/filecoin_testnet", epochSeconds: 30, token: "USDFC",
-    explorer: "https://calibration.filfox.info/en/message/", poll: 5000, settleEvery: 4,
+    explorer: "https://filecoin-testnet.blockscout.com/tx/", poll: 5000, settleEvery: 4,
     session: { rate: U("0.01"), lockupPeriod: 10n }, // 0.01 per 30 s; margin = 10 epochs (5 min)
     deadlines: { index: 20n, sales: 20n, late: 4n },
     approval: { rateAllowance: U("0.1"), lockupAllowance: U(3), maxLockupPeriod: 600n },
