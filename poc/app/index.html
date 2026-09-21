@@ -502,6 +502,10 @@ function moneyPanel() {
     <button class="b" data-act="withdraw" ${busy || n(c.available) === 0 ? "disabled" : ""}>Take free money back to wallet</button></div></div>`;
 }
 
+// While a transaction is waiting for its block, show the status next to the buttons (not only at the top)
+const inlineWait = () => busy && message?.text
+  ? `<p class="story" style="margin:0">⏳ ${esc(message.text)}${message.since ? ` <b>${Math.round((Date.now() - message.since) / 1000)} s</b>` : ""}<br><span class="muted">Buttons come back when the transaction is in a block.</span></p>` : "";
+
 function timePanel() {
   const P = S.params;
   const running = S.sessions.find((s) => s.status === "running");
@@ -511,7 +515,7 @@ function timePanel() {
   if (running) {
     const el = secs(S.block - running.startBlock);
     body = `<div class="live">
-        <div class="stat clock"><div class="l">Running for</div><div class="v">${dur(el)}</div></div>
+        <div class="stat clock"><div class="l">Running for (billed per ${CFG.epochSeconds} s epoch)</div><div class="v">${dur(el)}</div></div>
         <div class="stat"><div class="l">Cost so far</div><div class="v">${m(running.usedSoFar)}</div></div>
         <div class="stat"><div class="l">Rate</div><div class="v">${m(running.rate)}/epoch</div></div></div>
       <div class="jobcard" style="border-color:var(--accent)"><b>Ask the assistant</b> <span class="muted">— it runs next to your files; ask as many questions as you like, you pay for time, not per question</span>
@@ -519,6 +523,8 @@ function timePanel() {
       ${answers ? `<pre class="viewer">${answers.length ? answers.map(esc).join("\n") : "No match in your files."}</pre>` : ""}
       <div class="row"><button class="b primary" data-act="closeSession" data-id="${running.id}" ${busy ? "disabled" : ""}>Stop</button>
       <span class="muted">Session #${running.id}, payment rail #${running.railId}. Billing started at block ${running.startBlock}.</span></div>`;
+  } else if (S.sessions.find((s) => s.status === "stopping")) {
+    body = `<p><span class="pill warn">stopping</span> Your stop is on-chain; the provider is shutting the service down. Start will be available in a few seconds.</p>`;
   } else if (opening) {
     startingSince[opening.id] ??= Date.now();
     body = `<p><span class="pill warn">starting · ${Math.round((Date.now() - startingSince[opening.id]) / 1000)} s</span> The provider is starting the service next to your files (about a minute on calibnet). When it is running, a box appears here to ask it questions; billing starts only then.</p>`;
@@ -530,7 +536,7 @@ function timePanel() {
   return `<h2>Pay for time: rent a search assistant over your files</h2>
     <p class="muted">Like renting a machine in the cloud. You pay per epoch while it runs; when you stop, payment stops at that epoch.</p>
     <div class="jobcard"><b>What it does.</b> ${esc(CFG.params.session.desc)} Try words like <code>revenue</code>, <code>customer</code>, <code>filecoin</code>.</div>
-    ${body}${hist ? `<ul class="files">${hist}</ul>` : ""}`;
+    ${body}${inlineWait()}${hist ? `<ul class="files">${hist}</ul>` : ""}`;
 }
 
 function jobPanel() {
@@ -550,6 +556,7 @@ function jobPanel() {
     <div class="row"><select id="jobsel">${opts}</select><button class="b primary" data-act="postJob" ${busy ? "disabled" : ""}>Order</button></div>
     <div class="jobcard"><b>What this job does.</b> ${esc(CFG.params.jobs[pick].desc)}<br>
       <span class="muted">Reads: ${esc(CFG.params.jobs[pick].reads)} · Writes: ${esc(CFG.params.jobs[pick].writes)} · Price: ${m(J[pick].price)} ${CFG.token}, paid only on delivery · Deadline: ${dur(secs(J[pick].deadline))}. The SP runs the program in a container next to your files (no network, your files read-only).</span></div>
+    ${inlineWait()}
     <div class="jobs">${list || `<p class="muted">No jobs yet.</p>`}</div>`;
 }
 
@@ -635,7 +642,7 @@ document.addEventListener("submit", async (e) => {
 
 await init();
 await refresh();
-setInterval(() => { if (!busy) refresh(); }, CFG.network === "calibnet" ? 4000 : 1000);
+setInterval(refresh, CFG.network === "calibnet" ? 4000 : 1000); // keep numbers live, also while a transaction waits
 setInterval(() => { if (busy || S?.sessions?.some((x) => x.status === "opening")) render(); }, 1000); // live counters
 </script>
 </body>

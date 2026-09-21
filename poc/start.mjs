@@ -565,7 +565,9 @@ async function state(who) {
     const s = await read(C.cs, ABI.ComputeService, "sessions", [BigInt(id)]);
     const end = info.endEpoch !== undefined ? Math.min(block, info.endEpoch) : (info.stopBlock ?? block);
     const used = info.startBlock === undefined ? 0n : s[3] * BigInt(Math.max(0, end - info.startBlock));
-    out.sessions.push({ id: Number(id), railId: Number(s[2]), rate: fmt(s[3]), lockupPeriod: Number(s[4]), status: S[Number(s[7])],
+    // closed on-chain but not yet processed by the provider: report "stopping" rather than guess how it ended
+    const status = S[Number(s[7])] === "closed" && info.stopBlock === undefined ? "stopping" : S[Number(s[7])];
+    out.sessions.push({ id: Number(id), railId: Number(s[2]), rate: fmt(s[3]), lockupPeriod: Number(s[4]), status,
       startBlock: info.startBlock ?? null, stopBlock: info.stopBlock ?? null, rateStopped: info.stopped ?? null, usedSoFar: fmt(used) });
   }
   for (const [id, info] of Object.entries(jobInfo)) {
