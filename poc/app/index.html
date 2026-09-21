@@ -210,7 +210,7 @@ body.down .offline{display:block}
 
 <script type="module">
 import {
-  createPublicClient, createWalletClient, http, custom, parseUnits, formatUnits, toHex, BaseError, getAddress, defineChain,
+  createPublicClient, createWalletClient, http, custom, fallback, parseUnits, formatUnits, toHex, BaseError, getAddress, defineChain,
 } from "https://cdn.jsdelivr.net/npm/viem@2.56.8/+esm";
 
 const $ = (id) => document.getElementById(id);
@@ -243,7 +243,8 @@ const startingSince = {}; // session id -> when the page first saw it starting
 async function init() {
   CFG = await fetch("/api/config").then((r) => r.json());
   chain = defineChain({ id: CFG.chainId, name: CFG.chainName, nativeCurrency: { name: "FIL", symbol: CFG.network === "calibnet" ? "tFIL" : "ETH", decimals: 18 }, rpcUrls: { default: { http: [CFG.rpc] } } });
-  pub = createPublicClient({ chain, transport: http(CFG.rpc), pollingInterval: CFG.network === "local" ? 500 : 4000 });
+  const transport = CFG.rpcBackup ? fallback([http(CFG.rpc), http(CFG.rpcBackup)], { retryCount: 2 }) : http(CFG.rpc);
+  pub = createPublicClient({ chain, transport, pollingInterval: CFG.network === "local" ? 500 : 4000 });
   if (CFG.network === "local") { // built-in test wallet (an unlocked account of the local chain)
     me = getAddress(CFG.localClient);
     wal = createWalletClient({ chain, transport: http(CFG.rpc), account: me });
@@ -280,7 +281,10 @@ const demoProvider = {
       if (r.error) throw new Error(r.error);
       return r.result;
     }
-    const r = await fetch(CFG.rpc, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }) }).then((r) => r.json());
+    const call = (url) => fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }) }).then((r) => r.json());
+    let r;
+    try { r = await call(CFG.rpc); } catch { r = null; }
+    if ((!r || (r.error && !r.error.data)) && CFG.rpcBackup) r = await call(CFG.rpcBackup); // node failure: use the backup
     if (r.error) throw Object.assign(new Error(r.error.message), { code: r.error.code, data: r.error.data });
     return r.result;
   },
@@ -567,7 +571,7 @@ const waitBar = (since, typical = 45) => { // fills toward the typical wait; nev
   return `<div class="waitbar"><span style="width:${Math.min(95, (t / typical) * 90)}%"></span></div>`;
 };
 const inlineWait = () => busy && message?.text
-  ? `<div class="story" style="margin:0"><span class="spin"></span>${esc(message.text)}${message.since ? ` <b>${Math.round((Date.now() - message.since) / 1000)} s</b>` : ""}
+  ? `<div class="story" style="margin:0"><span class="spin"></span>${esc(message.text)}
      ${message.since ? waitBar(message.since) : ""}
      ${message.why ? `<div><b>What is happening:</b> ${esc(message.why)}</div>` : ""}
      <div class="muted">Filecoin makes a block every 30 s; the buttons come back when the transaction is in a block.</div></div>` : "";
@@ -604,7 +608,7 @@ function timePanel() {
     body = `<p><span class="pill warn">stopping</span> Your stop is on-chain; the provider is shutting the service down. Start will be available in a few seconds.</p>`;
   } else if (opening) {
     startingSince[opening.id] ??= Date.now();
-    body = `<div class="story" style="margin:0"><span class="spin"></span><b>Starting your session</b> · ${Math.round((Date.now() - startingSince[opening.id]) / 1000)} s
+    body = `<div class="story" style="margin:0"><span class="spin"></span><b>Starting your session</b>
       ${waitBar(startingSince[opening.id], 60)}
       <ol class="steps2">
         <li class="done">✓ Your request is on-chain; the safety margin is on hold (nothing billed yet)</li>
@@ -665,7 +669,7 @@ function render() {
   $("scene").innerHTML = scene();
   const st = $("story");
   st.className = "story" + (message?.err ? " err" : "");
-  st.textContent = (message?.text && message.since && busy ? `${message.text} (${Math.round((Date.now() - message.since) / 1000)} s)` : message?.text) ?? (S.clientLog.length ? "" : S.hasFiles ? "Your files are already stored: you have a data set with this storage provider (right), on FWSS, paid through Filecoin Pay. Start by putting money in Filecoin Pay for compute." : "");
+  st.textContent = message?.text ?? (S.clientLog.length ? "" : S.hasFiles ? "Your files are already stored: you have a data set with this storage provider (right), on FWSS, paid through Filecoin Pay. Start by putting money in Filecoin Pay for compute." : "");
   st.hidden = !st.textContent;
   $("money").innerHTML = moneyPanel();
   const ready = S.client && S.hasFiles && S.client.computeApproved && S.authorizerSet;

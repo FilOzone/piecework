@@ -25,7 +25,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  createPublicClient, createWalletClient, http as rpc, parseUnits, formatUnits, keccak256, toHex, BaseError, getAddress,
+  createPublicClient, createWalletClient, http as rpc, fallback, parseUnits, formatUnits, keccak256, toHex, BaseError, getAddress,
   verifyMessage, hexToString,
 } from "viem";
 import { foundry, filecoinCalibration } from "viem/chains";
@@ -71,7 +71,8 @@ const fmt = (x) => Number(formatUnits(x, 18)).toFixed(4);
 
 const NET = CAL
   ? {
-    chain: filecoinCalibration, rpc: "https://api.calibration.node.glif.io/rpc/v1", epochSeconds: 30, token: "USDFC",
+    chain: filecoinCalibration, rpc: "https://api.calibration.node.glif.io/rpc/v1",
+    rpcBackup: "https://rpc.ankr.com/filecoin_testnet", epochSeconds: 30, token: "USDFC",
     explorer: "https://calibration.filfox.info/en/message/", poll: 5000, settleEvery: 4,
     session: { rate: U("0.01"), lockupPeriod: 10n }, // 0.01 per 30 s; margin = 10 epochs (5 min)
     deadlines: { index: 20n, sales: 20n, late: 4n },
@@ -211,11 +212,13 @@ async function connectCalibnet() {
   if (!fs.existsSync(KEY_FILE)) throw new Error(`No provider key yet. Run: node start.mjs --calibnet --new-provider-key`);
   providerAcct = privateKeyToAccount(fs.readFileSync(KEY_FILE, "utf8").trim()); // loaded in memory only, never printed
   A.provider = providerAcct.address;
-  pub = createPublicClient({ chain: filecoinCalibration, transport: rpc(NET.rpc), pollingInterval: 4000 });
-  wallet = createWalletClient({ chain: filecoinCalibration, transport: rpc(NET.rpc), account: providerAcct });
+  // two public nodes: if one fails a request, the other is used
+  const T = () => fallback([rpc(NET.rpc), rpc(NET.rpcBackup)], { retryCount: 2 });
+  pub = createPublicClient({ chain: filecoinCalibration, transport: T(), pollingInterval: 4000 });
+  wallet = createWalletClient({ chain: filecoinCalibration, transport: T(), account: providerAcct });
   if (fs.existsSync(DEMO_KEY_FILE)) {
     demoAcct = privateKeyToAccount(fs.readFileSync(DEMO_KEY_FILE, "utf8").trim()); // in memory only, never printed
-    demoWallet = createWalletClient({ chain: filecoinCalibration, transport: rpc(NET.rpc), account: demoAcct });
+    demoWallet = createWalletClient({ chain: filecoinCalibration, transport: T(), account: demoAcct });
   }
   for (const n of FOC.NAMES) ABI[n] = FOC.artifact(n).abi;
   ABI.ERC20 = localArtifact("MockERC20").abi; // standard ERC-20 functions
@@ -589,7 +592,7 @@ async function state(who) {
 async function config() {
   const pick = (abi, names) => abi.filter((x) => x.type === "error" || names.includes(x.name));
   return {
-    network: NETWORK, chainId: NET.chain.id, chainName: NET.chain.name, rpc: NET.rpc, explorer: NET.explorer,
+    network: NETWORK, chainId: NET.chain.id, chainName: NET.chain.name, rpc: NET.rpc, rpcBackup: NET.rpcBackup ?? null, explorer: NET.explorer,
     epochSeconds: NET.epochSeconds, token: NET.token, contracts: C, provider: A.provider,
     localClient: CAL ? null : A.client,
     accessMessage: accessMessage("{id}"),
