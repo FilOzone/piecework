@@ -215,6 +215,7 @@ const EIP712Types = {
 let CFG, chain, pub, wal, me = null, usingDemo = false;
 let S = null, busy = false, tab = "time", message = null, answers = null, lastQ = "", pick = "index";
 const accessSigs = {}; // session id -> signature proving the session is yours
+const startingSince = {}; // session id -> when the page first saw it starting
 
 // ---------------------------------------------------------------- wallet and transactions
 
@@ -303,7 +304,7 @@ async function tx(address, abi, functionName, args, what) {
   await ensureChain();
   const { request } = await pub.simulateContract({ account: me, address, abi, functionName, args });
   const gas = (await pub.estimateContractGas({ account: me, address, abi, functionName, args })) * 3n / 2n;
-  message = { text: `${what}… ${CFG.network === "calibnet" ? (usingDemo ? "sent by the demo wallet; waiting for the block (about 30–60 s)." : "confirm in MetaMask, then wait for the block (about 30–60 s).") : ""}` };
+  message = { since: Date.now(), text: `${what}… ${CFG.network === "calibnet" ? (usingDemo ? "sent by the demo wallet; waiting for the block (about 30–60 s)." : "confirm in MetaMask, then wait for the block (about 30–60 s).") : ""}` };
   render();
   const hash = await wal.writeContract({ ...request, gas });
   const r = await pub.waitForTransactionReceipt({ hash, timeout: 600_000 });
@@ -519,7 +520,8 @@ function timePanel() {
       <div class="row"><button class="b primary" data-act="closeSession" data-id="${running.id}" ${busy ? "disabled" : ""}>Stop</button>
       <span class="muted">Session #${running.id}, payment rail #${running.railId}. Billing started at block ${running.startBlock}.</span></div>`;
   } else if (opening) {
-    body = `<p><span class="pill warn">starting</span> The provider is starting the service next to your files (about a minute on calibnet). When it is running, a box appears here to ask it questions; billing starts only then.</p>`;
+    startingSince[opening.id] ??= Date.now();
+    body = `<p><span class="pill warn">starting · ${Math.round((Date.now() - startingSince[opening.id]) / 1000)} s</span> The provider is starting the service next to your files (about a minute on calibnet). When it is running, a box appears here to ask it questions; billing starts only then.</p>`;
   } else {
     body = `<div class="row"><button class="b primary" data-act="openSession" ${busy ? "disabled" : ""}>Start the search assistant</button>
       <span class="muted">${m(P.rate)} ${CFG.token} per epoch (${CFG.epochSeconds} s). Safety margin on hold while it runs: ${m(P.margin)} (${dur(secs(P.lockupPeriod))}).</span></div>`;
@@ -567,7 +569,7 @@ function render() {
   $("scene").innerHTML = scene();
   const st = $("story");
   st.className = "story" + (message?.err ? " err" : "");
-  st.textContent = message?.text ?? (S.clientLog.length ? "" : S.hasFiles ? "Your files are already stored: you have a data set with this storage provider (right), on FWSS, paid through Filecoin Pay. Start by putting money in Filecoin Pay for compute." : "");
+  st.textContent = (message?.text && message.since && busy ? `${message.text} (${Math.round((Date.now() - message.since) / 1000)} s)` : message?.text) ?? (S.clientLog.length ? "" : S.hasFiles ? "Your files are already stored: you have a data set with this storage provider (right), on FWSS, paid through Filecoin Pay. Start by putting money in Filecoin Pay for compute." : "");
   st.hidden = !st.textContent;
   $("money").innerHTML = moneyPanel();
   const ready = S.client && S.hasFiles && S.client.computeApproved && S.authorizerSet;
@@ -634,6 +636,7 @@ document.addEventListener("submit", async (e) => {
 await init();
 await refresh();
 setInterval(() => { if (!busy) refresh(); }, CFG.network === "calibnet" ? 4000 : 1000);
+setInterval(() => { if (busy || S?.sessions?.some((x) => x.status === "opening")) render(); }, 1000); // live counters
 </script>
 </body>
 </html>
