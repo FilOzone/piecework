@@ -562,7 +562,8 @@ function moneyPanel() {
     </div>${inlineWait()}`;
   return `<div class="row" style="justify-content:space-between"><h2>Your money</h2><div class="row">
     <button class="b" data-act="deposit" data-amount="1" ${busy ? "disabled" : ""}>Add 1 ${CFG.token}</button>
-    <button class="b" data-act="withdraw" ${busy || n(c.available) === 0 ? "disabled" : ""}>Withdraw available funds to wallet</button></div></div>${lastPanel === "money" ? inlineWait() : ""}`;
+    <button class="b" data-act="withdraw" ${busy || n(c.available) === 0 ? "disabled" : ""}>Withdraw available funds to wallet</button></div></div>
+    <p class="muted" style="margin:.2em 0 0"><b>${m(c.available)} ${CFG.token} available</b> in your Filecoin Pay account, plus ${m(c.onHold)} on hold (open jobs and sessions, and your storage reserve). The compute service never holds your money: it can only put amounts on hold and pay providers, within the limits you approved. Add more when a job or session needs it; withdraw what is not on hold at any time.</p>${lastPanel === "money" ? inlineWait() : ""}`;
 }
 
 // While a transaction is waiting for its block, show the status next to the buttons (not only at the top)
