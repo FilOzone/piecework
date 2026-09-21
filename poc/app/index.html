@@ -248,7 +248,7 @@ async function init() {
     : "Every button sends a real transaction to a blockchain running on this computer, with the FOC contracts (same versions as on Filecoin). The storage provider really runs programs, in containers, next to your files.";
   $("eyebrow").textContent = `PieceWork · live proof of concept · ${CFG.network === "calibnet" ? "Filecoin Calibration" : "local chain"}`;
   $("footer").innerHTML = CFG.network === "calibnet"
-    ? `<div>Filecoin Calibration test network: 1 epoch = 30 seconds. USDFC and tFIL here are test tokens from faucets, with no value. Transactions are public: click an id to see it on Filfox.</div>
+    ? `<div>Filecoin Calibration network: 1 epoch = 30 seconds. USDFC and tFIL here are test tokens from faucets, with no value. Transactions are public: click an id to see it on Filfox.</div>
        <div>Real: Filecoin Pay, PDPVerifier, FWSS (FilOz's calibnet deployment), ComputeService (<code>${esc(CFG.contracts.cs)}</code>), your signatures, piece CIDs computed from the files, the containers. Simulated: proofs of possession are not run; the provider is assumed honest (the "PDP proof ✓" line).</div>`
     : `<div>Local chain: 1 block = 1 epoch = 1 second here (30 seconds on Filecoin). luca_usdfc is a local test token with no value, standing in for USDFC.</div>
        <div>Real: the FOC contracts at the versions deployed on calibnet and mainnet (Filecoin Pay v1.0.0, PDPVerifier, FWSS v1.4.0, provider registry), ComputeService, the client's signatures, piece CIDs computed from the files, the containers. Stand-ins: the token, and proofs of possession, which are not run: the provider is assumed to be an honest provider that proves every period (the "PDP proof ✓" line is simulated).</div>`;
