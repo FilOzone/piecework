@@ -140,6 +140,13 @@ select{font:inherit;padding:10px 12px;border-radius:9px;border:1px solid var(--l
 pre.viewer{white-space:pre-wrap;font:500 .82rem/1.5 var(--mono);background:var(--surface-2);border:1px solid var(--line);border-radius:10px;padding:12px;max-height:260px;overflow:auto;margin:0}
 .muted{color:var(--ink-3);font-size:.88rem}
 .offline{display:none}
+.spin{display:inline-block;width:14px;height:14px;border:2px solid var(--line);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite;vertical-align:-2px;margin-right:6px}
+@keyframes spin{to{transform:rotate(360deg)}}
+.waitbar{height:6px;border-radius:99px;background:var(--line);overflow:hidden;margin:8px 0 4px}
+.waitbar span{display:block;height:100%;background:var(--accent);transition:width 1s linear}
+ol.steps2{list-style:none;margin:6px 0 0;padding:0;display:flex;flex-direction:column;gap:3px;font-size:.92rem}
+ol.steps2 li.done{color:var(--money)} ol.steps2 li.now{font-weight:600} ol.steps2 li.next{color:var(--ink-3)}
+@media (prefers-reduced-motion:reduce){.spin{animation:none}.waitbar span{transition:none}}
 .intro3{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
 .intro3 div{background:var(--surface-2);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
 .intro3 b{display:block;margin-bottom:2px}
@@ -172,8 +179,8 @@ body.down .offline{display:block}
   <div class="card panel" id="dataset" hidden></div>
   <div class="card panel" id="money"></div>
 
-  <div class="tabs"><button id="tab-time" class="on">Pay for time</button><button id="tab-job">Pay per job</button></div>
-  <div class="card panel" id="time"></div>
+  <div class="tabs"><button id="tab-time">Pay for time</button><button id="tab-job">Pay per job</button><span class="muted" id="tabhint" style="align-self:center">← choose one to try it</span></div>
+  <div class="card panel" id="time" hidden></div>
   <div class="card panel" id="job" hidden></div>
 
   <div class="card panel">
@@ -213,7 +220,7 @@ const EIP712Types = {
 };
 
 let CFG, chain, pub, wal, me = null, usingDemo = false;
-let S = null, busy = false, tab = "time", message = null, answers = null, lastQ = "", pick = "index";
+let S = null, busy = false, tab = null, message = null, answers = null, lastQ = "", pick = "index";
 const accessSigs = {}; // session id -> signature proving the session is yours
 const startingSince = {}; // session id -> when the page first saw it starting
 
@@ -300,14 +307,33 @@ function reason(e) {
 }
 
 // One transaction from the client's wallet: dry run, gas estimate × 1.5, send, wait, record.
+// One line on what the chain is doing during each wait (shown with the spinner)
+const WHY = {
+  approve: "Your wallet lets Filecoin Pay take this amount (a standard token approval).",
+  deposit: "Filecoin Pay moves the money from your wallet into your Filecoin Pay balance.",
+  setOperatorApproval: "Filecoin Pay records that ComputeService may open payments for you, within your limits.",
+  setDataSetAuthorizer: "Warm Storage records that ComputeService decides who may add pieces to your data set.",
+  openSession: "ComputeService opens a payment stream to the provider and puts the safety margin on hold.",
+  closeSession: "ComputeService sets the rate to 0 and ends the payment stream: billing stops at this epoch.",
+  postJob: "ComputeService checks your input files are in your data set and puts the price on hold.",
+  expire: "ComputeService checks the deadline has passed and releases the price back to you.",
+  withdraw: "Filecoin Pay moves your free balance back to your wallet.",
+};
+
 async function tx(address, abi, functionName, args, what) {
   await ensureChain();
   const { request } = await pub.simulateContract({ account: me, address, abi, functionName, args });
   const gas = (await pub.estimateContractGas({ account: me, address, abi, functionName, args })) * 3n / 2n;
-  message = { since: Date.now(), text: `${what}… ${CFG.network === "calibnet" ? (usingDemo ? "sent by the demo wallet; waiting for the block (about 30–60 s)." : "confirm in MetaMask, then wait for the block (about 30–60 s).") : ""}` };
+  txStep += 1;
+  const stepLabel = txPlanned > 1 ? `Step ${txStep} of ${txPlanned}: ` : "";
+  message = { since: Date.now(), why: WHY[functionName], text: `${stepLabel}${what}… ${CFG.network === "calibnet" ? (usingDemo ? "sent by the demo wallet; waiting for the block (about 30–60 s)." : "confirm in MetaMask, then wait for the block (about 30–60 s).") : ""}` };
   render();
   const hash = await wal.writeContract({ ...request, gas });
-  const r = await pub.waitForTransactionReceipt({ hash, timeout: 600_000 });
+  let r;
+  for (let attempt = 1; ; attempt++) { // the public node sometimes fails a request: the transaction is already sent, keep asking
+    try { r = await pub.waitForTransactionReceipt({ hash, timeout: 600_000 }); break; }
+    catch (e) { if (attempt >= 6) throw e; await new Promise((ok) => setTimeout(ok, 5000)); }
+  }
   if (r.status !== "success") throw new Error(`${what} failed`);
   await fetch("/api/clientlog", { method: "POST", body: JSON.stringify({ what, fn: functionName, tx: hash, block: Number(r.blockNumber) }) });
   return r;
@@ -402,8 +428,14 @@ const ACTIONS = {
   },
 };
 
+let lastPanel = null; // where the current action was started (to show its progress there)
+let txStep = 0, txPlanned = 1; // "Step k of n" for actions made of several transactions
 async function act(name, args = {}) {
   if (busy) return;
+  txStep = 0;
+  txPlanned = { deposit: 2, setup: 2 + (S?.client?.computeApproved ? 0 : 1) + (S?.authorizerSet ? 0 : 1),
+    storeFiles: S?.client?.storageApproved ? 0 : 3 }[name] ?? 1;
+  lastPanel = ["deposit", "withdraw"].includes(name) ? "money" : name === "storeFiles" || name === "setup" ? "money" : ["openSession", "closeSession"].includes(name) ? "time" : "job";
   busy = true; message = { text: "Preparing…" }; render();
   try { message = { text: await ACTIONS[name](args) }; }
   catch (e) { message = { err: true, text: reason(e) }; }
@@ -421,9 +453,10 @@ function introPanel() {
   return `<h2>How this demo works</h2>
     <p class="muted">A storage provider that already stores your files (in a PDP data set on Filecoin) also sells <b>compute over them</b>, paid through <b>Filecoin Pay</b>. ${cal ? "Everything runs on Filecoin's Calibration test network, with test tokens." : "Everything runs on a local test chain, with test tokens."}</p>
     <div class="intro3">
+      <div style="border-color:var(--warn);background:var(--warn-soft)"><b>Good to know</b>Simulated: proofs of possession (the SP is assumed honest).${cal ? " Each step takes 30–60 s (one block every 30 s)." : ""}</div>
       <div><b>1 · Who is who</b>You are the <b>client</b>. The <b>service provider</b> (SP) holds your data set and runs the programs. <b>ComputeService</b> is the smart contract that enforces the payment rules.</div>
-      <div><b>2 · Two ways to pay</b><b style="display:inline">Pay for time</b>: rent a service next to your files, billed per epoch until you stop. <b style="display:inline">Pay per job</b>: order a result; the price is held and paid only if the result lands in your data set before the deadline.</div>
-      <div><b>3 · What is real</b>Every step is a transaction${cal ? " (click any id to see it on Filfox)" : ""}: Filecoin Pay, PDP and Warm Storage contracts, your signatures, the containers. Simulated: proofs of possession (the SP is assumed honest). ${cal ? "Each step takes 30–60 s (one block every 30 s)." : ""}</div>
+      <div><b>2 · Two ways to pay</b><b style="display:inline">Pay for time</b>: rent a service next to your files, billed per epoch until you stop.<br><b style="display:inline">Pay per job</b>: order a result; the price is held and paid only if the result lands in your data set before the deadline.</div>
+      <div><b>3 · What is real</b>Every step is a transaction${cal ? " (click any id to see it on Filfox)" : ""}: Filecoin Pay, PDP and Warm Storage contracts, your signatures, the containers.</div>
     </div>`;
 }
 
@@ -488,7 +521,7 @@ function moneyPanel() {
     const st = CFG.params.storage;
     return `<h2>Step 0 · Store your files with this provider (one time)</h2>
       <p class="muted">In real life your files would already be stored. Here: ${c.storageApproved ? "" : `3 transactions to pay for storage (deposit ${m(formatUnits(BigInt(st.deposit), 18))} ${CFG.token}, and let Warm Storage charge you), then `}2 signatures: create your data set with this provider, and add ${4} sample files to it. The provider submits them to FWSS.</p>
-      <div class="row"><button class="b primary" data-act="storeFiles" ${busy ? "disabled" : ""}>Store my files</button></div>`;
+      <div class="row"><button class="b primary" data-act="storeFiles" ${busy ? "disabled" : ""}>Store my files</button></div>${inlineWait()}`;
   }
   const started = c.computeApproved && S.authorizerSet;
   if (!started) return `<h2>Step 1 · Put money in Filecoin Pay</h2>
@@ -496,15 +529,33 @@ function moneyPanel() {
     <div class="row">
       <button class="b primary" data-act="setup" data-amount="2" ${busy ? "disabled" : ""}>Deposit 2 ${CFG.token}</button>
       ${CFG.network === "local" ? `<button class="b" data-act="setup" data-amount="0.03" ${busy ? "disabled" : ""}>Deposit only 0.03 (to see what happens when money runs out)</button>` : ""}
-    </div>`;
+    </div>${inlineWait()}`;
   return `<div class="row" style="justify-content:space-between"><h2>Your money</h2><div class="row">
     <button class="b" data-act="deposit" data-amount="1" ${busy ? "disabled" : ""}>Add 1 ${CFG.token}</button>
-    <button class="b" data-act="withdraw" ${busy || n(c.available) === 0 ? "disabled" : ""}>Take free money back to wallet</button></div></div>`;
+    <button class="b" data-act="withdraw" ${busy || n(c.available) === 0 ? "disabled" : ""}>Take free money back to wallet</button></div></div>${lastPanel === "money" ? inlineWait() : ""}`;
 }
 
 // While a transaction is waiting for its block, show the status next to the buttons (not only at the top)
+const waitBar = (since, typical = 45) => { // fills toward the typical wait; never shows "done" before it is
+  const t = (Date.now() - since) / 1000;
+  return `<div class="waitbar"><span style="width:${Math.min(95, (t / typical) * 90)}%"></span></div>`;
+};
 const inlineWait = () => busy && message?.text
-  ? `<p class="story" style="margin:0">⏳ ${esc(message.text)}${message.since ? ` <b>${Math.round((Date.now() - message.since) / 1000)} s</b>` : ""}<br><span class="muted">Buttons come back when the transaction is in a block.</span></p>` : "";
+  ? `<div class="story" style="margin:0"><span class="spin"></span>${esc(message.text)}${message.since ? ` <b>${Math.round((Date.now() - message.since) / 1000)} s</b>` : ""}
+     ${message.since ? waitBar(message.since) : ""}
+     ${message.why ? `<div><b>What is happening:</b> ${esc(message.why)}</div>` : ""}
+     <div class="muted">Filecoin makes a block every 30 s; the buttons come back when the transaction is in a block.</div></div>` : "";
+
+// Where a job is: ordered → running → storing the result → paid
+function jobSteps(stage) {
+  const order = ["received", "running", "storing", "paid"];
+  const labels = ["Order on-chain, price on hold", "Provider runs the program in a container (seconds)",
+    "Provider adds the result to your data set (one block, ~30–60 s)", "Provider commits the result and is paid (one block, ~30–60 s)"];
+  // index of the step in progress: waiting for the SP or running → 1, storing → 2, committing → 3, paid → all done
+  const now = { received: 1, running: 1, storing: 2, committing: 3, paid: 4 }[stage ?? "received"] ?? 1;
+  const cls = (i) => i < now ? "done" : i === now ? "now" : "next";
+  return `<ol class="steps2">${labels.map((l, i) => `<li class="${cls(i)}">${cls(i) === "done" ? "✓" : cls(i) === "now" ? '<span class="spin"></span>' : "○"} ${l}</li>`).join("")}</ol>`;
+}
 
 function timePanel() {
   const P = S.params;
@@ -527,7 +578,13 @@ function timePanel() {
     body = `<p><span class="pill warn">stopping</span> Your stop is on-chain; the provider is shutting the service down. Start will be available in a few seconds.</p>`;
   } else if (opening) {
     startingSince[opening.id] ??= Date.now();
-    body = `<p><span class="pill warn">starting · ${Math.round((Date.now() - startingSince[opening.id]) / 1000)} s</span> The provider is starting the service next to your files (about a minute on calibnet). When it is running, a box appears here to ask it questions; billing starts only then.</p>`;
+    body = `<div class="story" style="margin:0"><span class="spin"></span><b>Starting your session</b> · ${Math.round((Date.now() - startingSince[opening.id]) / 1000)} s
+      ${waitBar(startingSince[opening.id], 60)}
+      <ol class="steps2">
+        <li class="done">✓ Your request is on-chain; the safety margin is on hold (nothing billed yet)</li>
+        <li class="now">⏳ The provider starts the service next to your files, then sends its "ready" transaction</li>
+        <li class="next">○ Billing starts and a box appears to ask questions</li>
+      </ol></div>`;
   } else {
     body = `<div class="row"><button class="b primary" data-act="openSession" ${busy ? "disabled" : ""}>Start the search assistant</button>
       <span class="muted">${m(P.rate)} ${CFG.token} per epoch (${CFG.epochSeconds} s). Safety margin on hold while it runs: ${m(P.margin)} (${dur(secs(P.lockupPeriod))}).</span></div>`;
@@ -536,7 +593,7 @@ function timePanel() {
   return `<h2>Pay for time: rent a search assistant over your files</h2>
     <p class="muted">Like renting a machine in the cloud. You pay per epoch while it runs; when you stop, payment stops at that epoch.</p>
     <div class="jobcard"><b>What it does.</b> ${esc(CFG.params.session.desc)} Try words like <code>revenue</code>, <code>customer</code>, <code>filecoin</code>.</div>
-    ${body}${inlineWait()}${hist ? `<ul class="files">${hist}</ul>` : ""}`;
+    ${body}${lastPanel === "time" ? inlineWait() : ""}${hist ? `<ul class="files">${hist}</ul>` : ""}`;
 }
 
 function jobPanel() {
@@ -546,6 +603,7 @@ function jobPanel() {
     const stage = { waiting: j.stage === "late" ? ["warn", "provider missed the deadline"] : j.stage === "blocked" ? ["warn", "result refused by FWSS"] : ["warn", j.stage === "running" ? "running in a container" : j.stage === "storing" ? "storing the result" : "waiting for the provider"], paid: ["", "delivered and paid"], refunded: ["off", "cancelled, money back"] }[j.status] ?? ["off", j.status];
     const canExpire = j.status === "waiting" && left < 0;
     return `<div class="job"><div class="h"><b>#${j.id} · ${esc(j.name ?? "")}</b><span class="pill ${stage[0]}">${stage[1]}</span></div>
+      ${j.status === "waiting" && j.stage !== "late" && j.stage !== "blocked" ? jobSteps(j.stage) : ""}
       <div class="muted">Price ${m(j.price)} ${CFG.token} · deadline block ${j.deadline}${j.status === "waiting" ? (left >= 0 ? ` (${dur(secs(left))} left)` : " (passed)") : ""}</div>
       ${j.output ? `<div>Result: <a data-file="${j.output.pieceId}" style="cursor:pointer">${esc(j.output.name)}</a> <span class="muted">piece #${j.output.pieceId} in your data set</span></div>` : ""}
       ${canExpire ? `<div><button class="b primary" data-act="expire" data-id="${j.id}" ${busy ? "disabled" : ""}>Get my money back</button></div>` : ""}</div>`;
@@ -556,7 +614,7 @@ function jobPanel() {
     <div class="row"><select id="jobsel">${opts}</select><button class="b primary" data-act="postJob" ${busy ? "disabled" : ""}>Order</button></div>
     <div class="jobcard"><b>What this job does.</b> ${esc(CFG.params.jobs[pick].desc)}<br>
       <span class="muted">Reads: ${esc(CFG.params.jobs[pick].reads)} · Writes: ${esc(CFG.params.jobs[pick].writes)} · Price: ${m(J[pick].price)} ${CFG.token}, paid only on delivery · Deadline: ${dur(secs(J[pick].deadline))}. The SP runs the program in a container next to your files (no network, your files read-only).</span></div>
-    ${inlineWait()}
+    ${lastPanel === "job" ? inlineWait() : ""}
     <div class="jobs">${list || `<p class="muted">No jobs yet.</p>`}</div>`;
 }
 
@@ -589,6 +647,7 @@ function render() {
       el.querySelectorAll(".stat .v").forEach((v, i) => { const nv = tmp.querySelectorAll(".stat .v")[i]; if (nv) v.textContent = nv.textContent; });
     } else el.innerHTML = ready ? f() : `<p class="muted">First complete the step above.</p>`;
   }
+  $("tabhint").hidden = tab !== null;
   $("tab-time").className = tab === "time" ? "on" : "";
   $("tab-job").className = tab === "job" ? "on" : "";
   $("log").innerHTML = logPanel();
@@ -643,7 +702,7 @@ document.addEventListener("submit", async (e) => {
 await init();
 await refresh();
 setInterval(refresh, CFG.network === "calibnet" ? 4000 : 1000); // keep numbers live, also while a transaction waits
-setInterval(() => { if (busy || S?.sessions?.some((x) => x.status === "opening")) render(); }, 1000); // live counters
+setInterval(() => { if (busy || S?.sessions?.some((x) => x.status === "opening")) render(); }, 1000); // live counters and bars
 </script>
 </body>
 </html>

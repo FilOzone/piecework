@@ -162,7 +162,12 @@ async function send(account, address, abi, functionName, args = [], what = funct
     // gas: estimates can be too low for nested Filecoin Pay calls; locally a fixed budget, on calibnet estimate × 1.5
     const gas = CAL ? (await pub.estimateContractGas({ account, address, abi, functionName, args, value })) * 3n / 2n : 15_000_000n;
     const hash = await wallet.writeContract({ ...request, abi, chain: NET.chain, gas });
-    const rcpt = await pub.waitForTransactionReceipt({ hash, timeout: 300_000 });
+    // the public node sometimes fails a request: keep asking for the receipt (the transaction is already sent)
+    let rcpt;
+    for (let attempt = 1; ; attempt++) {
+      try { rcpt = await pub.waitForTransactionReceipt({ hash, timeout: 300_000 }); break; }
+      catch (e) { if (attempt >= 6) throw e; say(`receipt for ${functionName} not available yet (${reason(e)}), retrying…`); await sleep(5000); }
+    }
     if (rcpt.status !== "success") throw new Error(`${what} reverted`);
     return { what, fn: functionName, tx: hash, block: Number(rcpt.blockNumber), receipt: rcpt };
   });
@@ -462,6 +467,7 @@ async function runJob(jobId, client, spec, inputPieceIds, deadline) {
   }
   J.output = { name: out, pieceId: p.pieceId, cid: p.cid };
   plog(`Job #${jobId}: result "${out}" added to your data set as piece #${p.pieceId}.`, p);
+  J.stage = "committing";
   const r = await send(providerAcct, C.cs, ABI.ComputeService, "commitOutputs", [jobId, [BigInt(p.pieceId)]]);
   J.stage = "paid";
   plog(`Job #${jobId}: result committed on-chain; Filecoin Pay released the price to me.`, r);
