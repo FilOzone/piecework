@@ -248,7 +248,7 @@ async function init() {
     me = getAddress(CFG.localClient);
     wal = createWalletClient({ chain, transport: http(CFG.rpc), account: me });
   }
-  $("lede").textContent = "A working proof of concept: the storage provider that holds your data runs programs on it, paid through Filecoin Pay.";
+  $("lede").textContent = "A working proof of concept: the storage provider that holds your data also computes on it, paid through Filecoin Pay.";
   $("eyebrow").textContent = `PieceWork · live proof of concept · ${CFG.network === "calibnet" ? "Filecoin Calibration" : "local chain"}`;
   $("footer").innerHTML = CFG.network === "calibnet"
     ? `<div>Filecoin Calibration network: 1 epoch = 30 seconds. USDFC and tFIL here are test tokens from faucets, with no value. Transactions are public: click an id to see it on Filfox.</div>
@@ -463,7 +463,7 @@ const txLink = (h, label) => CFG.explorer ? `<a href="${CFG.explorer}${h}" targe
 function introPanel() {
   const cal = CFG.network === "calibnet";
   return `<h2>How this demo works</h2>
-    <p class="muted">Every action on this page is a real transaction${cal ? " on the Filecoin Calibration network" : ""}, signed by your wallet (the demo wallet or your own). Below: what is simulated, who does what, and the two ways to pay.</p>
+    <p class="muted">Every action on this page is a real transaction${cal ? " on the Filecoin Calibration network" : ""}, signed by your wallet (the demo wallet or your own).</p>
     <div class="disclaimer"><span class="t">Disclaimer</span><ul>
       <li><b>Storage proofs are simulated.</b> The service provider is assumed honest; it does not submit proofs of possession.</li>
       <li><b>${cal ? "Calibration network" : "Local test chain"}.</b> ${cal ? "Test tokens only. Each step takes 30–60&nbsp;seconds: Filecoin produces a block every 30&nbsp;seconds." : "Test tokens only. One block per second here; on Filecoin a block takes 30&nbsp;seconds."}</li>
@@ -471,7 +471,7 @@ function introPanel() {
     <div class="intro3">
       <div><span class="t">Who is who</span><dl class="terms">
         <dt>Client</dt><dd>You. You own the data set and pay for compute.</dd>
-        <dt>Service provider (SP)</dt><dd>Stores your data set and runs the programs next to it.</dd>
+        <dt>Service provider (SP)</dt><dd>Stores your data set and runs your workloads next to it.</dd>
         <dt>ComputeService</dt><dd>The smart contract that enforces the payment rules.</dd>
       </dl></div>
       <div><span class="t">Two ways to pay</span><dl class="terms">
@@ -481,7 +481,7 @@ function introPanel() {
       <div><span class="t">What is real</span><dl class="terms">
         <dt>Transactions</dt><dd>Every step is an on-chain transaction${cal ? ", linked to Filfox" : ""}.</dd>
         <dt>Contracts</dt><dd>Filecoin Pay, PDP and Warm Storage (FilOz's deployment), plus ComputeService.</dd>
-        <dt>Execution</dt><dd>Your signatures, and real programs running in containers.</dd>
+        <dt>Execution</dt><dd>Your signatures, and real workloads running in containers.</dd>
       </dl></div>
     </div>`;
 }
