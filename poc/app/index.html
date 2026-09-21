@@ -253,9 +253,9 @@ async function init() {
   $("eyebrow").textContent = `PieceWork · live proof of concept · ${CFG.network === "calibnet" ? "Filecoin Calibration" : "local chain"}`;
   $("footer").innerHTML = CFG.network === "calibnet"
     ? `<div>Filecoin Calibration network: 1 epoch = 30 seconds. USDFC and tFIL here are test tokens from faucets, with no value. Transactions are public: click an id to see it on Filfox.</div>
-       <div>Real: Filecoin Pay, PDPVerifier, FWSS (FilOz's calibnet deployment), ComputeService (<code>${esc(CFG.contracts.cs)}</code>), your signatures, piece CIDs computed from the files, the containers. Simulated: proofs of possession are not run; the provider is assumed honest (the "PDP proof ✓" line).</div>`
+       <div>Real: Filecoin Pay, PDPVerifier, FWSS (FilOz's calibnet deployment), ComputeService (<code>${esc(CFG.contracts.cs)}</code>), your signatures, piece CIDs computed from the files, the containers. Not run yet: proofs of possession (the demo provider does not run a prover; real proofs can be added later).</div>`
     : `<div>Local chain: 1 block = 1 epoch = 1 second here (30 seconds on Filecoin). luca_usdfc is a local test token with no value, standing in for USDFC.</div>
-       <div>Real: the FOC contracts at the versions deployed on calibnet and mainnet (Filecoin Pay v1.0.0, PDPVerifier, FWSS v1.4.0, provider registry), ComputeService, the client's signatures, piece CIDs computed from the files, the containers. Stand-ins: the token, and proofs of possession, which are not run: the provider is assumed to be an honest provider that proves every period (the "PDP proof ✓" line is simulated).</div>`;
+       <div>Real: the FOC contracts at the versions deployed on calibnet and mainnet (Filecoin Pay v1.0.0, PDPVerifier, FWSS v1.4.0, provider registry), ComputeService, the client's signatures, piece CIDs computed from the files, the containers. Stand-ins: the token. Not run yet: proofs of possession (the demo provider does not run a prover; real proofs can be added later).</div>`;
   if (CFG.network === "calibnet" && window.ethereum) {
     const accts = await window.ethereum.request({ method: "eth_accounts" }).catch(() => []);
     if (accts[0]) await useAccount(accts[0]);
@@ -470,7 +470,7 @@ function introPanel() {
   return `<h2>How this demo works</h2>
     <p class="muted">Every action on this page is a real transaction${cal ? " on the Filecoin Calibration network" : ""}, signed by your wallet (the demo wallet or your own).</p>
     <div class="disclaimer"><span class="t">Disclaimer</span><ul>
-      <li><b>Storage proofs are simulated.</b> The service provider is assumed honest; it does not submit proofs of possession.</li>
+      <li><b>Storage proofs are not run yet.</b> The demo provider does not submit proofs of possession; real proofs can be added later.</li>
       <li><b>${cal ? "Calibration network" : "Local test chain"}.</b> ${cal ? "Test tokens only. Each step takes 30–60&nbsp;seconds: Filecoin produces a block every 30&nbsp;seconds." : "Test tokens only. One block per second here; on Filecoin a block takes 30&nbsp;seconds."}</li>
     </ul></div>
     <div class="intro3">
@@ -529,7 +529,6 @@ function scene() {
   const files = S.files.map((f) => `<li class="${f.kind === "output" ? "new" : ""}"><span><span class="pid">#${f.pieceId}</span><a data-file="${f.pieceId}">${esc(f.name)}</a></span><span class="sz">${f.size} B</span></li>`).join("");
   const f1 = running ? { cls: "on", t: `streaming ${m(running.rate)}/epoch` } : waitingJob ? { cls: "", t: "price on hold" } : null;
   const PROVING_PERIOD = CFG.pdp?.maxProvingPeriod ?? 240;
-  const proven = Math.floor(S.block / PROVING_PERIOD) * PROVING_PERIOD;
   return `<div class="scene">
     <div class="actor"><div class="who">${icon.you}You${me ? ` · ${me.slice(0, 6)}…${me.slice(-4)}` : ""}</div>
       <div class="big">${c ? m(c.available) : ""}</div><div class="unit">${CFG.token} available in Filecoin Pay</div>
@@ -540,8 +539,8 @@ function scene() {
     <div class="flow ${running ? "on" : ""}"><span class="arr">→</span><span>${running ? "paid as time passes" : ""}</span></div>
     <div class="actor prov"><div class="who">${icon.prov}Storage provider</div>
       <div class="big">${m(S.providerEarned)}</div><div class="unit">${CFG.token} earned (in Filecoin Pay)</div>
-      <div class="note">${S.dataSetId !== null ? `Holds your data set #${S.dataSetId} (FWSS, proven with PDP). Click a file to open it. <span style="color:var(--money)">Green</span> = results added by jobs.` : "Does not hold files of yours yet."}</div>
-      ${S.dataSetId !== null ? `<div class="note"><span class="pill">PDP proof ✓</span> last proven at block ${proven}, next by block ${proven + PROVING_PERIOD}. The provider must prove it still holds your data once per proving period: ${PROVING_PERIOD} blocks (${dur(secs(PROVING_PERIOD))}) on ${CFG.network === "calibnet" ? "Calibration" : "this network"}, 2880 blocks (24 h) on mainnet. <span class="muted">(Simulated in this demo: we assume an honest provider that proves every period.)</span></div>` : ""}
+      <div class="note">${S.dataSetId !== null ? `Holds your data set #${S.dataSetId} (Warm Storage, PDP). Click a file to open it. <span style="color:var(--money)">Green</span> = results added by jobs.` : "Does not hold files of yours yet."}</div>
+      ${S.dataSetId !== null ? `<div class="note"><span class="pill off">PDP proofs: not run in this demo</span> A real provider must prove it still holds your data once per proving period: ${PROVING_PERIOD} blocks (${dur(secs(PROVING_PERIOD))}) on ${CFG.network === "calibnet" ? "Calibration" : "this network"}, 2880 blocks (24 h) on mainnet. The demo provider does not run a prover yet; real proofs can be added later. The compute and payment flows do not depend on them.</div>` : ""}
       ${S.files.length ? `<div class="note">${S.files.length} files in your data set: see <b>Your data set</b> below.</div>` : ""}</div>
   </div>`;
 }

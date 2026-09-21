@@ -16,7 +16,7 @@ To stop afterwards: close the Terminal window. Every start is a fresh chain: bal
 
 ## What to say and click
 
-**0 · The setup (15 s).** "Everything here runs on a local blockchain on my laptop, with the real FOC contracts, the same versions as on calibnet and mainnet: Filecoin Pay, PDP, Warm Storage. Plus our ComputeService contract. The money is a test token, luca_usdfc. The storage provider on the right already holds my data set: four files, real PDP pieces. It's a real program that runs jobs in containers next to my files. Proofs are simulated: we assume an honest provider."
+**0 · The setup (15 s).** "Everything here runs on a local blockchain on my laptop, with the real FOC contracts, the same versions as on calibnet and mainnet: Filecoin Pay, PDP, Warm Storage. Plus our ComputeService contract. The money is a test token, luca_usdfc. The storage provider on the right already holds my data set: four files, real PDP pieces. It's a real program that runs jobs in containers next to my files. Proofs of possession are not run yet: the demo provider does not run a prover; real proofs can be added later."
 
 **1 · Put money in (20 s).** Click **Deposit 2 luca_usdfc**.
 "Four transactions: allow, deposit, let ComputeService open payments for me within limits I set, and let providers add job results to my data set, but only while I have a job open with them. Look at the log at the bottom: every line is a transaction."
@@ -34,7 +34,7 @@ When it says *delivered and paid*, click **search-index.txt** (it's green on the
 "Deadline passed on-chain, no result, so the price comes back to me. Nobody has to trust anybody for that."
 
 **5 · What's real (20 s).** Point at the footer.
-"Real: the FOC contracts, ComputeService, my signatures, the piece IDs, the containers, every transaction. Simulated: PDP proofs (we assume an honest provider that proves), the token, and time runs fast: 1 second here is 30 seconds on Filecoin."
+"Real: the FOC contracts, ComputeService, my signatures, the piece IDs, the containers, every transaction. Not run yet: PDP proofs (real proofs can be added later). Stand-ins: the token, and time runs fast: 1 second here is 30 seconds on Filecoin."
 
 ## Likely questions
 

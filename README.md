@@ -48,7 +48,7 @@ What is real and what is a stand-in:
 | Real | Stand-in (local only) |
 |---|---|
 | FilecoinPayV1 v1.0.0, PDPVerifier, FWSS v1.4.0, ServiceProviderRegistry, SessionKeyRegistry (filecoin-services @ `4cbbea4`), unmodified | USDFC: a test token, `luca_usdfc` |
-| `ComputeService` (this repo), including the FWSS data set authorizer | **Proofs of possession are not run**: the provider is assumed honest ("PDP proof ✓" on the page is simulated) |
+| `ComputeService` (this repo), including the FWSS data set authorizer | **Proofs of possession are not run yet**: the demo provider does not run a prover; real proofs can be added later |
 | Client signatures (EIP-712, FilOz's definitions), piece CIDs (CommPv2, FilOz's library) | FVM precompiles: a stub reporting success, so FIL fees are kept instead of burned |
 | Containers (Docker, no network, read-only inputs); transactions, settlement, fees | Time: 1 block = 1 epoch = 1 s (30 s on Filecoin) |
 
@@ -95,4 +95,4 @@ cd integration && forge test    # 10 tests: ComputeService with the real FOC con
 
 ## Status
 
-Stage A (local POC) working. Stage B: running on Filecoin Calibration with FilOz's contracts, a registered demo provider and our deployed ComputeService; client via MetaMask or a demo wallet. Proofs of possession are simulated (honest-provider assumption).
+Stage A (local POC) working. Stage B: running on Filecoin Calibration with FilOz's contracts, a registered demo provider and our deployed ComputeService; client via MetaMask or a demo wallet. Proofs of possession are not run yet (the demo provider does not run a prover; real proofs can be added later).
