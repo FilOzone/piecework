@@ -97,7 +97,7 @@ const PARAMS = {
       desc: "Reads your text files and builds an index: every word, and which files contain it.", reads: "your .txt files", writes: "search-index.txt" },
     sales: { name: "Summarise my sales table", image: "sales-report:v1", price: U("0.2"), deadline: NET.deadlines.sales,
       desc: "Reads your sales table and adds up customers and revenue per region, plus the total.", reads: "sales-2026.csv", writes: "sales-summary.txt" },
-    late: { name: "Build a search index (provider will be late)", image: "indexer-slow:v1", price: U("0.5"), deadline: NET.deadlines.late,
+    late: { name: "Build a search index: see what happens if the provider misses the deadline", image: "indexer-slow:v1", price: U("0.5"), deadline: NET.deadlines.late,
       desc: "Same program as the search index, but the provider deliberately misses the deadline, to show what happens then: nobody is paid, and a \"Get my money back\" button appears.", reads: "your .txt files", writes: "nothing (late)" },
   },
   approval: NET.approval,
@@ -771,14 +771,14 @@ async function main() {
       }
     const registered = await read(C.registry, ABI.ServiceProviderRegistry, "getProviderIdByAddress", [A.provider]);
     if (registered === 0n) throw new Error("The provider is not registered yet. Run: node start.mjs --calibnet --register");
-    plog(`Provider ${A.provider} on calibnet (registry id ${registered}). Proofs of possession simulated: I act as an honest provider that proves every period.`);
+    plog(`Provider ${A.provider} on calibnet (registry id ${registered}). Proofs of possession: not run yet (I do not run a prover).`);
   } else {
     fs.rmSync(RUN, { recursive: true, force: true });
     fs.mkdirSync(STORAGE, { recursive: true });
     say("Starting the local blockchain…");
     await startLocalChain();
     const r = await prepareLocalClient();
-    plog(`I hold your data set #${cl().dataSetId} on FWSS (${(await listFiles()).length} files; storage paid through Filecoin Pay; proofs of possession simulated: I act as an honest provider that proves every period).`, r);
+    plog(`I hold your data set #${cl().dataSetId} on FWSS (${(await listFiles()).length} files; storage paid through Filecoin Pay; proofs of possession not run yet: I do not run a prover).`, r);
   }
   if (CAL) await recoverFromChain();
   lastBlock = await pub.getBlockNumber();

@@ -30,7 +30,7 @@ Wait ~10 s, then **Stop**. "Payment stopped at that second. I paid exactly the s
 "The price is on hold. The provider runs the program, adds the result to *my* data set as a new piece, and only then gets paid."
 When it says *delivered and paid*, click **search-index.txt** (it's green on the right). "That's the output, stored as a PDP piece."
 
-**4 · What if the provider is late? (40 s).** Choose **… (provider will be late)** → **Order**. Wait ~15 s until **Get my money back** appears, click it.
+**4 · What if the provider is late? (40 s).** Choose **Build a search index: see what happens if the provider misses the deadline** → **Order**. Wait ~15 s until **Get my money back** appears, click it.
 "Deadline passed on-chain, no result, so the price comes back to me. Nobody has to trust anybody for that."
 
 **5 · What's real (20 s).** Point at the footer.
