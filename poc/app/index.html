@@ -176,7 +176,7 @@ body.down .offline{display:block}
 <div class="wrap">
   <div class="top">
     <div>
-      <div class="eyebrow" id="eyebrow">PieceWork · live proof of concept</div>
+      <div class="eyebrow" id="eyebrow">PieceWork · simulation</div>
       <h1>Compute on your PDP data set</h1>
       <p class="lede" id="lede"></p>
     </div>
@@ -249,8 +249,8 @@ async function init() {
     me = getAddress(CFG.localClient);
     wal = createWalletClient({ chain, transport: http(CFG.rpc), account: me });
   }
-  $("lede").textContent = "A working proof of concept: the storage provider that holds your data also computes on it, paid through Filecoin Pay.";
-  $("eyebrow").textContent = `PieceWork · live proof of concept · ${CFG.network === "calibnet" ? "Filecoin Calibration" : "local chain"}`;
+  $("lede").textContent = "A simulation with real transactions: the storage provider that holds your data also computes on it, paid through Filecoin Pay.";
+  $("eyebrow").textContent = `PieceWork · simulation · ${CFG.network === "calibnet" ? "Filecoin Calibration" : "local chain"}`;
   $("footer").innerHTML = CFG.network === "calibnet"
     ? `<div>Filecoin Calibration network: 1 epoch = 30 seconds. USDFC and tFIL here are test tokens from faucets, with no value. Transactions are public: click an id to see it on the Blockscout explorer.</div>
        <div>Real: Filecoin Pay, PDPVerifier, FWSS (FilOz's calibnet deployment), ComputeService (<code>${esc(CFG.contracts.cs)}</code>), your signatures, piece CIDs computed from the files, the containers. Not run yet: proofs of possession (the demo provider does not run a prover; real proofs can be added later).</div>`
