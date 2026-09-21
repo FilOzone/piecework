@@ -495,7 +495,7 @@ function datasetPanel() {
   const rows = S.files.map((f) => `<tr>
       <td>#${f.pieceId}</td>
       <td><a data-file="${f.pieceId}" style="cursor:pointer">${esc(f.name)}</a></td>
-      <td>${f.kind === "output" ? `<span class="pill">result${f.jobId ? ` of job #${f.jobId}` : ""}</span>` : "your file"}</td>
+      <td>${f.kind === "output" ? `<span class="pill">result of ${esc(f.jobLabel ?? (f.jobId ? `job #${f.jobId}` : "a job"))}</span>` : "your file"}</td>
       <td>${f.size} B</td>
       <td class="mono" title="${esc(f.cid)}">${esc(f.cid.slice(0, 14))}…${esc(f.cid.slice(-6))}</td>
       <td>${f.tx ? txLink(f.tx, "stored in this transaction") : "–"}</td></tr>`).join("");

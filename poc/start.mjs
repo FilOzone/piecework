@@ -325,7 +325,7 @@ async function listFiles(client = current) {
     const p = c.pieces[i] ?? { name: `piece ${i}`, cid: "", kind: "input" };
     const f = path.join(clientDir(client), p.name);
     const size = fs.existsSync(f) ? fs.statSync(f).size : 0;
-    out.push({ pieceId: i, name: p.name, cid: p.cid, live, size, kind: p.kind, tx: p.tx ?? null, jobId: p.jobId ?? null });
+    out.push({ pieceId: i, name: p.name, cid: p.cid, live, size, kind: p.kind, tx: p.tx ?? null, jobId: p.jobId ?? null, jobLabel: p.jobLabel ?? null });
   }
   return out;
 }
