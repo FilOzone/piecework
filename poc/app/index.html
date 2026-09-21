@@ -406,8 +406,12 @@ const txLink = (h) => CFG.explorer ? `<a href="${CFG.explorer}${h}" target="_bla
 
 function walletPanel() {
   if (CFG.network !== "calibnet") return "";
-  const low = me && S?.client && (n(S.client.fil) < 1 || n(S.client.wallet) + n(S.client.available) < 1)
-    ? `<p class="story err" style="margin:6px 0 0">This wallet is running low on test tokens (${m(S.client.fil)} tFIL, ${m(S.client.wallet)} ${CFG.token} in the wallet). ${usingDemo ? "Ask @lucaniz to top up the demo wallet." : "Top up from the calibnet faucets."}</p>` : "";
+  // calibnet: when a test token drops below 5, show a direct link to its faucet (free test tokens)
+  const FAUCET = { tFIL: "https://forest-explorer.chainsafe.dev/faucet/calibnet", USDFC: "https://forest-explorer.chainsafe.dev/faucet/calibnet_usdfc" };
+  const lows = me && S?.client ? [["tFIL", S.client.fil], ["USDFC", S.client.wallet]].filter(([, v]) => n(v) < 5) : [];
+  const low = lows.length ? `<div class="story err" style="margin:6px 0 0">${lows.map(([t, v]) =>
+      `<div><b>${t} below 5</b> (${m(v)} in this wallet): <a href="${FAUCET[t]}" target="_blank" rel="noopener">get free test ${t} from the faucet</a></div>`).join("")}
+      <div class="muted">Paste this address in the faucet: <code>${esc(me)}</code> <button class="b" id="copyaddr" style="padding:2px 8px">Copy</button></div></div>` : "";
   const who = me ? `<p class="muted">You are the client: <code>${esc(me)}</code> (${usingDemo ? "demo wallet" : "your MetaMask"}). The storage provider is the demo program: <code>${esc(CFG.provider)}</code>.</p>` : "";
   const demo = CFG.demoClient ? `<button class="b ${me ? "" : "primary"}" id="usedemo">Use the demo wallet (no MetaMask)</button>` : "";
   const mm = window.ethereum ? `<button class="b" id="connect">Connect MetaMask</button>` : "";
@@ -544,8 +548,9 @@ async function refresh() {
 }
 
 document.addEventListener("click", async (e) => {
-  const t = e.target.closest("[data-act],[data-file],#connect,#usedemo,#tab-time,#tab-job");
+  const t = e.target.closest("[data-act],[data-file],#connect,#usedemo,#copyaddr,#tab-time,#tab-job");
   if (!t) return;
+  if (t.id === "copyaddr") { navigator.clipboard?.writeText(me); t.textContent = "Copied"; return; }
   if (t.id === "usedemo") return useDemoWallet().catch((err) => { message = { err: true, text: reason(err) }; render(); });
   if (t.id === "connect") return connectMetaMask().catch((err) => { message = { err: true, text: reason(err) }; render(); });
   if (t.id === "tab-time" || t.id === "tab-job") { tab = t.id.slice(4); message = null; return render(); }
