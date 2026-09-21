@@ -149,7 +149,10 @@ ol.steps2 li.done{color:var(--money)} ol.steps2 li.now{font-weight:600} ol.steps
 @media (prefers-reduced-motion:reduce){.spin{animation:none}.waitbar span{transition:none}}
 .intro3{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
 .intro3 div{background:var(--surface-2);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
-.intro3 b{display:block;margin-bottom:2px}
+.intro3 .t{display:block;font-weight:700;margin-bottom:4px}
+.intro3{grid-template-columns:repeat(3,minmax(0,1fr))}
+@media (max-width:760px){.intro3{grid-template-columns:minmax(0,1fr)}}
+.goodtoknow{border:1px solid var(--warn);background:var(--warn-soft);border-radius:10px;padding:10px 12px;margin:10px 0 12px}
 table.ds{width:100%;border-collapse:collapse;font-size:.9rem}
 table.ds th,table.ds td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:top}
 table.ds th{font:600 .75rem var(--body);letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3)}
@@ -452,11 +455,11 @@ function introPanel() {
   const cal = CFG.network === "calibnet";
   return `<h2>How this demo works</h2>
     <p class="muted">A storage provider that already stores your files (in a PDP data set on Filecoin) also sells <b>compute over them</b>, paid through <b>Filecoin Pay</b>. ${cal ? "Everything runs on Filecoin's Calibration test network, with test tokens." : "Everything runs on a local test chain, with test tokens."}</p>
+    <div class="goodtoknow"><b>Good to know:</b> proofs of possession are simulated (the SP is assumed honest).${cal ? " Each step takes 30–60 s (one block every 30 s)." : ""}</div>
     <div class="intro3">
-      <div style="border-color:var(--warn);background:var(--warn-soft)"><b>Good to know</b>Simulated: proofs of possession (the SP is assumed honest).${cal ? " Each step takes 30–60 s (one block every 30 s)." : ""}</div>
-      <div><b>1 · Who is who</b>You are the <b>client</b>. The <b>service provider</b> (SP) holds your data set and runs the programs. <b>ComputeService</b> is the smart contract that enforces the payment rules.</div>
-      <div><b>2 · Two ways to pay</b><b style="display:inline">Pay for time</b>: rent a service next to your files, billed per epoch until you stop.<br><b style="display:inline">Pay per job</b>: order a result; the price is held and paid only if the result lands in your data set before the deadline.</div>
-      <div><b>3 · What is real</b>Every step is a transaction${cal ? " (click any id to see it on Filfox)" : ""}: Filecoin Pay, PDP and Warm Storage contracts, your signatures, the containers.</div>
+      <div><span class="t">1 · Who is who</span>You are the <b>client</b>. The <b>service provider</b> (SP) holds your data set and runs the programs. <b>ComputeService</b> is the smart contract that enforces the payment rules.</div>
+      <div><span class="t">2 · Two ways to pay</span><b>Pay for time</b>: rent a service next to your files, billed per epoch until you stop.<br><b>Pay per job</b>: order a result; the price is held and paid only if the result lands in your data set before the deadline.</div>
+      <div><span class="t">3 · What is real</span>Every step is a transaction${cal ? " (click any id to see it on Filfox)" : ""}: Filecoin Pay, PDP and Warm Storage contracts, your signatures, the containers.</div>
     </div>`;
 }
 
