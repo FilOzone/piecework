@@ -1,0 +1,12 @@
+{
+  "name": "piecework-provider-kit",
+  "private": true,
+  "type": "module",
+  "description": "Lets a Curio (PDP) storage provider sell compute over the data sets it stores, paid through Filecoin Pay via ComputeService.",
+  "scripts": { "start": "node kit.mjs --config kit.config.json" },
+  "dependencies": {
+    "@filoz/synapse-core": "0.9.0",
+    "multiformats": "^14.0.5",
+    "viem": "^2.56.8"
+  }
+}

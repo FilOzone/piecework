@@ -23,14 +23,16 @@ import { promisify } from "node:util";
 import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
+import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
 import {
   createPublicClient, createWalletClient, http as rpc, fallback, parseUnits, formatUnits, keccak256, toHex, BaseError, getAddress,
-  verifyMessage, hexToString,
+  verifyMessage, hexToString, decodeEventLog,
 } from "viem";
 import { foundry, filecoinCalibration } from "viem/chains";
 import { privateKeyToAccount, generatePrivateKey } from "viem/accounts";
 import * as FOC from "./foc.mjs";
+import { CID } from "multiformats/cid";
 
 const execFile = promisify(execFileCb);
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -44,6 +46,9 @@ const ZERO = "0x0000000000000000000000000000000000000000";
 // ---------------------------------------------------------------- network
 
 const NETWORK = process.argv.includes("--calibnet") ? "calibnet" : "local";
+// --external-kit: jobs are run by the provider kit (poc/provider-kit), which talks to this program's Curio-style API
+// exactly as it talks to a real Curio. This program then only serves the page and the provider's storage.
+const EXTERNAL_KIT = process.argv.includes("--external-kit");
 const CAL = NETWORK === "calibnet";
 // Working files live outside ~/Documents: macOS asks for extra permission before Docker can read Documents.
 const RUN = path.join(process.env.HOME, ".foc-compute-poc", NETWORK);
@@ -447,6 +452,7 @@ function onJobPosted({ jobId, client, provider, imageDigest, inputPieceIds, pric
   jobInfo[jobId] = { client, name, image, stage: "received" };
   plog(`New job #${jobId}: "${name}" for ${fmt(price)} ${NET.token}, deadline block ${deadline}.`);
   if (!spec) return plog(`I don't run ${image}; ignoring job #${jobId}.`);
+  if (EXTERNAL_KIT) return plog(`Job #${jobId}: handed to the provider kit, which runs it and stores the results through the Curio API.`);
   runJob(jobId, client, spec, inputPieceIds, deadline).catch((e) => plog(`Job #${jobId} failed: ${reason(e)}`));
 }
 
@@ -495,6 +501,109 @@ async function runJob(jobId, client, spec, inputPieceIds, deadline) {
   const r = await send(providerAcct, C.cs, ABI.ComputeService, "commitOutputs", [jobId, p.pieces.map((x) => BigInt(x.pieceId))]);
   J.stage = "paid";
   plog(`Job #${jobId}: result committed on-chain; Filecoin Pay released the price to me.`, r);
+}
+
+// Kit mode: the kit added the results through the Curio API as unnamed pieces; give them the job's output names.
+function onKitJobPaid({ jobId, outputPieceIds }) {
+  const J = jobInfo[jobId];
+  if (!J) return;
+  const c = cl(J.client), spec = JOB_SCRIPTS[J.image];
+  const names = spec?.outputs ?? [spec?.output];
+  J.outputs = outputPieceIds.map((id, i) => {
+    const p = c?.pieces[Number(id)];
+    if (p && names[i] && p.name.startsWith("piece-")) {
+      let out = names[i], k = 2;
+      while (fs.existsSync(path.join(clientDir(J.client), out))) out = names[i].replace(/(\.[^.]+)$/, ` (${k++})$1`);
+      fs.renameSync(path.join(clientDir(J.client), p.name), path.join(clientDir(J.client), out));
+      Object.assign(p, { name: out, jobId: Number(jobId) });
+    }
+    return { name: p?.name ?? `piece ${id}`, pieceId: Number(id), cid: p?.cid };
+  });
+  J.stage = "paid";
+  saveState();
+  plog(`Job #${jobId}: the provider kit delivered ${J.outputs.map((o) => `"${o.name}"`).join(" and ")} and was paid.`);
+}
+
+// ---------------------------------------------------------------- Curio-style PDP API (the laptop as a stand-in SP)
+// The subset of Curio's HTTP API the provider kit and Synapse use (curio@5fdc4fc pdp/handlers.go, market/retrieval):
+// GET /piece/<cid>, POST /pdp/piece + PUT /pdp/piece/upload/<uuid>, POST /pdp/data-sets/<id>/pieces and its status.
+const parked = new Map(); // pieceCid -> bytes (uploaded, not yet in a data set)
+const uploads = new Map(); // uuid -> expected pieceCid
+const adds = new Map(); // txHash -> status for GET .../pieces/added/<txHash>
+
+function pieceBytes(cid) {
+  if (parked.has(cid)) return parked.get(cid);
+  for (const [addr, c] of Object.entries(ST.clients))
+    for (const p of Object.values(c.pieces))
+      if (p.cid === cid && fs.existsSync(path.join(clientDir(addr), p.name))) return fs.readFileSync(path.join(clientDir(addr), p.name));
+  return null;
+}
+
+async function curioApi(req, res, url) {
+  const reply = (code, obj, headers = {}) => { res.writeHead(code, { "content-type": "application/json", ...headers }); res.end(obj ? JSON.stringify(obj) : ""); };
+  const body = async () => { const chunks = []; for await (const ch of req) chunks.push(ch); return Buffer.concat(chunks); };
+  let m;
+  if (req.method === "GET" && url.pathname === "/pdp/ping") return reply(200);
+  if (req.method === "GET" && (m = url.pathname.match(/^\/piece\/([a-z0-9]+)$/))) {
+    const b = pieceBytes(m[1]);
+    if (!b) return reply(404, { error: "piece not found" });
+    res.writeHead(200, { "content-type": "application/octet-stream" }); return res.end(b);
+  }
+  if (req.method === "POST" && url.pathname === "/pdp/piece") {
+    const { pieceCid } = JSON.parse(await body());
+    if (pieceBytes(pieceCid)) return reply(200, { pieceCid });
+    const uuid = crypto.randomUUID(); uploads.set(uuid, pieceCid);
+    return reply(201, null, { Location: `/pdp/piece/upload/${uuid}` });
+  }
+  if (req.method === "PUT" && (m = url.pathname.match(/^\/pdp\/piece\/upload\/([0-9a-f-]+)$/))) {
+    const expected = uploads.get(m[1]);
+    if (!expected) return reply(404, { error: "upload not found" });
+    const bytes = await body();
+    if ((await FOC.pieceCid(bytes)).text !== expected) return reply(400, { error: "Computed piece CID does not match expected piece CID" });
+    parked.set(expected, bytes); uploads.delete(m[1]);
+    return reply(204);
+  }
+  if (req.method === "POST" && (m = url.pathname.match(/^\/pdp\/data-sets\/(\d+)\/pieces$/))) {
+    const dataSetId = Number(m[1]);
+    const owner = Object.keys(ST.clients).find((a) => ST.clients[a].dataSetId === dataSetId);
+    if (!owner) return reply(404, { error: "data set not held here" });
+    const { pieces, extraData } = JSON.parse(await body());
+    const cids = pieces.map((p) => p.pieceCid);
+    if (cids.some((c) => !pieceBytes(c))) return reply(400, { error: "piece not uploaded" });
+    const args = [BigInt(dataSetId), ZERO, cids.map((c) => ({ data: toHex(CID.parse(c).bytes) })), extraData];
+    const { request } = await pub.simulateContract({ account: providerAcct, address: C.pdp, abi: ABI.PDPVerifier, functionName: "addPieces", args });
+    const gas = (await pub.estimateContractGas({ account: providerAcct, address: C.pdp, abi: ABI.PDPVerifier, functionName: "addPieces", args })) * 3n / 2n;
+    const hash = await wallet.writeContract({ ...request, gas });
+    adds.set(hash, { txHash: hash, txStatus: "pending", dataSetId, pieceCount: cids.length, addMessageOk: null, piecesAdded: false });
+    (async () => { // confirm in the background, as Curio does, then record the new pieces
+      let r;
+      for (let i = 0; !r && i < 60; i++) r = await pub.waitForTransactionReceipt({ hash, timeout: 120_000 }).catch(() => null);
+      if (r?.status !== "success") return adds.set(hash, { ...adds.get(hash), txStatus: "rejected" });
+      const ids = [];
+      for (const log of r.logs) {
+        try {
+          const ev = decodeEventLog({ abi: ABI.PDPVerifier, data: log.data, topics: log.topics });
+          if (ev.eventName === "PiecesAdded") ids.push(...ev.args.pieceIds.map(Number));
+          if (ev.eventName === "PiecesAddedV2") cids.forEach((_, i) => ids.push(Number(ev.args.firstPieceId) + i));
+        } catch { /* other contracts' events */ }
+      }
+      const c = ST.clients[owner];
+      ids.forEach((id, i) => {
+        const name = `piece-${id}.txt`;
+        fs.writeFileSync(path.join(clientDir(owner), name), parked.get(cids[i]) ?? pieceBytes(cids[i]));
+        c.pieces[id] = { name, cid: cids[i], kind: "output", tx: hash };
+        parked.delete(cids[i]);
+      });
+      saveState();
+      adds.set(hash, { ...adds.get(hash), txStatus: "confirmed", addMessageOk: true, piecesAdded: true, confirmedPieceIds: ids, confirmedTxHash: hash });
+    })().catch((e) => { say("curio api:", reason(e)); adds.set(hash, { ...adds.get(hash), txStatus: "rejected" }); });
+    return reply(201, { txHash: hash }, { Location: `/pdp/data-sets/${dataSetId}/pieces/added/${hash}` });
+  }
+  if (req.method === "GET" && (m = url.pathname.match(/^\/pdp\/data-sets\/\d+\/pieces\/added\/(0x[0-9a-fA-F]+)$/))) {
+    const st = adds.get(m[1]);
+    return st ? reply(200, st) : reply(404, { error: "unknown transaction" });
+  }
+  return false;
 }
 
 // ---------------------------------------------------------------- recovery after a restart (calibnet)
@@ -550,6 +659,7 @@ async function eventLoop() {
           else if (l.eventName === "SessionClosed") await onSessionClosed(l.args, b);
           else if (l.eventName === "JobPosted") onJobPosted(l.args);
           else if (l.eventName === "JobExpired" && jobInfo[l.args.jobId]) jobInfo[l.args.jobId].stage = "refunded";
+          else if (l.eventName === "JobPaid" && EXTERNAL_KIT) onKitJobPaid(l.args);
         }
         await providerTick(Number(latest));
       }
@@ -637,7 +747,7 @@ async function config() {
     },
     abi: {
       erc20: pick(ABI.ERC20, ["approve", "balanceOf", "allowance"]),
-      payments: pick(ABI.FilecoinPayV1, ["deposit", "withdraw", "setOperatorApproval", "getAccountInfoIfSettled"]),
+      payments: pick(ABI.FilecoinPayV1, ["deposit", "withdraw", "setOperatorApproval", "getAccountInfoIfSettled", "operatorApprovals"]),
       fwss: pick(ABI.FilecoinWarmStorageService, ["setDataSetAuthorizer"]),
       cs: ABI.ComputeService,
     },
@@ -654,6 +764,7 @@ function serve() {
       const url = new URL(req.url, "http://x");
       // health check for the stable link's "is the demo up?" test (github.io origin, so CORS is open here)
       if (req.method === "GET" && url.pathname === "/api/ping") { res.writeHead(200, { "content-type": "application/json", "access-control-allow-origin": "*" }); return res.end('{"ok":true}'); }
+      if (url.pathname.startsWith("/pdp/") || url.pathname.startsWith("/piece/")) { if ((await curioApi(req, res, url)) !== false) return; }
       if (req.method === "GET" && url.pathname === "/api/config") return json(200, await config());
       if (req.method === "GET" && url.pathname === "/api/state") return json(200, await state(url.searchParams.get("client")));
       if (req.method === "GET" && url.pathname === "/api/sample-pieces") return json(200, (await samplePieces()).map(({ name, hex, text }) => ({ name, hex, text })));

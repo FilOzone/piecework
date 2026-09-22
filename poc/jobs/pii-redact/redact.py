@@ -65,11 +65,26 @@ def keep(text, r):
     return r.score >= 0.4
 
 
+FAST = os.environ.get("MODE") == "fast"  # patterns only: skips the language model (no names or places)
+PATTERN_ENTITIES = ["EMAIL_ADDRESS", "PHONE_NUMBER", "IBAN_CODE", "CREDIT_CARD", "US_SSN", "SWIFT_BIC", "PASSPORT_NUMBER",
+                    "WALLET_ADDRESS", "STREET_ADDRESS"]
+
+
+def analyze_fast(analyzer, doc):
+    from presidio_analyzer import EntityRecognizer
+    out = []
+    for rec in analyzer.registry.get_recognizers(language="en", entities=PATTERN_ENTITIES):
+        if rec.name == "PhoneRecognizer" or hasattr(rec, "patterns"):
+            out += rec.analyze(text=doc, entities=PATTERN_ENTITIES, nlp_artifacts=None)
+    return EntityRecognizer.remove_duplicates(out)
+
+
 def process(doc):
     """Returns (entity counts, redacted text, bytes) for one document."""
     from presidio_anonymizer.entities import OperatorConfig
     analyzer, anonymizer = engines()
-    results = [r for r in analyzer.analyze(text=doc, language="en", entities=ENTITIES) if keep(doc, r)]
+    found = analyze_fast(analyzer, doc) if FAST else analyzer.analyze(text=doc, language="en", entities=ENTITIES)
+    results = [r for r in found if keep(doc, r)]
     redacted = anonymizer.anonymize(text=doc, analyzer_results=results,
                                     operators={"DEFAULT": OperatorConfig("replace", {})}).text
     return Counter(r.entity_type for r in results), redacted, len(doc.encode())
@@ -111,7 +126,7 @@ def main():
             c = per_file.get(f, Counter())
             rep.write(f"  {f}: " + (", ".join(f"{v} {k.replace('_', ' ').lower()}" for k, v in c.most_common()) or "nothing found") + "\n")
         rep.write("\nA redacted copy of every document is in redacted-documents.txt (each item replaced by its type).\n")
-        rep.write(f"\nHow the job ran: {workers} CPU workers, model loading {t1 - t0:.1f} s, scanning {scan:.1f} s, "
+        rep.write(f"\nHow the job ran: {'patterns only (no names or places), ' if FAST else ''}{workers} CPU workers, model loading {t1 - t0:.1f} s, scanning {scan:.1f} s, "
                   f"{nbytes / scan / 1e6:.2f} MB/s ({len(docs) / scan:.1f} documents/s). No GPU, no network.\n")
     print(f"{len(docs)} docs, {nbytes / 1e6:.2f} MB, {workers} workers, load {t1 - t0:.1f}s, scan {scan:.1f}s, "
           f"{nbytes / scan / 1e6:.3f} MB/s", file=sys.stderr)

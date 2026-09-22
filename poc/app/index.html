@@ -357,6 +357,16 @@ async function tx(address, abi, functionName, args, what) {
 
 const C = () => CFG.contracts;
 const A = () => CFG.abi;
+// Filecoin Pay treats the client's approval of ComputeService as a budget: every job paid uses part of it for good
+// (FilecoinPayV1.sol @04ded6a L1663-1673). Top it up, with the client's own transaction, when it gets low.
+async function ensureBudget(amount) {
+  const [, , lockupAllowance, , lockupUsage] = await pub.readContract({ address: C().payments, abi: A().payments,
+    functionName: "operatorApprovals", args: [C().usdfc, me, C().cs] });
+  if (lockupAllowance - lockupUsage >= amount) return;
+  const ap = CFG.params.approval;
+  await tx(C().payments, A().payments, "setOperatorApproval", [C().usdfc, C().cs, true, BigInt(ap.rateAllowance), lockupUsage + BigInt(ap.lockupAllowance), BigInt(ap.maxLockupPeriod)],
+    `Renew your budget for the compute service: up to ${m(formatUnits(BigInt(ap.lockupAllowance), 18))} ${CFG.token} more on hold`);
+}
 async function free() {
   const [, , available] = await pub.readContract({ address: C().payments, abi: A().payments, functionName: "getAccountInfoIfSettled", args: [C().usdfc, me] });
   return available;
@@ -423,6 +433,7 @@ const ACTIONS = {
   async openSession() {
     const s = CFG.params.session;
     await requireFree(BigInt(s.rate) * BigInt(s.lockupPeriod), "the safety margin");
+    await ensureBudget(BigInt(s.rate) * BigInt(s.lockupPeriod));
     await tx(C().cs, A().cs, "openSession", [CFG.provider, s.image, BigInt(s.rate), BigInt(s.lockupPeriod), BigInt(S.dataSetId)], `Start a session: ${s.name}`);
     return "You asked for a session. Filecoin Pay puts the safety margin on hold. The provider is starting the service next to your files; billing starts when it is ready.";
   },
@@ -433,6 +444,7 @@ const ACTIONS = {
   async postJob() {
     const j = CFG.params.jobs[pick];
     await requireFree(BigInt(j.price), "this job");
+    await ensureBudget(BigInt(j.price));
     const accepts = new Function(`return (${j.inputs})`)();
     const inputs = S.files.filter((f) => f.live && f.kind === "input" && accepts(f.name)).map((f) => BigInt(f.pieceId));
     const deadline = (await pub.getBlockNumber()) + BigInt(j.deadline);
