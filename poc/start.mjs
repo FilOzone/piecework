@@ -97,6 +97,9 @@ const PARAMS = {
       desc: "Reads your text files and builds an index: every word, and which files contain it.", reads: "your .txt files", writes: "search-index.txt" },
     sales: { name: "Summarise my sales table", image: "sales-report:v1", price: U("0.2"), deadline: NET.deadlines.sales,
       desc: "Reads your sales table and adds up customers and revenue per region, plus the total.", reads: "sales-2026.csv", writes: "sales-summary.txt" },
+    pii: { name: "Find and remove personal data in my documents", image: "pii-redact:v1", price: U("0.5"), deadline: NET.deadlines.index,
+      desc: "Scans your financial documents (loan agreements, KYC forms, invoices, trade confirmations) for personal and account data: names, addresses, dates of birth, emails, phone numbers, IBANs, bank codes, card numbers, tax and passport numbers, wallet addresses. Produces a report and a redacted copy of every document, for example to share with investors or auditors. Runs Microsoft Presidio on the provider's CPU; the documents never leave the provider.",
+      reads: "your documents (.txt)", writes: "pii-report.txt and redacted-documents.txt" },
     late: { name: "Build a search index: see what happens if the provider misses the deadline", image: "indexer-slow:v1", price: U("0.5"), deadline: NET.deadlines.late,
       desc: "Same program as the search index, but the provider deliberately misses the deadline, to show what happens then: nobody is paid, and a \"Get my money back\" button appears.", reads: "your .txt files", writes: "nothing (late)" },
   },
@@ -111,7 +114,7 @@ const IMAGE_BY_DIGEST = Object.fromEntries(
 const JOB_SCRIPTS = {
   "indexer:v1": {
     output: "search-index.txt",
-    inputs: (name) => name.endsWith(".txt") && !name.startsWith("search-index"),
+    inputs: (name) => name.endsWith(".txt") && !/^(search-index|sales-summary|pii-report|redacted-documents)/.test(name),
     script: `for f in /in/*; do tr 'A-Z' 'a-z' < "$f" | tr -cs 'a-z0-9' '\\n' | grep -E '^.{5,}$' | sort -u | sed "s|$| $(basename "$f")|"; done \
 | awk '{a[$1]=a[$1]" "$2} END{for (w in a) print w ":" a[w]}' | sort > /out/search-index.txt`,
   },
@@ -122,6 +125,13 @@ const JOB_SCRIPTS = {
   },
 };
 JOB_SCRIPTS["indexer-slow:v1"] = { ...JOB_SCRIPTS["indexer:v1"], slow: true };
+// input filters are also evaluated by the page, so they must be self-contained (no outside names)
+// Jobs packaged as their own container image (built from poc/jobs/<name>): the image reads /in and writes /out.
+JOB_SCRIPTS["pii-redact:v1"] = {
+  dockerImage: "piecework/pii-redact:v1",
+  outputs: ["pii-report.txt", "redacted-documents.txt"],
+  inputs: (name) => name.endsWith(".txt") && !/^(search-index|sales-summary|pii-report|redacted-documents)/.test(name),
+};
 
 // ---------------------------------------------------------------- helpers
 
@@ -301,18 +311,22 @@ async function prepareLocalClient() {
 
 // Add a job output (a file in the provider's storage) to the client's data set, signed by the provider:
 // FWSS accepts it only through ComputeService's authorizer, while the client has a job open with this provider.
-async function addOutputPiece(client, name, jobId) {
+async function addOutputPieces(client, names, jobId) {
   const c = cl(client);
-  const cid = await FOC.pieceCid(fs.readFileSync(path.join(clientDir(client), name)));
+  const cids = [];
+  for (const n of names) cids.push(await FOC.pieceCid(fs.readFileSync(path.join(clientDir(client), n))));
   const nonce = FOC.randomNonce();
   const signer = CAL ? providerAcct : { signTypedData: (args) => wallet.signTypedData({ account: A.provider, ...args }) };
-  const sig = await FOC.signAddPieces(signer, { chainId: NET.chain.id, fwss: C.fwss, clientDataSetId: BigInt(c.clientDataSetId), nonce, cids: [cid.hex] });
-  const pieceId = Number(await read(C.pdp, ABI.PDPVerifier, "getNextPieceId", [BigInt(c.dataSetId)]));
+  const sig = await FOC.signAddPieces(signer, { chainId: NET.chain.id, fwss: C.fwss, clientDataSetId: BigInt(c.clientDataSetId), nonce, cids: cids.map((x) => x.hex) });
+  const first = Number(await read(C.pdp, ABI.PDPVerifier, "getNextPieceId", [BigInt(c.dataSetId)]));
   const r = await send(providerAcct, C.pdp, ABI.PDPVerifier, "addPieces",
-    [BigInt(c.dataSetId), ZERO, [{ data: cid.hex }], FOC.addPiecesExtraData(nonce, sig)], `add piece ${name}`);
-  c.pieces[pieceId] = { name, cid: cid.text, kind: "output", tx: r.tx, jobId: Number(jobId) };
+    [BigInt(c.dataSetId), ZERO, cids.map((x) => ({ data: x.hex })), FOC.addPiecesExtraData(nonce, sig)], `add ${names.join(", ")}`);
+  const pieces = names.map((name, i) => {
+    c.pieces[first + i] = { name, cid: cids[i].text, kind: "output", tx: r.tx, jobId: Number(jobId) };
+    return { name, pieceId: first + i, cid: cids[i].text };
+  });
   saveState();
-  return { pieceId, cid: cid.text, ...r };
+  return { pieces, ...r };
 }
 
 async function listFiles(client = current) {
@@ -456,22 +470,29 @@ async function runJob(jobId, client, spec, inputPieceIds, deadline) {
     return plog(`Job #${jobId}: I missed the deadline (block ${deadline}). I can no longer be paid; you can take your money back.`);
   }
   await sleep(3000); // let the demo show the "running" stage
-  await execFile("docker", ["run", "--rm", "--network", "none", "-v", `${dir}/in:/in:ro`, "-v", `${dir}/out:/out`,
+  const t0 = Date.now();
+  if (spec.dockerImage) await execFile("docker", ["run", "--rm", "--network", "none", "-v", `${dir}/in:/in:ro`, "-v", `${dir}/out:/out`, spec.dockerImage], XENV);
+  else await execFile("docker", ["run", "--rm", "--network", "none", "-v", `${dir}/in:/in:ro`, "-v", `${dir}/out:/out`,
     "alpine:3.20", "sh", "-c", spec.script], XENV);
-  let out = spec.output, k = 2; // unique name in the data set
-  while (fs.existsSync(path.join(clientDir(client), out))) out = spec.output.replace(/(\.[^.]+)$/, ` (${k++})$1`);
-  fs.copyFileSync(path.join(dir, "out", spec.output), path.join(clientDir(client), out));
+  plog(`Job #${jobId}: the program finished in ${((Date.now() - t0) / 1000).toFixed(1)} s.`);
+  const names = [];
+  for (const o of spec.outputs ?? [spec.output]) { // unique names in the data set
+    let out = o, k = 2;
+    while (fs.existsSync(path.join(clientDir(client), out))) out = o.replace(/(\.[^.]+)$/, ` (${k++})$1`);
+    fs.copyFileSync(path.join(dir, "out", o), path.join(clientDir(client), out));
+    names.push(out);
+  }
   J.stage = "storing";
   let p;
-  try { p = await addOutputPiece(client, out, jobId); }
+  try { p = await addOutputPieces(client, names, jobId); }
   catch (e) {
     J.stage = "blocked";
     return plog(`Job #${jobId}: FWSS refused to add the result to your data set (${reason(e)}). Did you let providers deliver results into your data set? (step 1)`);
   }
-  J.output = { name: out, pieceId: p.pieceId, cid: p.cid };
-  plog(`Job #${jobId}: result "${out}" added to your data set as piece #${p.pieceId}.`, p);
+  J.outputs = p.pieces;
+  plog(`Job #${jobId}: ${names.length > 1 ? `results ${names.map((n) => `"${n}"`).join(" and ")}` : `result "${names[0]}"`} added to your data set as piece${names.length > 1 ? "s" : ""} #${p.pieces.map((x) => x.pieceId).join(", #")}.`, p);
   J.stage = "committing";
-  const r = await send(providerAcct, C.cs, ABI.ComputeService, "commitOutputs", [jobId, [BigInt(p.pieceId)]]);
+  const r = await send(providerAcct, C.cs, ABI.ComputeService, "commitOutputs", [jobId, p.pieces.map((x) => BigInt(x.pieceId))]);
   J.stage = "paid";
   plog(`Job #${jobId}: result committed on-chain; Filecoin Pay released the price to me.`, r);
 }
@@ -506,9 +527,9 @@ async function recoverFromChain() {
     if (getAddress(j[1]) !== A.provider) continue;
     const image = IMAGE_BY_DIGEST[j[6]];
     const name = Object.values(PARAMS.jobs).find((x) => x.image === image)?.name ?? image;
-    const out = Object.entries(cl(j[0])?.pieces ?? {}).find(([, p]) => p.jobId === id);
+    const outs = Object.entries(cl(j[0])?.pieces ?? {}).filter(([, p]) => p.jobId === id && !/first contract/.test(p.jobLabel ?? ""));
     const stage = { 1: "received", 2: "paid", 3: "refunded" }[Number(j[8])];
-    jobInfo[id] = { client: j[0], name, image, stage, output: out ? { name: out[1].name, pieceId: Number(out[0]), cid: out[1].cid } : undefined };
+    jobInfo[id] = { client: j[0], name, image, stage, outputs: outs.map(([pid, p]) => ({ name: p.name, pieceId: Number(pid), cid: p.cid })) };
   }
 }
 
@@ -583,7 +604,7 @@ async function state(who) {
     if (getAddress(info.client) !== getAddress(current)) continue;
     const j = await read(C.cs, ABI.ComputeService, "jobs", [BigInt(id)]);
     out.jobs.push({ id: Number(id), railId: Number(j[2]), price: fmt(j[3]), deadline: Number(j[4]), status: J[Number(j[8])],
-      name: info.name, stage: info.stage, output: info.output ?? null });
+      name: info.name, stage: info.stage, outputs: info.outputs ?? [] });
   }
   return out;
 }
@@ -747,13 +768,31 @@ async function calibnetCommand() {
       block: Number(r.blockNumber), constructorArgs: args, deployedAt: new Date().toISOString() }, null, 2) + "\n");
     return say("ComputeService deployed at", computeService, "(written to poc/calibnet.json)");
   }
+  if (process.argv.includes("--add-demo-files")) { // new sample files into the demo client's existing data set
+    ST = loadJSON(STATE_FILE, ST);
+    const client = demoAcct.address, c = cl(client);
+    const have = new Set(Object.values(c.pieces).map((p) => p.name));
+    const missing = (await samplePieces()).filter((f) => !have.has(f.name));
+    if (!missing.length) return say("The demo data set already has every sample file.");
+    const nonce = FOC.randomNonce();
+    const sig = await FOC.signAddPieces(demoAcct, { chainId: NET.chain.id, fwss: C.fwss, clientDataSetId: BigInt(c.clientDataSetId), nonce, cids: missing.map((f) => f.hex) });
+    const first = Number(await read(C.pdp, ABI.PDPVerifier, "getNextPieceId", [BigInt(c.dataSetId)]));
+    const r = await send(providerAcct, C.pdp, ABI.PDPVerifier, "addPieces",
+      [BigInt(c.dataSetId), ZERO, missing.map((f) => ({ data: f.hex })), FOC.addPiecesExtraData(BigInt(nonce), sig)], "add demo files");
+    missing.forEach((f, i) => {
+      fs.copyFileSync(path.join(HERE, "data", "dataset", f.name), path.join(clientDir(client), f.name));
+      c.pieces[first + i] = { name: f.name, cid: f.text, kind: "input", tx: r.tx };
+    });
+    saveState();
+    return say(`Added ${missing.length} files to data set #${c.dataSetId} as pieces #${first}–#${first + missing.length - 1}, tx ${r.tx}`);
+  }
   return false;
 }
 
 // ---------------------------------------------------------------- main
 
 async function main() {
-  const setup = ["--new-provider-key", "--new-demo-client-key", "--register", "--deploy"].some((f) => process.argv.includes(f));
+  const setup = ["--new-provider-key", "--new-demo-client-key", "--register", "--deploy", "--add-demo-files"].some((f) => process.argv.includes(f));
   if (CAL && setup) { await calibnetCommand(); process.exit(0); }
 
   try { await execFile("docker", ["info"], XENV); }

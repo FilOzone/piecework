@@ -639,7 +639,7 @@ function jobPanel() {
     return `<div class="job"><div class="h"><b>#${j.id} · ${esc(j.name ?? "")}</b><span class="pill ${stage[0]}">${stage[1]}</span></div>
       ${j.status === "waiting" && j.stage !== "late" && j.stage !== "blocked" ? jobSteps(j.stage) : ""}
       <div class="muted">Price ${m(j.price)} ${CFG.token} · deadline block ${j.deadline}${j.status === "waiting" ? (left >= 0 ? ` (${dur(secs(left))} left)` : " (passed)") : ""}</div>
-      ${j.output ? `<div>Result: <a data-file="${j.output.pieceId}" style="cursor:pointer">${esc(j.output.name)}</a> <span class="muted">piece #${j.output.pieceId} in your data set</span></div>` : ""}
+      ${j.outputs?.length ? `<div>Result${j.outputs.length > 1 ? "s" : ""}: ${j.outputs.map((o) => `<a data-file="${o.pieceId}" style="cursor:pointer">${esc(o.name)}</a> <span class="muted">piece #${o.pieceId}</span>`).join(" · ")} <span class="muted">in your data set</span></div>` : ""}
       ${canExpire ? `<div><button class="b primary" data-act="expire" data-id="${j.id}" ${busy ? "disabled" : ""}>Get my money back</button></div>` : ""}</div>`;
   }).join("");
   const opts = Object.entries(J).map(([k, j]) => `<option value="${k}" ${k === pick ? "selected" : ""}>${esc(j.name)} — ${m(j.price)} ${CFG.token}, deadline ${dur(secs(j.deadline))}</option>`).join("");

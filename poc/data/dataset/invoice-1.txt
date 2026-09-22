@@ -1,0 +1,10 @@
+INVOICE INV-2026-0001
+
+From: Granite Property Holdings LLC, Corso Buenos Aires 174, 75002 Paris
+To: Alder Capital Partners, attention of Clara Moreau (clara.moreau@example.org, +33 626468616)
+
+  Arrangement fee      2,900 EUR
+  Arrangement fee      1,900 EUR
+
+Payment within 30 days to UniCredit, BIC UNCRITMMXXX, IBAN IT52J2524776472KXUS7XXH6DE0.
+Questions: accounts payable, Sofia Brown, +33 656820525.
