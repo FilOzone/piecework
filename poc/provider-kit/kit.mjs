@@ -17,6 +17,7 @@
 // a file on this machine and never leaves it.
 
 import fs from "node:fs";
+import { createServer } from "node:http";
 import path from "node:path";
 import os from "node:os";
 import crypto from "node:crypto";
@@ -43,7 +44,11 @@ const BY_DIGEST = Object.fromEntries(Object.keys(JOBS).map((name) => [keccak256(
 const arg = (k) => { const i = process.argv.indexOf(k); return i > 0 ? process.argv[i + 1] : undefined; };
 const cfg = JSON.parse(fs.readFileSync(arg("--config") ?? path.join(HERE, "kit.config.json"), "utf8"));
 const chain = cfg.network === "mainnet" ? filecoin : filecoinCalibration;
-const say = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
+const LOG = []; // recent lines, for the dashboard
+const say = (...a) => {
+  const line = `${new Date().toISOString().slice(11, 19)} ${a.join(" ")}`;
+  console.log(line); LOG.push(line); if (LOG.length > 200) LOG.shift();
+};
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const account = privateKeyToAccount(fs.readFileSync(cfg.providerKeyFile.replace(/^~/, os.homedir()), "utf8").trim());
@@ -109,7 +114,9 @@ async function runJob(ev) {
   if (!spec) return say(`Job #${jobId}: unknown program ${imageDigest}; not mine to run.`);
   const job = await read(cfg.contracts.computeService, ABI.ComputeService, "jobs", [jobId]);
   if (Number(job[8]) !== 1) { state.jobs[key] = { done: true }; save(); return; } // already paid or expired
-  const J = (state.jobs[key] = { client, dataSetId: String(dataSetId), stage: "running" });
+  const now = () => new Date().toISOString();
+  const J = (state.jobs[key] = { id: key, name: spec.name, client, dataSetId: String(dataSetId), stage: "fetching",
+    price: formatUnits(job[3], 18), deadline: String(deadline), inputs: inputPieceIds.length, t: { received: now() } });
   save();
   say(`Job #${jobId}: "${spec.name}" for ${client}, data set #${dataSetId}, deadline block ${deadline}.`);
   const dir = path.join(WORK, `job-${jobId}`);
@@ -121,35 +128,74 @@ async function runJob(ev) {
     const pieceCid = CID.decode(hexToBytes(c.data)).toString();
     fs.writeFileSync(path.join(dir, "in", `piece-${id}${spec.inputExtension ?? ""}`), await fetchPiece(pieceCid));
   }
+  J.inputBytes = fs.readdirSync(path.join(dir, "in")).reduce((n, f) => n + fs.statSync(path.join(dir, "in", f)).size, 0);
+  J.stage = "running"; J.t.running = now(); save();
   const t0 = Date.now();
   const run = ["run", "--rm", "--network", "none", "-v", `${dir}/in:/in:ro`, "-v", `${dir}/out:/out`, spec.dockerImage];
   await execFile("docker", spec.script ? [...run, "sh", "-c", spec.script] : run, { maxBuffer: 1 << 26 });
-  say(`Job #${jobId}: program finished in ${((Date.now() - t0) / 1000).toFixed(1)} s.`);
+  J.runSeconds = (Date.now() - t0) / 1000;
+  say(`Job #${jobId}: program finished in ${J.runSeconds.toFixed(1)} s.`);
   if ((await pub.getBlockNumber()) > deadline) { J.stage = "late"; save(); return say(`Job #${jobId}: past the deadline; not delivering.`); }
 
   const { clientDataSetId } = await read(cfg.contracts.view, ABI.View, "getDataSet", [dataSetId]);
   const files = spec.outputs.map((name) => ({ name, bytes: new Uint8Array(fs.readFileSync(path.join(dir, "out", name))) }));
-  J.stage = "storing"; save();
+  J.stage = "storing"; J.t.storing = now(); save();
   const stored = await storeResults(dataSetId, clientDataSetId, files);
   say(`Job #${jobId}: results added to the client's data set as pieces #${stored.pieceIds.join(", #")} (tx ${stored.tx}).`);
-  J.stage = "committing"; J.outputs = files.map((f, i) => ({ name: f.name, pieceId: String(stored.pieceIds[i]), cid: stored.cids[i] })); save();
+  J.stage = "committing"; J.t.committing = now(); J.addTx = stored.tx; J.outputs = files.map((f, i) => ({ name: f.name, pieceId: String(stored.pieceIds[i]), cid: stored.cids[i] })); save();
   const r = await send(cfg.contracts.computeService, ABI.ComputeService, "commitOutputs", [jobId, stored.pieceIds]);
-  J.stage = "paid"; J.done = true; J.commitTx = r.transactionHash; save();
+  J.stage = "paid"; J.t.paid = now(); J.done = true; J.commitTx = r.transactionHash; save();
   say(`Job #${jobId}: committed and paid (tx ${r.transactionHash}).`);
+}
+
+// ---------------------------------------------------------------- health and dashboard
+
+const health = { checkedAt: null, curio: null, gas: null, images: {}, block: null };
+async function checkHealth(verbose) {
+  const ping = await fetch(`${curio}/pdp/ping`).then((r) => r.status).catch(() => "unreachable");
+  health.curio = ping === 200 ? "reachable" : `not reachable (${ping})`;
+  health.gas = Number(formatUnits(await pub.getBalance({ address: account.address }), 18)).toFixed(3);
+  for (const [name, spec] of Object.entries(JOBS))
+    health.images[name] = { image: spec.dockerImage, ready: await execFile("docker", ["image", "inspect", spec.dockerImage]).then(() => true, () => false) };
+  health.block = Number(await pub.getBlockNumber());
+  health.checkedAt = new Date().toISOString();
+  if (verbose) {
+    say(`Curio PDP API: ${health.curio}.`);
+    say(`Gas balance: ${health.gas} ${chain.nativeCurrency.symbol}.`);
+    for (const [name, x] of Object.entries(health.images)) say(`Job type "${name}": image ${x.image} ${x.ready ? "present" : "MISSING (build or pull it first)"}.`);
+  }
+}
+
+function dashboard() {
+  const port = cfg.dashboardPort ?? 8090, host = cfg.dashboardHost ?? "127.0.0.1"; // only this machine, unless configured
+  createServer((req, res) => {
+    if (req.url === "/api/status") {
+      const jobs = Object.entries(state.jobs).filter(([, j]) => j.client).map(([id, j]) => ({ ...j, id, name: j.name ?? "Find and remove personal data in my documents" })).sort((a, b) => Number(b.id) - Number(a.id));
+      const earned = jobs.filter((j) => j.stage === "paid").reduce((n, j) => n + Number(j.price ?? 0), 0);
+      res.writeHead(200, { "content-type": "application/json" });
+      return res.end(JSON.stringify({ provider: account.address, network: chain.name, chainId: chain.id, curio, token: cfg.token ?? "USDFC",
+        gasSymbol: chain.nativeCurrency.symbol, explorer: cfg.explorer ?? "https://filecoin-testnet.blockscout.com", health, jobs, earned, log: LOG.slice(-60) }));
+    }
+    res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+    res.end(fs.readFileSync(path.join(HERE, "dashboard.html")));
+  }).listen(port, host, () => say(`Dashboard: http://${host === "0.0.0.0" ? "localhost" : host}:${port}`));
 }
 
 // ---------------------------------------------------------------- main loop
 
 async function main() {
   say(`PieceWork provider kit. Provider ${account.address} on ${chain.name}; Curio at ${curio}.`);
-  const ping = await fetch(`${curio}/pdp/ping`).then((r) => r.status).catch(() => "unreachable");
-  say(`Curio PDP API: ${ping === 200 ? "reachable" : `not reachable (${ping})`}.`);
-  const bal = await pub.getBalance({ address: account.address });
-  say(`Gas balance: ${Number(formatUnits(bal, 18)).toFixed(3)} ${chain.nativeCurrency.symbol}.`);
-  for (const [name, spec] of Object.entries(JOBS)) {
-    const ok = await execFile("docker", ["image", "inspect", spec.dockerImage]).then(() => true, () => false);
-    say(`Job type "${name}": image ${spec.dockerImage} ${ok ? "present" : "MISSING (build or pull it first)"}.`);
+  await checkHealth(true);
+  for (const [id, J] of Object.entries(state.jobs)) { // fill in jobs recorded by earlier versions of the kit
+    if (!J.client || J.price) continue;
+    const j = await read(cfg.contracts.computeService, ABI.ComputeService, "jobs", [BigInt(id)]).catch(() => null);
+    if (!j) continue;
+    if (!J.commitTx) { delete state.jobs[id]; continue; } // not delivered by this kit
+    Object.assign(J, { price: formatUnits(j[3], 18), deadline: String(j[4]) });
   }
+  save();
+  dashboard();
+  setInterval(() => checkHealth(false).catch(() => {}), 60_000);
   if (!state.lastBlock) state.lastBlock = Number(await pub.getBlockNumber()) - 100;
   const busy = new Set();
   for (;;) {
@@ -162,7 +208,11 @@ async function main() {
         for (const l of logs) {
           if (getAddress(l.args.provider) !== account.address || busy.has(l.args.jobId)) continue;
           busy.add(l.args.jobId);
-          runJob(l.args).catch((e) => say(`Job #${l.args.jobId} failed: ${e.shortMessage ?? e.message}`)).finally(() => busy.delete(l.args.jobId));
+          runJob(l.args).catch((e) => {
+            say(`Job #${l.args.jobId} failed: ${e.shortMessage ?? e.message}`);
+            const J = state.jobs[String(l.args.jobId)];
+            if (J && !J.done) { J.stage = "failed"; J.error = e.shortMessage ?? e.message; save(); }
+          }).finally(() => busy.delete(l.args.jobId));
         }
         state.lastBlock = to; save();
       }

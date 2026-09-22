@@ -33,6 +33,8 @@ node kit.mjs --config kit.config.json
 
 On start it checks that Curio answers, shows your gas balance, and checks the job images are present. Then it waits for jobs. Each job prints what it does: fetching inputs, running the program, storing results, getting paid.
 
+While it runs, open the dashboard at http://localhost:8090. It shows whether Curio answers, your gas balance, the job types ready on this machine, every job with its stage, run time, price and transactions, what you have earned, and the log. It listens only on this machine unless you set `dashboardHost` in the config.
+
 ## Job types
 
 `jobs.json` lists the programs the kit runs. Each one is a container that reads `/in` and writes `/out`, and runs with `--network none`.

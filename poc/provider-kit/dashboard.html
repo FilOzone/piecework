@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PieceWork Provider</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛠️</text></svg>">
+<style>
+:root{--ground:#EEF3F8;--surface:#fff;--surface-2:#F5F8FC;--line:#D5DFEA;--ink:#0E1A2B;--ink-2:#4A5A70;--ink-3:#7A889B;
+  --accent:#0A74E8;--accent-soft:#E1EEFD;--money:#0B8F7F;--money-soft:#DDF3EF;--warn:#A86200;--warn-soft:#FDF0DA;--bad:#B42318;--bad-soft:#FDE7E5;
+  --mono:ui-monospace,SFMono-Regular,Menlo,monospace;--body:system-ui,-apple-system,"Segoe UI",sans-serif}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--ground:#0A111C;--surface:#111B2A;--surface-2:#0E1724;--line:#243349;--ink:#E4ECF6;
+  --ink-2:#A6B4C7;--ink-3:#7485A0;--accent:#4C9DFF;--accent-soft:#132A47;--money:#3CC7B3;--money-soft:#0F2E2B;--warn:#F0AE4A;--warn-soft:#33250F;--bad:#FF7A6E;--bad-soft:#3A1614}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--ground);color:var(--ink);font:16px/1.5 var(--body);padding:24px 16px 48px}
+.wrap{max-width:1000px;margin:0 auto;display:flex;flex-direction:column;gap:18px}
+h1{font-size:1.7rem;margin:0}
+h2{font-size:1.15rem;margin:0 0 10px}
+.muted{color:var(--ink-3);font-size:.9rem}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:18px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px}
+.stat .l{font-size:.8rem;color:var(--ink-3);text-transform:uppercase;letter-spacing:.06em}
+.stat .v{font:600 1.35rem var(--mono);margin-top:4px}
+.ok{color:var(--money)} .bad{color:var(--bad)}
+code{font:.85rem var(--mono);word-break:break-all}
+table{width:100%;border-collapse:collapse;font-size:.9rem}
+th,td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-size:.75rem;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-3);font-weight:600}
+.tw{overflow-x:auto}
+.pill{display:inline-block;font:600 .72rem var(--body);letter-spacing:.05em;text-transform:uppercase;padding:3px 8px;border-radius:99px;background:var(--accent-soft);color:var(--accent);white-space:nowrap}
+.pill.paid{background:var(--money-soft);color:var(--money)} .pill.failed,.pill.late{background:var(--bad-soft);color:var(--bad)}
+pre{font:.8rem/1.5 var(--mono);background:var(--surface-2);border:1px solid var(--line);border-radius:8px;padding:12px;max-height:320px;overflow:auto;margin:0;white-space:pre-wrap}
+a{color:var(--accent)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div>
+    <div class="muted">PieceWork provider kit</div>
+    <h1>Your compute provider</h1>
+    <div class="muted" id="who">Loading…</div>
+  </div>
+  <div class="grid" id="stats"></div>
+  <div class="card"><h2>Job types this machine can run</h2><div id="images" class="muted"></div></div>
+  <div class="card"><h2>Jobs</h2>
+    <p class="muted" style="margin:0 0 8px">Newest first. A job goes through: fetching the client's files from Curio, running the program in a container (no network),
+      storing the results in the client's data set through Curio, and getting paid by ComputeService.</p>
+    <div class="tw"><table><thead><tr><th>Job</th><th>Program</th><th>Client · data set</th><th>Stage</th><th>Input</th><th>Run time</th><th>Price</th><th>Transactions</th></tr></thead>
+    <tbody id="jobs"></tbody></table></div></div>
+  <div class="card"><h2>Log</h2><pre id="log"></pre></div>
+</div>
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const short = (a) => a ? `${a.slice(0, 6)}…${a.slice(-4)}` : "";
+const kb = (n) => n == null ? "" : n < 1e6 ? `${(n / 1e3).toFixed(1)} KB` : `${(n / 1e6).toFixed(2)} MB`;
+async function refresh() {
+  let S;
+  try { S = await fetch("/api/status").then((r) => r.json()); } catch { $("who").textContent = "The kit is not responding."; return; }
+  const tx = (h, label) => h ? `<a href="${S.explorer}/tx/${h}" target="_blank" rel="noopener">${label}</a>` : "";
+  $("who").innerHTML = `Provider <code>${esc(S.provider)}</code> on ${esc(S.network)} · block ${S.health.block ?? "…"} · Curio at <code>${esc(S.curio)}</code>`;
+  const paid = S.jobs.filter((j) => j.stage === "paid").length;
+  $("stats").innerHTML = [
+    ["Curio", S.health.curio === "reachable" ? `<span class="ok">reachable</span>` : `<span class="bad">${esc(S.health.curio ?? "…")}</span>`],
+    ["Gas balance", `${esc(S.health.gas ?? "…")} ${esc(S.gasSymbol)}`],
+    ["Jobs delivered", `${paid} of ${S.jobs.length}`],
+    ["Earned", `${S.earned.toFixed(2)} ${esc(S.token)}`],
+  ].map(([l, v]) => `<div class="card stat"><div class="l">${l}</div><div class="v">${v}</div></div>`).join("");
+  $("images").innerHTML = Object.entries(S.health.images).map(([n, x]) =>
+    `${x.ready ? "✓" : "✗"} <b>${esc(n)}</b> <code>${esc(x.image)}</code> ${x.ready ? "" : '<span class="bad">image missing: build it first</span>'}`).join("<br>");
+  $("jobs").innerHTML = S.jobs.map((j) => `<tr>
+    <td>#${esc(j.id)}</td><td>${esc(j.name)}</td><td><code>${short(j.client)}</code> · #${esc(j.dataSetId)}</td>
+    <td><span class="pill ${esc(j.stage)}">${esc(j.stage)}</span>${j.error ? `<div class="muted">${esc(j.error)}</div>` : ""}</td>
+    <td>${j.inputs ?? ""} files<br><span class="muted">${kb(j.inputBytes)}</span></td>
+    <td>${j.runSeconds != null ? `${j.runSeconds.toFixed(1)} s` : ""}</td><td>${esc(j.price)} ${esc(S.token)}</td>
+    <td>${[tx(j.addTx, "results stored"), tx(j.commitTx, "paid")].filter(Boolean).join(" · ")}</td></tr>`).join("")
+    || `<tr><td colspan="8" class="muted">No jobs yet. They appear here as soon as a client orders one from this provider.</td></tr>`;
+  const log = $("log"), atEnd = log.scrollTop + log.clientHeight >= log.scrollHeight - 8;
+  log.textContent = S.log.join("\n");
+  if (atEnd) log.scrollTop = log.scrollHeight;
+}
+refresh(); setInterval(refresh, 5000);
+</script>
+</body>
+</html>
