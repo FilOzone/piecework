@@ -130,14 +130,14 @@ export function createPilot({ HERE, RUN, NET, C, ABI, pub, demoAcct, say, demoDa
       const paid = await pub.getContractEvents({ address: C.cs, abi: ABI.ComputeService, eventName: "JobPaid", fromBlock: BigInt(j.fromBlock), args: { jobId: BigInt(jobId) } });
       const ids = paid[0]?.args.outputPieceIds ?? [];
       const names = JOBS[j.type]?.outputs ?? [];
-      j.outputs = [];
+      const outputs = [];
       for (const [i, pid] of ids.entries()) {
         const cid = CID.decode(hexToBytes((await pub.readContract({ address: C.pdp, abi: ABI.PDPVerifier, functionName: "getPieceCid", args: [BigInt(j.dataSetId), pid] })).data)).toString();
-        j.outputs.push({ pieceId: String(pid), name: names[i] ?? `result-${i + 1}`, cid });
+        outputs.push({ pieceId: String(pid), name: names[i] ?? `result-${i + 1}`, cid });
         const set = st.sets[j.provider];
         if (set) set.files[String(pid)] = { name: `${names[i] ?? "result"} (job #${jobId})`, cid, kind: "output" };
       }
-      j.status = "paid"; j.paidTx = paid[0]?.transactionHash; save();
+      j.outputs = outputs; j.status = "paid"; j.paidTx = paid[0]?.transactionHash; save();
     } else if (s === 3) { j.status = "expired"; save(); }
     else j.status = (await pub.getBlockNumber()) > BigInt(j.deadline) ? "late" : "waiting";
     return j;
@@ -165,5 +165,15 @@ export function createPilot({ HERE, RUN, NET, C, ABI, pub, demoAcct, say, demoDa
     return Buffer.from(await r.arrayBuffer());
   }
 
-  return { state, store, uploadFile, order, file };
+  function expire(jobId) {
+    const j = st.jobs[String(jobId)];
+    if (!j) throw new Error("unknown job");
+    return run(`Get your money back for job #${jobId}`, async (step) => {
+      step("The deadline passed with no result: cancelling the job releases the price (one block)");
+      const r = await send(C.cs, ABI.ComputeService, "expire", [BigInt(jobId)]);
+      j.status = "expired"; j.expireTx = r.transactionHash; save();
+    });
+  }
+
+  return { state, store, uploadFile, order, file, expire };
 }

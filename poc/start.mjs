@@ -279,7 +279,7 @@ async function addSampleFilesFor(client, nonce, signature) {
   const files = await samplePieces();
   const first = Number(await read(C.pdp, ABI.PDPVerifier, "getNextPieceId", [BigInt(c.dataSetId)]));
   const r = await send(providerAcct, C.pdp, ABI.PDPVerifier, "addPieces",
-    [BigInt(c.dataSetId), ZERO, files.map((f) => ({ data: f.hex })), FOC.addPiecesExtraData(BigInt(nonce), signature)], "add your files");
+    [BigInt(c.dataSetId), ZERO, files.map((f) => ({ data: f.hex })), FOC.addPiecesExtraData(BigInt(nonce), signature, files.map((f) => f.name))], "add your files");
   files.forEach((f, i) => {
     fs.copyFileSync(path.join(HERE, "data", "dataset", f.name), path.join(clientDir(client), f.name));
     c.pieces[first + i] = { name: f.name, cid: f.text, kind: "input", tx: r.tx };
@@ -302,7 +302,7 @@ async function prepareLocalClient() {
   const r = await createDataSetFor(client, clientDataSetId, sig);
   const nonce = FOC.randomNonce();
   const files = await samplePieces();
-  const sig2 = await FOC.signAddPieces(sign, { chainId: foundry.id, fwss: C.fwss, clientDataSetId, nonce, cids: files.map((f) => f.hex) });
+  const sig2 = await FOC.signAddPieces(sign, { chainId: foundry.id, fwss: C.fwss, clientDataSetId, nonce, cids: files.map((f) => f.hex), names: files.map((f) => f.name) });
   await addSampleFilesFor(client, nonce, sig2);
   // keep only a small buffer beyond the storage reserve (so the wallet shows exactly 5 and "money runs out" is quick)
   const [, , available] = await read(C.payments, ABI.FilecoinPayV1, "getAccountInfoIfSettled", [C.usdfc, client]);
@@ -323,10 +323,10 @@ async function addOutputPieces(client, names, jobId) {
   for (const n of names) cids.push(await FOC.pieceCid(fs.readFileSync(path.join(clientDir(client), n))));
   const nonce = FOC.randomNonce();
   const signer = CAL ? providerAcct : { signTypedData: (args) => wallet.signTypedData({ account: A.provider, ...args }) };
-  const sig = await FOC.signAddPieces(signer, { chainId: NET.chain.id, fwss: C.fwss, clientDataSetId: BigInt(c.clientDataSetId), nonce, cids: cids.map((x) => x.hex) });
+  const sig = await FOC.signAddPieces(signer, { chainId: NET.chain.id, fwss: C.fwss, clientDataSetId: BigInt(c.clientDataSetId), nonce, cids: cids.map((x) => x.hex), names });
   const first = Number(await read(C.pdp, ABI.PDPVerifier, "getNextPieceId", [BigInt(c.dataSetId)]));
   const r = await send(providerAcct, C.pdp, ABI.PDPVerifier, "addPieces",
-    [BigInt(c.dataSetId), ZERO, cids.map((x) => ({ data: x.hex })), FOC.addPiecesExtraData(nonce, sig)], `add ${names.join(", ")}`);
+    [BigInt(c.dataSetId), ZERO, cids.map((x) => ({ data: x.hex })), FOC.addPiecesExtraData(nonce, sig, names)], `add ${names.join(", ")}`);
   const pieces = names.map((name, i) => {
     c.pieces[first + i] = { name, cid: cids[i].text, kind: "output", tx: r.tx, jobId: Number(jobId) };
     return { name, pieceId: first + i, cid: cids[i].text };
@@ -625,6 +625,7 @@ async function pilotApi(req, res, url, json) {
       if (url.pathname === "/api/pilot/store") { await pilot.store(a.provider); return json(200, { ok: true }); }
       if (url.pathname === "/api/pilot/upload") { await pilot.uploadFile(a.provider, a.name, a.data); return json(200, { ok: true }); }
       if (url.pathname === "/api/pilot/order") { await pilot.order(a.provider, a.type); return json(200, { ok: true }); }
+      if (url.pathname === "/api/pilot/expire") { await pilot.expire(a.jobId); return json(200, { ok: true }); }
     }
     return json(404, { error: "unknown action" });
   } catch (e) { return json(400, { error: reason(e) }); }
@@ -916,10 +917,10 @@ async function calibnetCommand() {
     const missing = (await samplePieces()).filter((f) => !have.has(f.name));
     if (!missing.length) return say("The demo data set already has every sample file.");
     const nonce = FOC.randomNonce();
-    const sig = await FOC.signAddPieces(demoAcct, { chainId: NET.chain.id, fwss: C.fwss, clientDataSetId: BigInt(c.clientDataSetId), nonce, cids: missing.map((f) => f.hex) });
+    const sig = await FOC.signAddPieces(demoAcct, { chainId: NET.chain.id, fwss: C.fwss, clientDataSetId: BigInt(c.clientDataSetId), nonce, cids: missing.map((f) => f.hex), names: missing.map((f) => f.name) });
     const first = Number(await read(C.pdp, ABI.PDPVerifier, "getNextPieceId", [BigInt(c.dataSetId)]));
     const r = await send(providerAcct, C.pdp, ABI.PDPVerifier, "addPieces",
-      [BigInt(c.dataSetId), ZERO, missing.map((f) => ({ data: f.hex })), FOC.addPiecesExtraData(BigInt(nonce), sig)], "add demo files");
+      [BigInt(c.dataSetId), ZERO, missing.map((f) => ({ data: f.hex })), FOC.addPiecesExtraData(BigInt(nonce), sig, missing.map((f) => f.name))], "add demo files");
     missing.forEach((f, i) => {
       fs.copyFileSync(path.join(HERE, "data", "dataset", f.name), path.join(clientDir(client), f.name));
       c.pieces[first + i] = { name: f.name, cid: f.text, kind: "input", tx: r.tx };

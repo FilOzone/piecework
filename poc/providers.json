@@ -8,9 +8,9 @@
   },
   {
     "id": "james",
-    "name": "James Bluett (TippyFlits)",
-    "address": null,
-    "curioUrl": null,
-    "note": "Curio provider with V100 GPUs. Fill in address and Curio URL once PDP is enabled on Calibration."
+    "name": "James Bluett (ezpdpz-calib)",
+    "address": "0xa3971A7234a3379A1813d9867B531e7EeB20ae07",
+    "curioUrl": "https://calib.ezpdpz.net",
+    "note": "Curio PDP provider in Cheltenham, UK; registry id 9 on Calibration. Runs the provider kit for compute."
   }
 ]

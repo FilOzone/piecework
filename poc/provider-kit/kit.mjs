@@ -82,6 +82,26 @@ async function fetchPiece(pieceCid) {
   return new Uint8Array(await res.arrayBuffer());
 }
 
+/// The names the client gave the pieces of a data set, from Warm Storage's PieceAdded events (one scan per job,
+/// over recent blocks). Pieces stored without a name simply have none.
+const nameCache = {};
+async function pieceNames(dataSetId) {
+  const key = String(dataSetId);
+  if (nameCache[key]) return nameCache[key];
+  const head = Number(await pub.getBlockNumber());
+  const span = cfg.nameLookbackBlocks ?? 20000; // about a week on Calibration
+  const names = {};
+  for (let to = head; to > head - span; to -= 2000) {
+    const logs = await pub.getContractEvents({ address: cfg.contracts.fwss, abi: ABI.FWSS, eventName: "PieceAdded",
+      args: { dataSetId }, fromBlock: BigInt(Math.max(0, to - 1999)), toBlock: BigInt(to) }).catch(() => []);
+    for (const ev of logs) {
+      const i = ev.args.keys.indexOf("name");
+      if (i >= 0) names[String(ev.args.pieceId)] = ev.args.values[i];
+    }
+  }
+  return (nameCache[key] = names);
+}
+
 /// Adds result files to the client's data set through Curio, signed by this provider. Returns their piece ids.
 async function storeResults(dataSetId, clientDataSetId, files) {
   const cids = [];
@@ -94,10 +114,11 @@ async function storeResults(dataSetId, clientDataSetId, files) {
   const signature = await account.signTypedData({
     domain: { name: "FilecoinWarmStorageService", version: "1", chainId: chain.id, verifyingContract: getAddress(cfg.contracts.fwss) },
     types: EIP712Types, primaryType: "AddPieces",
-    message: { clientDataSetId, nonce, pieceData: cids.map((c) => ({ data: toHex(c.bytes) })), pieceMetadata: [] },
+    message: { clientDataSetId, nonce, pieceData: cids.map((c) => ({ data: toHex(c.bytes) })),
+      pieceMetadata: files.map((f, i) => ({ pieceIndex: BigInt(i), metadata: [{ key: "name", value: f.name }] })) },
   });
   const extraData = encodeAbiParameters([{ type: "uint256" }, { type: "string[][]" }, { type: "string[][]" }, { type: "bytes" }],
-    [nonce, [], [], signature]);
+    [nonce, files.map(() => ["name"]), files.map((f) => [f.name]), signature]);
   const { statusUrl, txHash } = await SP.addPiecesApiRequest({ serviceURL: curio, dataSetId, pieces: cids, extraData });
   say(`  Curio submitted addPieces ${txHash}; waiting for confirmation…`);
   const done = await SP.waitForAddPieces({ statusUrl, timeout: 900_000 });
@@ -110,6 +131,7 @@ async function runJob(ev) {
   const { jobId, client, dataSetId, imageDigest, inputPieceIds, deadline } = ev;
   const key = String(jobId);
   if (state.jobs[key]?.done) return;
+  if (state.jobs[key]?.stage === "storing" || state.jobs[key]?.stage === "committing") return; // do not run twice
   const spec = JOBS[BY_DIGEST[imageDigest]];
   if (!spec) return say(`Job #${jobId}: unknown program ${imageDigest}; not mine to run.`);
   const job = await read(cfg.contracts.computeService, ABI.ComputeService, "jobs", [jobId]);
@@ -123,10 +145,13 @@ async function runJob(ev) {
   fs.rmSync(dir, { recursive: true, force: true });
   fs.mkdirSync(path.join(dir, "in"), { recursive: true });
   fs.mkdirSync(path.join(dir, "out"), { recursive: true });
-  for (const id of inputPieceIds) { // the client's files, as stored on this provider
+  const names = await pieceNames(dataSetId).catch(() => ({}));
+  for (const id of inputPieceIds) { // the client's files, as stored on this provider, under the names the client gave them
     const c = await read(cfg.contracts.pdp, ABI.PDPVerifier, "getPieceCid", [dataSetId, id]);
     const pieceCid = CID.decode(hexToBytes(c.data)).toString();
-    fs.writeFileSync(path.join(dir, "in", `piece-${id}${spec.inputExtension ?? ""}`), await fetchPiece(pieceCid));
+    const given = names[String(id)];
+    const safe = given && /^[\w .()-]{1,80}$/.test(given) ? given : `piece-${id}${spec.inputExtension ?? ""}`;
+    fs.writeFileSync(path.join(dir, "in", fs.existsSync(path.join(dir, "in", safe)) ? `${id}-${safe}` : safe), await fetchPiece(pieceCid));
   }
   J.inputBytes = fs.readdirSync(path.join(dir, "in")).reduce((n, f) => n + fs.statSync(path.join(dir, "in", f)).size, 0);
   J.stage = "running"; J.t.running = now(); save();
@@ -198,6 +223,17 @@ async function main() {
   setInterval(() => checkHealth(false).catch(() => {}), 60_000);
   if (!state.lastBlock) state.lastBlock = Number(await pub.getBlockNumber()) - 100;
   const busy = new Set();
+  const pending = new Map(); // jobs seen in this run, so a failed one can be retried
+  setInterval(async () => { // retry jobs that failed before delivering, while the deadline allows it
+    const head = await pub.getBlockNumber();
+    for (const [id, ev] of pending) {
+      const J = state.jobs[id];
+      if (!J || J.done || busy.has(ev.jobId) || J.stage !== "failed" || head > ev.deadline) continue;
+      say(`Job #${id}: retrying after the earlier failure.`);
+      busy.add(ev.jobId);
+      runJob(ev).catch((e) => say(`Job #${id} failed again: ${e.shortMessage ?? e.message}`)).finally(() => busy.delete(ev.jobId));
+    }
+  }, 30_000);
   for (;;) {
     try {
       const head = Number(await pub.getBlockNumber());
@@ -208,8 +244,10 @@ async function main() {
         for (const l of logs) {
           if (getAddress(l.args.provider) !== account.address || busy.has(l.args.jobId)) continue;
           busy.add(l.args.jobId);
+          pending.set(String(l.args.jobId), l.args);
           runJob(l.args).catch((e) => {
             say(`Job #${l.args.jobId} failed: ${e.shortMessage ?? e.message}`);
+            if (process.env.KIT_DEBUG) console.error(e);
             const J = state.jobs[String(l.args.jobId)];
             if (J && !J.done) { J.stage = "failed"; J.error = e.shortMessage ?? e.message; save(); }
           }).finally(() => busy.delete(l.args.jobId));

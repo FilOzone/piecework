@@ -123,10 +123,13 @@ export async function signCreateDataSet(signer, { chainId, fwss, clientDataSetId
   return signature;
 }
 
-export async function signAddPieces(signer, { chainId, fwss, clientDataSetId, nonce, cids }) {
+/// `names`: one file name per piece, stored as the piece's "name" metadata in Warm Storage (it comes back in the
+/// PieceAdded event, so the provider can call the files by their names).
+export async function signAddPieces(signer, { chainId, fwss, clientDataSetId, nonce, cids, names = [] }) {
   return signer.signTypedData({
     domain: domain(chainId, fwss), types: EIP712Types, primaryType: "AddPieces",
-    message: { clientDataSetId, nonce, pieceData: cids.map((c) => ({ data: c })), pieceMetadata: [] },
+    message: { clientDataSetId, nonce, pieceData: cids.map((c) => ({ data: c })),
+      pieceMetadata: cids.map((_, i) => (names[i] ? { pieceIndex: BigInt(i), metadata: [{ key: "name", value: names[i] }] } : null)).filter(Boolean) },
   });
 }
 
@@ -134,9 +137,9 @@ export const createDataSetExtraData = (payer, clientDataSetId, signature) =>
   encodeAbiParameters([{ type: "address" }, { type: "uint256" }, { type: "string[]" }, { type: "string[]" }, { type: "bytes" }],
     [payer, clientDataSetId, [], [], signature]);
 
-export const addPiecesExtraData = (nonce, signature) =>
+export const addPiecesExtraData = (nonce, signature, names = []) =>
   encodeAbiParameters([{ type: "uint256" }, { type: "string[][]" }, { type: "string[][]" }, { type: "bytes" }],
-    [nonce, [], [], signature]);
+    [nonce, names.map((n) => (n ? ["name"] : [])), names.map((n) => (n ? [n] : [])), signature]);
 
 export const randomNonce = () => BigInt(toHex(crypto.randomBytes(31)));
 

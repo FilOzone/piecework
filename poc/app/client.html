@@ -119,7 +119,8 @@ function render() {
     <td>${esc(S.providers.find((p) => p.id === j.provider)?.name ?? j.provider)}</td>
     <td><span class="pill ${esc(j.status)}">${esc(status[j.status] ?? j.status ?? "…")}</span></td>
     <td>${(j.outputs ?? []).map((o) => `<a onclick="view('${esc(j.provider)}','${o.pieceId}','${esc(o.name)} (job #${esc(j.id)})')">${esc(o.name)}</a> <span class="muted">#${o.pieceId}</span>`).join("<br>")}</td>
-    <td>${[tx(j.postTx, "ordered"), tx(j.paidTx, "paid")].filter(Boolean).join(" · ")}</td></tr>`).join("")
+    <td>${[tx(j.postTx, "ordered"), tx(j.paidTx, "paid"), tx(j.expireTx, "refunded")].filter(Boolean).join(" · ")}
+      ${j.status === "late" ? `<div><button class="b" onclick="post('/api/pilot/expire',{jobId:'${esc(j.id)}'})" ${busy() ? "disabled" : ""}>Get my money back</button></div>` : ""}</td></tr>`).join("")
     || `<tr><td colspan="5" class="muted">No jobs ordered from this console yet.</td></tr>`;
 }
 async function refresh() {
