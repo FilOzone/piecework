@@ -33,6 +33,7 @@ import { foundry, filecoinCalibration } from "viem/chains";
 import { privateKeyToAccount, generatePrivateKey } from "viem/accounts";
 import * as FOC from "./foc.mjs";
 import { CID } from "multiformats/cid";
+import { createPilot } from "./pilot.mjs";
 
 const execFile = promisify(execFileCb);
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -606,6 +607,29 @@ async function curioApi(req, res, url) {
   return false;
 }
 
+// ---------------------------------------------------------------- client console (pilot.mjs)
+
+let pilot = null;
+async function pilotApi(req, res, url, json) {
+  if (!pilot) return json(503, { error: "the client console needs calibnet mode and the demo wallet" });
+  try {
+    let m;
+    if (req.method === "GET" && url.pathname === "/api/pilot/state") return json(200, await pilot.state());
+    if (req.method === "GET" && (m = url.pathname.match(/^\/api\/pilot\/file\/(\w+)\/(\d+)$/))) {
+      const b = await pilot.file(m[1], m[2]);
+      res.writeHead(200, { "content-type": "text/plain; charset=utf-8" }); return res.end(b);
+    }
+    if (req.method === "POST") {
+      const chunks = []; for await (const ch of req) chunks.push(ch);
+      const a = JSON.parse(Buffer.concat(chunks).toString() || "{}");
+      if (url.pathname === "/api/pilot/store") { await pilot.store(a.provider); return json(200, { ok: true }); }
+      if (url.pathname === "/api/pilot/upload") { await pilot.uploadFile(a.provider, a.name, a.data); return json(200, { ok: true }); }
+      if (url.pathname === "/api/pilot/order") { await pilot.order(a.provider, a.type); return json(200, { ok: true }); }
+    }
+    return json(404, { error: "unknown action" });
+  } catch (e) { return json(400, { error: reason(e) }); }
+}
+
 // ---------------------------------------------------------------- recovery after a restart (calibnet)
 
 // The chain is the source of truth: rebuild running sessions (restart their containers, keep settling)
@@ -764,7 +788,13 @@ function serve() {
       const url = new URL(req.url, "http://x");
       // health check for the stable link's "is the demo up?" test (github.io origin, so CORS is open here)
       if (req.method === "GET" && url.pathname === "/api/ping") { res.writeHead(200, { "content-type": "application/json", "access-control-allow-origin": "*" }); return res.end('{"ok":true}'); }
+      // Only this machine may use the stand-in Curio API and the client console: requests through the public tunnel
+      // carry Cloudflare's headers and are refused here.
+      const local = !req.headers["cf-connecting-ip"] && !req.headers["cf-ray"];
+      const privatePath = /^\/(pdp|piece)\//.test(url.pathname) || url.pathname.startsWith("/api/pilot/") || url.pathname === "/client.html";
+      if (privatePath && !local) { res.writeHead(403); return res.end("only available on the provider's own machine"); }
       if (url.pathname.startsWith("/pdp/") || url.pathname.startsWith("/piece/")) { if ((await curioApi(req, res, url)) !== false) return; }
+      if (url.pathname.startsWith("/api/pilot/")) return await pilotApi(req, res, url, json);
       if (req.method === "GET" && url.pathname === "/api/config") return json(200, await config());
       if (req.method === "GET" && url.pathname === "/api/state") return json(200, await state(url.searchParams.get("client")));
       if (req.method === "GET" && url.pathname === "/api/sample-pieces") return json(200, (await samplePieces()).map(({ name, hex, text }) => ({ name, hex, text })));
@@ -933,6 +963,10 @@ async function main() {
     plog(`I hold your data set #${cl().dataSetId} on FWSS (${(await listFiles()).length} files; storage paid through Filecoin Pay; proofs of possession not run yet: I do not run a prover).`, r);
   }
   if (CAL) await recoverFromChain();
+  if (CAL && demoAcct) pilot = createPilot({ HERE, RUN, NET, C, ABI, pub, demoAcct, say, demoDataSet: () => {
+    const c = cl(demoAcct.address);
+    return c && { dataSetId: c.dataSetId, files: Object.fromEntries(Object.entries(c.pieces).map(([id, p]) => [id, { name: p.name, cid: p.cid, kind: p.kind }])) };
+  } });
   lastBlock = await pub.getBlockNumber();
   eventLoop();
   serve();
