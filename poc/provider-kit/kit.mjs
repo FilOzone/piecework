@@ -25,9 +25,12 @@ import { execFile as execFileCb } from "node:child_process";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import {
-  createPublicClient, createWalletClient, http, fallback, keccak256, toHex, hexToBytes, encodeAbiParameters, decodeEventLog, getAddress,
-  formatUnits,
+  createPublicClient, createWalletClient, http, fallback, keccak256, toHex, hexToBytes, encodeAbiParameters, encodePacked, decodeEventLog,
+  getAddress, formatUnits, concat, hashDomain,
 } from "viem";
+
+const EIP712_DOMAIN = [{ name: "name", type: "string" }, { name: "version", type: "string" },
+  { name: "chainId", type: "uint256" }, { name: "verifyingContract", type: "address" }];
 import { filecoinCalibration, filecoin } from "viem/chains";
 import { privateKeyToAccount } from "viem/accounts";
 import { CID } from "multiformats/cid";
@@ -171,6 +174,30 @@ async function runJob(ev) {
   const r = await send(cfg.contracts.computeService, ABI.ComputeService, "commitOutputs", [jobId, stored.pieceIds]);
   J.stage = "paid"; J.t.paid = now(); J.done = true; J.commitTx = r.transactionHash; save();
   say(`Job #${jobId}: committed and paid (tx ${r.transactionHash}).`);
+
+  // If the client asked for old files to be replaced, the contract allowed exactly those pieces on delivery.
+  const allowed = [];
+  for (const log of r.logs) {
+    try {
+      const ev = decodeEventLog({ abi: ABI.ComputeService, data: log.data, topics: log.topics });
+      if (ev.eventName === "RemovalAllowed" && ev.args.jobId === jobId) allowed.push(...ev.args.pieceIds);
+    } catch { /* other contracts' events */ }
+  }
+  if (allowed.length) await removePieces(jobId, dataSetId, clientDataSetId, allowed).catch((e) => say(`Job #${jobId}: could not remove the old files: ${e.shortMessage ?? e.message}`));
+}
+
+/// Schedules the removal of the pieces the client allowed with this job. PDP removes them at the provider's
+/// next proving period; Warm Storage checks with ComputeService, which allows each piece once.
+async function removePieces(jobId, dataSetId, clientDataSetId, pieceIds) {
+  const structHash = keccak256(encodeAbiParameters(
+    [{ type: "bytes32" }, { type: "uint256" }, { type: "bytes32" }],
+    [keccak256(toHex("SchedulePieceRemovals(uint256 clientDataSetId,uint256[] pieceIds)")), clientDataSetId,
+      keccak256(encodePacked(["uint256[]"], [pieceIds]))],
+  ));
+  const domain = { name: "FilecoinWarmStorageService", version: "1", chainId: chain.id, verifyingContract: getAddress(cfg.contracts.fwss) };
+  const signature = await account.sign({ hash: keccak256(concat(["0x1901", hashDomain({ domain, types: { EIP712Domain: EIP712_DOMAIN } }), structHash])) });
+  const r = await send(cfg.contracts.pdp, ABI.PDPVerifier, "schedulePieceDeletions", [dataSetId, pieceIds, encodeAbiParameters([{ type: "bytes" }], [signature])]);
+  say(`Job #${jobId}: the client asked to replace ${pieceIds.length} old file${pieceIds.length > 1 ? "s" : ""}; removal scheduled (tx ${r.transactionHash}). PDP removes them at my next proving period.`);
 }
 
 // ---------------------------------------------------------------- health and dashboard

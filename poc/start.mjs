@@ -27,7 +27,7 @@ import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
 import {
   createPublicClient, createWalletClient, http as rpc, fallback, parseUnits, formatUnits, keccak256, toHex, BaseError, getAddress,
-  verifyMessage, hexToString, decodeEventLog,
+  verifyMessage, hexToString, decodeEventLog, decodeAbiParameters,
 } from "viem";
 import { foundry, filecoinCalibration } from "viem/chains";
 import { privateKeyToAccount, generatePrivateKey } from "viem/accounts";
@@ -244,7 +244,7 @@ async function connectCalibnet() {
 // ---------------------------------------------------------------- persistent provider state
 
 // ST.clients[address] = { dataSetId, clientDataSetId, pieces: { id: {name, cid, kind} } }
-let ST = { clients: {}, lastBlock: 0 };
+let ST = { clients: {}, lastBlock: 0, extraSets: {} };
 let current = null; // local: the built-in test wallet (calibnet: each request names its client)
 const LOCAL_CLIENT = () => current;
 const dataSetTimes = []; // calibnet: when data sets were created (each costs the provider a FIL deposit)
@@ -531,11 +531,16 @@ function onKitJobPaid({ jobId, outputPieceIds }) {
 const parked = new Map(); // pieceCid -> bytes (uploaded, not yet in a data set)
 const uploads = new Map(); // uuid -> expected pieceCid
 const adds = new Map(); // txHash -> status for GET .../pieces/added/<txHash>
+const creates = new Map(); // txHash -> status for GET /pdp/data-sets/created/<txHash>
+let extraSets = {}; // data sets this provider holds beyond the demo one (created through the Curio-style API)
 
 function pieceBytes(cid) {
   if (parked.has(cid)) return parked.get(cid);
+  for (const set of Object.values(extraSets))
+    for (const p of Object.values(set.pieces))
+      if (p.cid === cid && fs.existsSync(path.join(clientDir(set.payer), p.file))) return fs.readFileSync(path.join(clientDir(set.payer), p.file));
   for (const [addr, c] of Object.entries(ST.clients))
-    for (const p of Object.values(c.pieces))
+    for (const p of Object.values(c.pieces ?? {}))
       if (p.cid === cid && fs.existsSync(path.join(clientDir(addr), p.name))) return fs.readFileSync(path.join(clientDir(addr), p.name));
   return null;
 }
@@ -564,9 +569,53 @@ async function curioApi(req, res, url) {
     parked.set(expected, bytes); uploads.delete(m[1]);
     return reply(204);
   }
+  if (req.method === "POST" && url.pathname === "/pdp/data-sets/create-and-add") {
+    const { recordKeeper, extraData, pieces } = JSON.parse(await body());
+    const cids = pieces.map((p) => p.pieceCid);
+    if (cids.some((c) => !pieceBytes(c))) return reply(400, { error: "piece not uploaded" });
+    const deposit = await read(C.pdp, ABI.PDPVerifier, "FIL_CLEANUP_DEPOSIT");
+    const args = [0n, recordKeeper, cids.map((c) => ({ data: toHex(CID.parse(c).bytes) })), extraData]; // setId 0 = create
+    const { request } = await pub.simulateContract({ account: providerAcct, address: C.pdp, abi: ABI.PDPVerifier, functionName: "addPieces", args, value: deposit });
+    const gas = (await pub.estimateContractGas({ account: providerAcct, address: C.pdp, abi: ABI.PDPVerifier, functionName: "addPieces", args, value: deposit })) * 3n / 2n;
+    const hash = await wallet.writeContract({ ...request, gas });
+    creates.set(hash, { createMessageHash: hash, dataSetCreated: false, service: "public", txStatus: "pending", ok: null });
+    (async () => {
+      let r;
+      for (let i = 0; !r && i < 60; i++) r = await pub.waitForTransactionReceipt({ hash, timeout: 120_000 }).catch(() => null);
+      if (r?.status !== "success") return creates.set(hash, { ...creates.get(hash), txStatus: "rejected", ok: false });
+      let dataSetId = null; const ids = [];
+      for (const log of r.logs) {
+        try {
+          const ev = decodeEventLog({ abi: ABI.PDPVerifier, data: log.data, topics: log.topics });
+          if (ev.eventName === "DataSetCreated") dataSetId = Number(ev.args.setId);
+          if (ev.eventName === "PiecesAdded") ids.push(...ev.args.pieceIds.map(Number));
+          if (ev.eventName === "PiecesAddedV2") cids.forEach((_, i) => ids.push(Number(ev.args.firstPieceId) + i));
+        } catch { /* other contracts' events */ }
+      }
+      // create-and-add extraData is abi.encode(createPayload, addPayload); the create payload starts with the payer
+      const [createPayload] = decodeAbiParameters([{ type: "bytes" }, { type: "bytes" }], extraData);
+      const [payer] = decodeAbiParameters(
+        [{ type: "address" }, { type: "uint256" }, { type: "string[]" }, { type: "string[]" }, { type: "bytes" }], createPayload);
+      extraSets[dataSetId] = { payer, pieces: {} };
+      ids.forEach((id, i) => {
+        const name = `piece-${id}.txt`;
+        fs.writeFileSync(path.join(clientDir(payer), `set${dataSetId}-${name}`), parked.get(cids[i]) ?? pieceBytes(cids[i]));
+        extraSets[dataSetId].pieces[id] = { name, cid: cids[i], file: `set${dataSetId}-${name}` };
+        parked.delete(cids[i]);
+      });
+      saveState();
+      creates.set(hash, { createMessageHash: hash, dataSetCreated: true, service: "public", txStatus: "confirmed", ok: true, dataSetId, confirmedTxHash: hash });
+      adds.set(hash, { txHash: hash, txStatus: "confirmed", dataSetId, pieceCount: ids.length, addMessageOk: true, piecesAdded: true, confirmedPieceIds: ids, confirmedTxHash: hash });
+    })().catch((e) => { say("curio api:", reason(e)); creates.set(hash, { ...creates.get(hash), txStatus: "rejected", ok: false }); });
+    return reply(201, { txHash: hash }, { Location: `/pdp/data-sets/created/${hash}` });
+  }
+  if (req.method === "GET" && (m = url.pathname.match(/^\/pdp\/data-sets\/created\/(0x[0-9a-fA-F]+)$/))) {
+    const st = creates.get(m[1]);
+    return st ? reply(200, st) : reply(404, { error: "unknown transaction" });
+  }
   if (req.method === "POST" && (m = url.pathname.match(/^\/pdp\/data-sets\/(\d+)\/pieces$/))) {
     const dataSetId = Number(m[1]);
-    const owner = Object.keys(ST.clients).find((a) => ST.clients[a].dataSetId === dataSetId);
+    const owner = Object.keys(ST.clients).find((a) => ST.clients[a].dataSetId === dataSetId) ?? extraSets[dataSetId]?.payer;
     if (!owner) return reply(404, { error: "data set not held here" });
     const { pieces, extraData } = JSON.parse(await body());
     const cids = pieces.map((p) => p.pieceCid);
@@ -588,11 +637,13 @@ async function curioApi(req, res, url) {
           if (ev.eventName === "PiecesAddedV2") cids.forEach((_, i) => ids.push(Number(ev.args.firstPieceId) + i));
         } catch { /* other contracts' events */ }
       }
-      const c = ST.clients[owner];
+      const extra = extraSets[dataSetId];
+      const c = extra ?? ST.clients[owner];
       ids.forEach((id, i) => {
         const name = `piece-${id}.txt`;
-        fs.writeFileSync(path.join(clientDir(owner), name), parked.get(cids[i]) ?? pieceBytes(cids[i]));
-        c.pieces[id] = { name, cid: cids[i], kind: "output", tx: hash };
+        const file = extra ? `set${dataSetId}-${name}` : name;
+        fs.writeFileSync(path.join(clientDir(owner), file), parked.get(cids[i]) ?? pieceBytes(cids[i]));
+        c.pieces[id] = extra ? { name, cid: cids[i], file } : { name, cid: cids[i], kind: "output", tx: hash };
         parked.delete(cids[i]);
       });
       saveState();
@@ -912,6 +963,7 @@ async function calibnetCommand() {
   }
   if (process.argv.includes("--add-demo-files")) { // new sample files into the demo client's existing data set
     ST = loadJSON(STATE_FILE, ST);
+    extraSets = ST.extraSets ??= {};
     const client = demoAcct.address, c = cl(client);
     const have = new Set(Object.values(c.pieces).map((p) => p.name));
     const missing = (await samplePieces()).filter((f) => !have.has(f.name));
@@ -947,6 +999,7 @@ async function main() {
     await connectCalibnet();
     if (!C.cs) throw new Error("ComputeService is not deployed on calibnet yet. Run: node start.mjs --calibnet --deploy");
     ST = loadJSON(STATE_FILE, ST);
+    extraSets = ST.extraSets ??= {};
     for (const [addr, c] of Object.entries(ST.clients)) // move files from the old shared folder into the client's own
       for (const p of Object.values(c.pieces)) {
         const old = path.join(STORAGE, p.name);
