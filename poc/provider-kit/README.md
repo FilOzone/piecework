@@ -16,14 +16,20 @@ It runs next to Curio and needs no change to Curio. It uses the same Curio HTTP 
 
 ## Set up
 
+One command, which checks Node and Docker, installs the dependencies, builds the job image and writes the config:
+
 ```bash
 cd poc/provider-kit
-npm install
-docker build -t piecework/pii-redact:v1 ../jobs/pii-redact
-cp kit.config.example.json kit.config.json
+./setup.sh
 ```
 
-Edit `kit.config.json`: set `curioUrl` to your Curio's public URL, and `providerKeyFile` to the key file (for example `~/.piecework-kit/provider.key`, with mode 600).
+It asks two things: your Curio service URL, and the path to a file holding your provider key. Add `--start` to start the kit straight away, or pass both answers on the command line:
+
+```bash
+./setup.sh --curio https://calib.example.net --key ~/.piecework-kit/provider.key --start
+```
+
+By hand, if you prefer: `npm install`, `docker build -t piecework/pii-redact:v1 ../jobs/pii-redact`, then copy `kit.config.example.json` to `kit.config.json` and set `curioUrl` and `providerKeyFile` in it.
 
 ## Run
 
