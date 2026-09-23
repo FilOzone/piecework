@@ -95,13 +95,24 @@ export function createPilot({ HERE, RUN, NET, C, ABI, pub, demoAcct, say, demoDa
     return d.clientDataSetId;
   }
 
-  function order(id, type) {
+  // What happens to the client's files once the job has delivered. The client lists the pieces the provider may
+  // then remove; the contract allows those and nothing else, once each.
+  function removalsFor(policy, set, inputs) {
+    if (policy === "replace-inputs") return inputs;
+    if (policy === "replace-previous") {
+      return Object.entries(set.files).filter(([, f]) => f.kind === "output").map(([pid]) => BigInt(pid));
+    }
+    return [];
+  }
+
+  function order(id, type, policy = "keep") {
     const p = provider(id), set = st.sets[id], spec = JOBS[type];
     if (!set) throw new Error("store the sample documents first");
     if (!spec) throw new Error("unknown job type");
     const inputs = Object.entries(set.files).filter(([, f]) => f.kind === "input" && f.name.endsWith(spec.inputExtension ?? "")).map(([pid]) => BigInt(pid));
     if (!inputs.length) throw new Error(`no ${spec.inputExtension} files in your data set for this job`);
     const price = parseUnits(spec.price ?? "0.5", 18);
+    const removals = removalsFor(policy, set, inputs);
     return run(`Order "${spec.name}" from ${p.name}`, async (step) => {
       const [, rateAllowance, lockupAllowance, , lockupUsage, maxLockupPeriod] = await pub.readContract({ address: C.payments, abi: ABI.FilecoinPayV1,
         functionName: "operatorApprovals", args: [C.usdfc, demoAcct.address, C.cs] });
@@ -111,10 +122,12 @@ export function createPilot({ HERE, RUN, NET, C, ABI, pub, demoAcct, say, demoDa
       }
       const deadline = (await pub.getBlockNumber()) + BigInt(spec.deadlineEpochs ?? 40);
       step(`Ordering the job on ${inputs.length} files: the price is put on hold (one block)`);
-      const r = await send(C.cs, ABI.ComputeService, "postJob", [getAddress(p.address), keccak256(toHex(type)), BigInt(set.dataSetId), inputs, price, deadline]);
+      if (removals.length) step(`The provider will be allowed to remove ${removals.length} old ${removals.length === 1 ? "file" : "files"} once it has delivered`);
+      const r = await send(C.cs, ABI.ComputeService, "postJob",
+        [getAddress(p.address), keccak256(toHex(type)), BigInt(set.dataSetId), inputs, removals, price, deadline]);
       const ev = (await pub.getContractEvents({ address: C.cs, abi: ABI.ComputeService, eventName: "JobPosted", fromBlock: r.blockNumber, toBlock: r.blockNumber }))
         .find((l) => l.transactionHash === r.transactionHash);
-      st.jobs[String(ev.args.jobId)] = { provider: id, type, dataSetId: set.dataSetId, inputs: inputs.length, price: spec.price ?? "0.5",
+      st.jobs[String(ev.args.jobId)] = { provider: id, type, policy, dataSetId: set.dataSetId, inputs: inputs.length, price: spec.price ?? "0.5",
         deadline: String(deadline), fromBlock: String(r.blockNumber), postTx: r.transactionHash };
       save();
     });
@@ -137,7 +150,13 @@ export function createPilot({ HERE, RUN, NET, C, ABI, pub, demoAcct, say, demoDa
         const set = st.sets[j.provider];
         if (set) set.files[String(pid)] = { name: `${names[i] ?? "result"} (job #${jobId})`, cid, kind: "output" };
       }
-      j.outputs = outputs; j.status = "paid"; j.paidTx = paid[0]?.transactionHash; save();
+      j.outputs = outputs; j.status = "paid"; j.paidTx = paid[0]?.transactionHash;
+      const set = st.sets[j.provider];
+      if (set && j.policy && j.policy !== "keep") { // the provider may now remove those pieces; mark them
+        for (const [pid, f] of Object.entries(set.files))
+          if ((j.policy === "replace-inputs" && f.kind === "input") || (j.policy === "replace-previous" && f.kind === "output" && !outputs.some((o) => o.pieceId === pid))) f.removable = true;
+      }
+      save();
     } else if (s === 3) { j.status = "expired"; save(); }
     else j.status = (await pub.getBlockNumber()) > BigInt(j.deadline) ? "late" : "waiting";
     return j;
@@ -154,6 +173,9 @@ export function createPilot({ HERE, RUN, NET, C, ABI, pub, demoAcct, say, demoDa
       jobs.push({ id, ...(await jobStatus(id, j).catch(() => j)), name: JOBS[j.type]?.name });
     const [, , available] = await pub.readContract({ address: C.payments, abi: ABI.FilecoinPayV1, functionName: "getAccountInfoIfSettled", args: [C.usdfc, demoAcct.address] });
     return { client: demoAcct.address, available: formatUnits(available, 18), token: NET.token, explorer: NET.explorer,
+      policies: [{ id: "keep", label: "Keep everything (default)" },
+        { id: "replace-previous", label: "Keep only the newest result: the provider may remove earlier results" },
+        { id: "replace-inputs", label: "Replace the originals: the provider may remove the files it read" }],
       providers: ps, jobs, jobTypes: Object.entries(JOBS).map(([type, j]) => ({ type, name: j.name, price: j.price ?? "0.5", inputExtension: j.inputExtension })), task };
   }
 

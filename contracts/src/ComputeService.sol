@@ -114,12 +114,21 @@ contract ComputeService is IDataSetAuthorizer {
         "PieceMetadata(uint256 pieceIndex,MetadataEntry[] metadata)"
     );
 
+    // FWSS operation id for scheduling piece removals (SignatureVerificationLib.SCHEDULE_PIECE_REMOVALS_TYPEHASH,
+    // filecoin-services at 4cbbea4, L35)
+    bytes32 public constant SCHEDULE_PIECE_REMOVALS_TYPEHASH =
+        keccak256("SchedulePieceRemovals(uint256 clientDataSetId,uint256[] pieceIds)");
+
     uint256 public nextSessionId = 1;
     uint256 public nextJobId = 1;
     mapping(uint256 => Session) public sessions;
     mapping(uint256 => Job) public jobs;
     // open (posted, not yet paid or expired) jobs per data set, client and provider
     mapping(uint256 dataSetId => mapping(address client => mapping(address provider => uint256))) public openJobs;
+    // pieces the client lets the provider remove once that job has delivered (empty = nothing is ever removed)
+    mapping(uint256 jobId => uint256[]) internal jobRemovals;
+    // granted on delivery, spent when the provider schedules the removal: one piece, one removal
+    mapping(uint256 dataSetId => mapping(address provider => mapping(uint256 pieceId => bool))) public mayRemove;
 
     // ---------------------------------------------------------------- events
 
@@ -128,6 +137,7 @@ contract ComputeService is IDataSetAuthorizer {
     event SessionClosed(uint256 indexed sessionId, address closedBy, bool rateStoppedAtClose);
 
     event JobPosted(uint256 indexed jobId, address indexed client, address indexed provider, uint256 railId, bytes32 imageDigest, uint256 dataSetId, uint256[] inputPieceIds, uint256 price, uint256 deadline);
+    event RemovalAllowed(uint256 indexed jobId, uint256 dataSetId, address indexed provider, uint256[] pieceIds);
     event JobPaid(uint256 indexed jobId, uint256[] outputPieceIds, uint256 epoch);
     event JobExpired(uint256 indexed jobId);
 
@@ -221,6 +231,7 @@ contract ComputeService is IDataSetAuthorizer {
         bytes32 imageDigest,
         uint256 dataSetId,
         uint256[] calldata inputPieceIds,
+        uint256[] calldata removeOnDelivery,
         uint256 price,
         uint256 deadline
     ) external returns (uint256 jobId) {
@@ -229,12 +240,16 @@ contract ComputeService is IDataSetAuthorizer {
         for (uint256 i = 0; i < inputPieceIds.length; i++) {
             if (!pdp.pieceLive(dataSetId, inputPieceIds[i])) revert PieceNotLive(dataSetId, inputPieceIds[i]);
         }
+        for (uint256 i = 0; i < removeOnDelivery.length; i++) {
+            if (!pdp.pieceLive(dataSetId, removeOnDelivery[i])) revert PieceNotLive(dataSetId, removeOnDelivery[i]);
+        }
         uint256 railId = payments.createRail(token, msg.sender, provider, address(0), 0, address(0));
         payments.modifyRailLockup(railId, 0, price);
         jobId = nextJobId++;
         jobs[jobId] = Job(
             msg.sender, provider, railId, price, deadline, dataSetId, imageDigest, pdp.getNextPieceId(dataSetId), JobStatus.Posted
         );
+        jobRemovals[jobId] = removeOnDelivery;
         openJobs[dataSetId][msg.sender][provider]++;
         emit JobPosted(jobId, msg.sender, provider, railId, imageDigest, dataSetId, inputPieceIds, price, deadline);
     }
@@ -255,6 +270,9 @@ contract ComputeService is IDataSetAuthorizer {
         }
         j.status = JobStatus.Paid;
         openJobs[j.dataSetId][j.client][j.provider]--;
+        uint256[] storage removals = jobRemovals[jobId];
+        for (uint256 i = 0; i < removals.length; i++) mayRemove[j.dataSetId][j.provider][removals[i]] = true;
+        if (removals.length > 0) emit RemovalAllowed(jobId, j.dataSetId, j.provider, removals);
         payments.modifyRailPayment(j.railId, 0, j.price);
         payments.terminateRail(j.railId);
         emit JobPaid(jobId, outputPieceIds, block.number);
@@ -286,14 +304,26 @@ contract ComputeService is IDataSetAuthorizer {
         bytes32 operation,
         bytes32 digest,
         bytes calldata signature,
-        bytes calldata /* operationData */
-    ) external view returns (bool) {
+        bytes calldata operationData
+    ) external returns (bool) {
         (address signer, ECDSA.RecoverError err,) = ECDSA.tryRecover(digest, signature);
         if (err != ECDSA.RecoverError.NoError) return false;
         if (signer == payer) return true;
         if (address(sessionKeys) != address(0) && sessionKeys.authorizationExpiry(payer, signer, operation) >= block.timestamp) {
             return true;
         }
-        return operation == ADD_PIECES_TYPEHASH && openJobs[dataSetId][payer][signer] > 0;
+        if (operation == ADD_PIECES_TYPEHASH) return openJobs[dataSetId][payer][signer] > 0;
+        // Removals: only the pieces the client listed with a job that the provider then delivered, once each
+        // (FWSS passes abi.encode(clientDataSetId, pieceIds), SignatureVerificationLib L274).
+        if (operation == SCHEDULE_PIECE_REMOVALS_TYPEHASH) {
+            (, uint256[] memory pieceIds) = abi.decode(operationData, (uint256, uint256[]));
+            if (pieceIds.length == 0) return false;
+            for (uint256 i = 0; i < pieceIds.length; i++) {
+                if (!mayRemove[dataSetId][signer][pieceIds[i]]) return false;
+            }
+            for (uint256 i = 0; i < pieceIds.length; i++) mayRemove[dataSetId][signer][pieceIds[i]] = false;
+            return true;
+        }
+        return false;
     }
 }

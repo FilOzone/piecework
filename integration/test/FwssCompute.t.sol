@@ -181,9 +181,29 @@ contract FwssComputeTest is MockFVMTest {
         ids[1] = 1;
     }
 
+    function noRemovals() internal pure returns (uint256[] memory) {
+        return new uint256[](0);
+    }
+
     function postJob() internal returns (uint256 jobId) {
         vm.prank(client);
-        jobId = cs.postJob(provider, IMAGE, dataSetId, inputs(), P_PRICE, vm.getBlockNumber() + 100);
+        jobId = cs.postJob(provider, IMAGE, dataSetId, inputs(), noRemovals(), P_PRICE, vm.getBlockNumber() + 100);
+    }
+
+
+    // provider submits schedulePieceDeletions; ComputeService (the authorizer) decides
+    function scheduleRemoval(uint256 signerPk, uint256[] memory pieceIds, bytes4 expectRevert) internal {
+        bytes32 structHash = keccak256(
+            abi.encode(
+                keccak256("SchedulePieceRemovals(uint256 clientDataSetId,uint256[] pieceIds)"),
+                CLIENT_DATA_SET_ID,
+                keccak256(abi.encodePacked(pieceIds))
+            )
+        );
+        bytes memory sig = sign(signerPk, structHash);
+        vm.prank(provider);
+        if (expectRevert != bytes4(0)) vm.expectPartialRevert(expectRevert);
+        pdp.schedulePieceDeletions(dataSetId, pieceIds, abi.encode(sig));
     }
 
     function attachAuthorizer() internal {
@@ -275,7 +295,7 @@ contract FwssComputeTest is MockFVMTest {
         payments.deposit(usdfc, mallory, 10 ether);
         payments.setOperatorApproval(usdfc, address(cs), true, 1 ether, 10 ether, 10000);
         vm.expectRevert(abi.encodeWithSelector(ComputeService.NotDataSetOwner.selector, dataSetId, mallory));
-        cs.postJob(provider, IMAGE, dataSetId, inputs(), P_PRICE, vm.getBlockNumber() + 100);
+        cs.postJob(provider, IMAGE, dataSetId, inputs(), noRemovals(), P_PRICE, vm.getBlockNumber() + 100);
         vm.stopPrank();
         addPieces(PROVIDER_PK, piece("injected.txt"), Errors.Unauthorized.selector);
     }
@@ -304,5 +324,33 @@ contract FwssComputeTest is MockFVMTest {
         vm.prank(client);
         skr.revoke(vm.addr(sessionPk), perms, "test");
         addPieces(sessionPk, piece("after-revoke.txt"), Errors.Unauthorized.selector);
+    }
+
+    /// "Replace the originals": the client lists its input pieces with the job; once the provider has delivered,
+    /// Warm Storage lets that provider schedule their removal, and nothing else.
+    function test_removals_providerReplacesTheInputsAfterDelivery() public {
+        attachAuthorizer();
+        vm.prank(client);
+        uint256 jobId = cs.postJob(provider, IMAGE, dataSetId, inputs(), one(0), P_PRICE, vm.getBlockNumber() + 100);
+        uint256 outId = addPieces(PROVIDER_PK, piece("redacted.txt"), OK);
+
+        scheduleRemoval(PROVIDER_PK, one(0), Errors.Unauthorized.selector); // not before delivering
+
+        vm.prank(provider);
+        cs.commitOutputs(jobId, one(outId));
+
+        scheduleRemoval(PROVIDER_PK, one(0), OK); // the piece the client listed
+        scheduleRemoval(PROVIDER_PK, one(1), Errors.Unauthorized.selector); // not another of the client's files
+        scheduleRemoval(PROVIDER_PK, one(outId), Errors.Unauthorized.selector); // not the result either
+    }
+
+    /// Without the client listing anything, a delivered job gives the provider no right to remove.
+    function test_removals_noneUnlessTheClientAsks() public {
+        attachAuthorizer();
+        uint256 jobId = postJob();
+        uint256 outId = addPieces(PROVIDER_PK, piece("search-index.txt"), OK);
+        vm.prank(provider);
+        cs.commitOutputs(jobId, one(outId));
+        scheduleRemoval(PROVIDER_PK, one(0), Errors.Unauthorized.selector);
     }
 }

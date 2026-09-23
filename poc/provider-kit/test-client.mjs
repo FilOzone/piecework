@@ -87,7 +87,7 @@ async function main() {
     await send(C.payments, PAY, "setOperatorApproval", [C.usdfc, C.computeService, true, rateAllowance, lockupUsage + parseUnits("3", 18), maxLockupPeriod || 600n]);
   }
   const r = await send(C.computeService, ABI.ComputeService, "postJob",
-    [getAddress(cfg.provider), keccak256(toHex("pii-redact:v1")), dataSetId, inputs, price, deadline]);
+    [getAddress(cfg.provider), keccak256(toHex("pii-redact:v1")), dataSetId, inputs, [], price, deadline]);
   const jobId = (await pub.getContractEvents({ address: C.computeService, abi: ABI.ComputeService, eventName: "JobPosted",
     fromBlock: r.blockNumber, toBlock: r.blockNumber })).find((l) => l.transactionHash === r.transactionHash).args.jobId;
   say(`Job #${jobId} posted. Waiting for the provider…`);

@@ -64,7 +64,7 @@ a{color:var(--accent);cursor:pointer}
 <script>
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-let S = null, pick = localStorage.getItem("pilot-provider") ?? "laptop", jobType = null;
+let S = null, pick = localStorage.getItem("pilot-provider") ?? "laptop", jobType = null, policy = "keep";
 const busy = () => S?.task && !S.task.done;
 async function post(path, body) {
   const r = await fetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }).then((x) => x.json());
@@ -103,7 +103,7 @@ function render() {
        <button class="b primary" onclick="post('/api/pilot/store',{provider:'${esc(P.id)}'})" ${busy() || !P.ready ? "disabled" : ""}>Store the sample documents with this provider</button>`
     : `<p class="muted">Data set #${P.set.dataSetId}: ${files.length} pieces, stored and proven by the provider. Click a name to read the file back from the provider.</p>
        <div class="tw"><table><thead><tr><th>Piece</th><th>File</th><th>What</th></tr></thead><tbody>${files.map(([id, f]) =>
-       `<tr><td>#${id}</td><td><a onclick="view('${esc(P.id)}','${id}','${esc(f.name)}')">${esc(f.name)}</a></td><td>${f.kind === "output" ? '<span class="pill paid">job result</span>' : "your file"}</td></tr>`).join("")}</tbody></table></div>
+       `<tr><td>#${id}</td><td><a onclick="view('${esc(P.id)}','${id}','${esc(f.name)}')">${esc(f.name)}</a></td><td>${f.kind === "output" ? '<span class="pill paid">job result</span>' : "your file"}${f.removable ? ' <span class="pill late">the provider may remove this</span>' : ""}</td></tr>`).join("")}</tbody></table></div>
        <div class="row" style="margin-top:12px"><label class="b">Upload a file of yours<input type="file" hidden onchange="upload(this)" ${busy() ? "disabled" : ""}></label>
        <span class="muted">Text files work with the jobs below. Stored in your data set at this provider; one signature, one block.</span></div>`);
   jobType = jobType ?? S.jobTypes[0]?.type;
@@ -111,9 +111,18 @@ function render() {
     <p class="muted">The price is put on hold in Filecoin Pay. The provider runs the program next to your files, adds the results to your data set, and is paid
     only if it does so before the deadline (about 20 minutes).</p>
     <div class="row"><select id="jt">${S.jobTypes.map((j) => `<option value="${esc(j.type)}" ${j.type === jobType ? "selected" : ""}>${esc(j.name)} — ${esc(j.price)} ${esc(S.token)}</option>`).join("")}</select>
-    <button class="b primary" id="orderbtn" ${busy() || !P.set ? "disabled" : ""}>Order</button></div>`;
+    <select id="pol">${(S.policies ?? []).map((x) => `<option value="${esc(x.id)}" ${x.id === policy ? "selected" : ""}>${esc(x.label)}</option>`).join("")}</select>
+    <button class="b primary" id="orderbtn" ${busy() || !P.set ? "disabled" : ""}>Order</button></div>
+    <p class="muted" style="margin:8px 0 0">${policy === "replace-inputs"
+      ? "After delivery the provider may remove the files this job read, and nothing else. Use it to keep only the redacted copies. This cannot be undone."
+      : policy === "replace-previous" ? "After delivery the provider may remove the results of earlier jobs, so only the newest one stays."
+      : "Nothing is ever removed from your data set."}</p>`;
   $("jt").onchange = (e) => (jobType = e.target.value);
-  $("orderbtn").onclick = () => post("/api/pilot/order", { provider: P.id, type: jobType });
+  $("pol").onchange = (e) => { policy = e.target.value; render(); };
+  $("orderbtn").onclick = () => {
+    if (policy !== "keep" && !confirm("The provider will be allowed to remove those files from your data set after it delivers. This cannot be undone. Continue?")) return;
+    post("/api/pilot/order", { provider: P.id, type: jobType, policy });
+  };
   const status = { waiting: "waiting for the provider", paid: "delivered and paid", late: "late: deadline passed", expired: "refunded" };
   $("jobs").innerHTML = S.jobs.map((j) => `<tr><td>#${esc(j.id)} ${esc(j.name)}<br><span class="muted">${j.inputs} files · ${esc(j.price)} ${esc(S.token)}</span></td>
     <td>${esc(S.providers.find((p) => p.id === j.provider)?.name ?? j.provider)}</td>

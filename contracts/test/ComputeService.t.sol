@@ -84,6 +84,10 @@ contract ComputeServiceTest is Test {
         ids[1] = 1;
     }
 
+    function noRemovals() internal pure returns (uint256[] memory) {
+        return new uint256[](0);
+    }
+
     function addOutput() internal returns (uint256[] memory ids) {
         vm.prank(PROVIDER);
         uint256 id = pdp.addPiece(dataSetId, "search-index.parquet", "baga-output-1");
@@ -101,7 +105,7 @@ contract ComputeServiceTest is Test {
 
     function postJob(uint256 deadlineIn) internal returns (uint256 id) {
         vm.prank(CLIENT);
-        id = cs.postJob(PROVIDER, IMAGE, dataSetId, inputs(), P_PRICE, vm.getBlockNumber() + deadlineIn);
+        id = cs.postJob(PROVIDER, IMAGE, dataSetId, inputs(), noRemovals(), P_PRICE, vm.getBlockNumber() + deadlineIn);
     }
 
     // ---------- pay for time ----------
@@ -271,7 +275,7 @@ contract ComputeServiceTest is Test {
         bad[0] = 99;
         vm.prank(CLIENT);
         vm.expectRevert(abi.encodeWithSelector(ComputeService.PieceNotLive.selector, dataSetId, 99));
-        cs.postJob(PROVIDER, IMAGE, dataSetId, bad, P_PRICE, vm.getBlockNumber() + 100);
+        cs.postJob(PROVIDER, IMAGE, dataSetId, bad, noRemovals(), P_PRICE, vm.getBlockNumber() + 100);
     }
 
     function test_job_outputsMustBeLive() public {
@@ -313,14 +317,14 @@ contract ComputeServiceTest is Test {
         approveCS();
         vm.prank(CLIENT);
         vm.expectRevert();
-        cs.postJob(PROVIDER, IMAGE, dataSetId, inputs(), P_PRICE, vm.getBlockNumber() + 100);
+        cs.postJob(PROVIDER, IMAGE, dataSetId, inputs(), noRemovals(), P_PRICE, vm.getBlockNumber() + 100);
     }
 
     // Only the data set's owner can order compute over it...
     function test_job_onlyDataSetOwner() public {
         vm.prank(STRANGER);
         vm.expectRevert(abi.encodeWithSelector(ComputeService.NotDataSetOwner.selector, dataSetId, STRANGER));
-        cs.postJob(PROVIDER, IMAGE, dataSetId, inputs(), P_PRICE, vm.getBlockNumber() + 100);
+        cs.postJob(PROVIDER, IMAGE, dataSetId, inputs(), noRemovals(), P_PRICE, vm.getBlockNumber() + 100);
         vm.prank(STRANGER);
         vm.expectRevert(abi.encodeWithSelector(ComputeService.NotDataSetOwner.selector, dataSetId, STRANGER));
         cs.openSession(PROVIDER, IMAGE, R, L, dataSetId);
@@ -332,6 +336,84 @@ contract ComputeServiceTest is Test {
         approveCS();
         vm.prank(CLIENT);
         vm.expectRevert(abi.encodeWithSelector(ComputeService.NotDataSetProvider.selector, dataSetId, STRANGER));
-        cs.postJob(STRANGER, IMAGE, dataSetId, inputs(), P_PRICE, vm.getBlockNumber() + 100);
+        cs.postJob(STRANGER, IMAGE, dataSetId, inputs(), noRemovals(), P_PRICE, vm.getBlockNumber() + 100);
+    }
+
+    // ---------- replacing files: the client says which pieces the provider may remove once it delivers ----------
+
+    function postJobRemoving(uint256[] memory removals) internal returns (uint256 id) {
+        helper.makeDeposit(CLIENT, CLIENT, 1 ether);
+        approveCS();
+        vm.prank(CLIENT);
+        id = cs.postJob(PROVIDER, IMAGE, dataSetId, inputs(), removals, P_PRICE, vm.getBlockNumber() + 100);
+    }
+
+    function one(uint256 a) internal pure returns (uint256[] memory ids) {
+        ids = new uint256[](1);
+        ids[0] = a;
+    }
+
+    /// The provider may remove the listed pieces only after it has delivered, and only those.
+    function test_removals_grantedOnlyOnDelivery() public {
+        uint256 id = postJobRemoving(one(0));
+        assertFalse(cs.mayRemove(dataSetId, PROVIDER, 0), "nothing before delivery");
+        uint256[] memory outs = addOutput();
+        vm.prank(PROVIDER);
+        cs.commitOutputs(id, outs);
+        assertTrue(cs.mayRemove(dataSetId, PROVIDER, 0), "the listed piece");
+        assertFalse(cs.mayRemove(dataSetId, PROVIDER, 1), "not a piece the client did not list");
+    }
+
+    /// Nothing is removable when the client lists nothing (the default).
+    function test_removals_noneByDefault() public {
+        uint256 id = postJobRemoving(noRemovals());
+        uint256[] memory outs = addOutput();
+        vm.prank(PROVIDER);
+        cs.commitOutputs(id, outs);
+        assertFalse(cs.mayRemove(dataSetId, PROVIDER, 0));
+        assertFalse(cs.mayRemove(dataSetId, PROVIDER, 1));
+    }
+
+    /// An expired job grants nothing.
+    function test_removals_notAfterExpiry() public {
+        uint256 id = postJobRemoving(one(0));
+        vm.roll(vm.getBlockNumber() + 101);
+        cs.expire(id);
+        assertFalse(cs.mayRemove(dataSetId, PROVIDER, 0));
+    }
+
+    /// Through the authorizer: the delivering provider's signature passes once, for the listed pieces only.
+    function test_removals_authorizerAcceptsOnceForTheProvider() public {
+        uint256 pk = 0xA11CE;
+        address signer = vm.addr(pk);
+        vm.startPrank(signer);
+        uint256 ds = pdp.createDataSet(CLIENT);
+        pdp.addPiece(ds, "notes.txt", "baga-1");
+        pdp.addPiece(ds, "papers.pdf", "baga-2");
+        vm.stopPrank();
+
+        helper.makeDeposit(CLIENT, CLIENT, 1 ether);
+        approveCS();
+        vm.prank(CLIENT);
+        uint256 id = cs.postJob(signer, IMAGE, ds, inputs(), one(0), P_PRICE, vm.getBlockNumber() + 100);
+
+        bytes32 digest = keccak256("a schedule-removals digest");
+        (uint8 v, bytes32 r, bytes32 sSig) = vm.sign(pk, digest);
+        bytes memory sig = abi.encodePacked(r, sSig, v);
+        bytes memory data = abi.encode(uint256(1), one(0)); // FWSS sends (clientDataSetId, pieceIds)
+
+        assertFalse(cs.isAuthorized(ds, CLIENT, cs.SCHEDULE_PIECE_REMOVALS_TYPEHASH(), digest, sig, data), "before delivery");
+
+        vm.prank(signer);
+        uint256 outId = pdp.addPiece(ds, "search-index.parquet", "baga-out");
+        vm.prank(signer);
+        cs.commitOutputs(id, one(outId));
+
+        assertTrue(cs.isAuthorized(ds, CLIENT, cs.SCHEDULE_PIECE_REMOVALS_TYPEHASH(), digest, sig, data), "after delivery");
+        assertFalse(cs.isAuthorized(ds, CLIENT, cs.SCHEDULE_PIECE_REMOVALS_TYPEHASH(), digest, sig, data), "only once");
+        assertFalse(
+            cs.isAuthorized(ds, CLIENT, cs.SCHEDULE_PIECE_REMOVALS_TYPEHASH(), digest, sig, abi.encode(uint256(1), one(1))),
+            "not a piece the client did not list"
+        );
     }
 }

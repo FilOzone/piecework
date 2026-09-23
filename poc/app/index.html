@@ -448,7 +448,7 @@ const ACTIONS = {
     const accepts = new Function(`return (${j.inputs})`)();
     const inputs = S.files.filter((f) => f.live && f.kind === "input" && accepts(f.name)).map((f) => BigInt(f.pieceId));
     const deadline = (await pub.getBlockNumber()) + BigInt(j.deadline);
-    await tx(C().cs, A().cs, "postJob", [CFG.provider, j.image, BigInt(S.dataSetId), inputs, BigInt(j.price), deadline], `Order job: ${j.name}`);
+    await tx(C().cs, A().cs, "postJob", [CFG.provider, j.image, BigInt(S.dataSetId), inputs, [], BigInt(j.price), deadline], `Order job: ${j.name}`);
     return "Job ordered. The price is on hold in Filecoin Pay. The provider is paid only if it adds the result to your data set before the deadline.";
   },
   async expire({ id }) {

@@ -1,9 +1,9 @@
 {
   "network": "calibnet",
   "chainId": 314159,
-  "computeService": "0x04347c64F010f256f529aC94BC8Fe7A81abDf45A",
-  "tx": "0xb1be459e2358862adbbd0b4be060b25c47114051e39331eba4d11842a928a37b",
-  "block": 4088407,
+  "computeService": "0x9F3011BE4bd383f85f05816611bF7Ea080195505",
+  "tx": "0xd4eb10227d78a7b6edadbd9e167ff84531d62195c121cbd65f2292d9a1514a0c",
+  "block": 4093570,
   "constructorArgs": [
     "0x09a0fDc2723fAd1A7b8e3e00eE5DF73841df55a0",
     "0xb3042734b608a1B16e9e86B374A3f3e389B4cDf0",
@@ -11,5 +11,13 @@
     "0x518411c2062E119Aaf7A8B12A2eDf9a939347655",
     "0x1B68d64f01bAa42014B9774605867BF4eDC0320f"
   ],
-  "deployedAt": "2026-09-21T08:17:04.293Z"
+  "deployedAt": "2026-09-23T03:35:06.090650Z",
+  "previous": [
+    {
+      "computeService": "0x04347c64F010f256f529aC94BC8Fe7A81abDf45A",
+      "tx": "0xb1be459e2358862adbbd0b4be060b25c47114051e39331eba4d11842a928a37b",
+      "deployedAt": "2026-09-21T08:17:04.293Z",
+      "note": "before per-job removal permissions"
+    }
+  ]
 }

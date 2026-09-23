@@ -624,7 +624,7 @@ async function pilotApi(req, res, url, json) {
       const a = JSON.parse(Buffer.concat(chunks).toString() || "{}");
       if (url.pathname === "/api/pilot/store") { await pilot.store(a.provider); return json(200, { ok: true }); }
       if (url.pathname === "/api/pilot/upload") { await pilot.uploadFile(a.provider, a.name, a.data); return json(200, { ok: true }); }
-      if (url.pathname === "/api/pilot/order") { await pilot.order(a.provider, a.type); return json(200, { ok: true }); }
+      if (url.pathname === "/api/pilot/order") { await pilot.order(a.provider, a.type, a.policy); return json(200, { ok: true }); }
       if (url.pathname === "/api/pilot/expire") { await pilot.expire(a.jobId); return json(200, { ok: true }); }
     }
     return json(404, { error: "unknown action" });
