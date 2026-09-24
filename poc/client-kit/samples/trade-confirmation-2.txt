@@ -1,0 +1,10 @@
+TRADE CONFIRMATION TC-000002
+
+Client: Alice Weber, Hauptstrasse 142, EC2V 7HH London
+Trade date: 21/09/2026   Settlement: T+2
+Instrument: tokenized fund units, Delta Receivables Pool
+Side: SELL   Quantity: 2801   Price: 130.66 EUR
+On-chain settlement address: 0xa107f174cb78a6bbeef965d4f0bd1529b8430691
+Cash leg: UniCredit (UNCRITMMXXX), IBAN IT36M6882811265ZGJ2CAIIYIM8
+
+Please contact your relationship manager Ines Dubois at +44 7097658280 with any questions.

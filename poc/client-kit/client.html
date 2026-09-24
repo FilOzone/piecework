@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PieceWork Client Console</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧾</text></svg>">
+<style>
+:root{--ground:#EEF3F8;--surface:#fff;--surface-2:#F5F8FC;--line:#D5DFEA;--ink:#0E1A2B;--ink-2:#4A5A70;--ink-3:#7A889B;
+  --accent:#0A74E8;--accent-ink:#fff;--accent-soft:#E1EEFD;--money:#0B8F7F;--money-soft:#DDF3EF;--warn:#A86200;--warn-soft:#FDF0DA;--bad:#B42318;--bad-soft:#FDE7E5;
+  --mono:ui-monospace,SFMono-Regular,Menlo,monospace;--body:system-ui,-apple-system,"Segoe UI",sans-serif}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--ground:#0A111C;--surface:#111B2A;--surface-2:#0E1724;--line:#243349;--ink:#E4ECF6;
+  --ink-2:#A6B4C7;--ink-3:#7485A0;--accent:#4C9DFF;--accent-ink:#06121F;--accent-soft:#132A47;--money:#3CC7B3;--money-soft:#0F2E2B;--warn:#F0AE4A;--warn-soft:#33250F;--bad:#FF7A6E;--bad-soft:#3A1614}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--ground);color:var(--ink);font:16px/1.5 var(--body);padding:24px 16px 48px}
+.wrap{max-width:1000px;margin:0 auto;display:flex;flex-direction:column;gap:18px}
+h1{font-size:1.7rem;margin:0} h2{font-size:1.15rem;margin:0 0 10px}
+.muted{color:var(--ink-3);font-size:.9rem}
+.lede{color:var(--ink-2);max-width:70ch;margin:.4em 0 0}
+.count{font:600 .8rem var(--mono);color:var(--warn)}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:18px}
+.providers{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px}
+.prov{border:1px solid var(--line);border-radius:10px;padding:14px;background:var(--surface-2);cursor:pointer;text-align:left;font:inherit;color:inherit}
+.prov.on{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.prov[disabled]{opacity:.55;cursor:not-allowed}
+.prov b{display:block;margin-bottom:4px}
+code{font:.82rem var(--mono);word-break:break-all}
+button.b{font:600 .95rem var(--body);border:1px solid var(--line);background:var(--surface);color:var(--ink);padding:9px 14px;border-radius:8px;cursor:pointer}
+button.b.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+button.b:disabled{opacity:.45;cursor:not-allowed}
+select{font:inherit;padding:8px 10px;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--ink)}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+table{width:100%;border-collapse:collapse;font-size:.9rem}
+th,td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-size:.75rem;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-3);font-weight:600}
+.tw{overflow-x:auto}
+.pill{display:inline-block;font:600 .72rem var(--body);letter-spacing:.05em;text-transform:uppercase;padding:3px 8px;border-radius:99px;background:var(--accent-soft);color:var(--accent);white-space:nowrap}
+.pill.paid,.pill.ok{background:var(--money-soft);color:var(--money)} .pill.late,.pill.expired,.pill.bad{background:var(--bad-soft);color:var(--bad)}
+.pill.off{background:var(--surface-2);color:var(--ink-3);border:1px solid var(--line)}
+.task{border-left:4px solid var(--accent);background:var(--accent-soft);border-radius:0 10px 10px 0;padding:12px 16px}
+.task.err{border-color:var(--bad);background:var(--bad-soft)}
+.task ol{margin:6px 0 0;padding-left:20px}
+.spin{display:inline-block;width:12px;height:12px;border:2px solid var(--line);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite;vertical-align:-1px;margin-right:6px}
+@keyframes spin{to{transform:rotate(360deg)}}
+pre{font:.8rem/1.5 var(--mono);background:var(--surface-2);border:1px solid var(--line);border-radius:8px;padding:12px;max-height:420px;overflow:auto;margin:0;white-space:pre-wrap}
+a{color:var(--accent);cursor:pointer}
+.drop{border:2px dashed var(--line);border-radius:10px;padding:18px;text-align:center;color:var(--ink-3);background:var(--surface-2);transition:.15s}
+.drop.over{border-color:var(--accent);background:var(--accent-soft);color:var(--accent)}
+.sets{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px}
+td.pick{width:28px} input[type=checkbox]{width:16px;height:16px;accent-color:var(--accent)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div>
+    <div class="muted">PieceWork · client console · runs on your own machine</div>
+    <h1>Run programs over your data, where it is stored</h1>
+    <p class="lede">Your files live in a data set at a storage provider on Filecoin Calibration. Here you order work over them:
+      the price is held in Filecoin Pay, the provider runs the program next to your files, writes the results back into your
+      data set, and is paid only when it delivers. Every step below is a real transaction.</p>
+    <div class="muted" id="who">Loading…</div>
+  </div>
+  <div id="task"></div>
+  <div class="card"><h2>1. Choose a provider</h2>
+    <p class="muted" style="margin:0 0 10px">Providers are listed in <code>poc/providers.json</code>. Each one runs Curio with PDP and the PieceWork provider kit.</p>
+    <div class="providers" id="providers"></div></div>
+  <div class="card" id="setcard"></div>
+  <div class="card" id="newsetcard" hidden></div>
+  <div class="card" id="ordercard"></div>
+  <div class="card"><h2>Your jobs</h2><div class="tw"><table><thead><tr><th>Job</th><th>Provider</th><th>Status</th><th>Results</th><th>Transactions</th></tr></thead>
+    <tbody id="jobs"></tbody></table></div></div>
+  <div class="card" id="viewer" hidden></div>
+</div>
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+let S = null, pick = localStorage.getItem("pilot-provider") ?? "laptop", jobType = null, policy = "keep";
+let setPick = JSON.parse(localStorage.getItem("pilot-sets") ?? "{}"); // provider id -> data set id
+let checked = new Set(); // piece ids ticked for removal
+const busy = () => S?.task && !S.task.done;
+
+async function post(path, body) {
+  const r = await fetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }).then((x) => x.json());
+  if (r.error) alert(r.error);
+  refresh();
+}
+// Files the browser holds -> [{ name, data(base64) }]
+const readFiles = (list) => Promise.all([...list].map((f) => new Promise((res, rej) => {
+  const rd = new FileReader();
+  rd.onload = () => res({ name: f.name, data: rd.result.split(",")[1] });
+  rd.onerror = () => rej(new Error(`could not read ${f.name}`));
+  rd.readAsDataURL(f);
+})));
+async function addFiles(list, dataSetId) {
+  if (!list.length) return;
+  const files = await readFiles(list);
+  if (dataSetId) return post("/api/pilot/add-files", { dataSetId, files });
+  return post("/api/pilot/new-set", { provider: pick, files });
+}
+async function view(dataSetId, pieceId, name) {
+  const v = $("viewer"); v.hidden = false;
+  v.innerHTML = `<h2>${esc(name)}</h2><p class="muted">Read back from the provider's Curio.</p><pre>Loading…</pre>`;
+  const t = await fetch(`/api/pilot/file/${dataSetId}/${pieceId}`).then((r) => r.text());
+  v.querySelector("pre").textContent = t; v.scrollIntoView({ behavior: "smooth" });
+}
+function currentSet(P) {
+  if (!P?.sets?.length) return null;
+  return P.sets.find((s) => String(s.dataSetId) === String(setPick[P.id])) ?? P.sets[P.sets.length - 1];
+}
+
+function render() {
+  const tx = (h, label) => h ? `<a href="${S.explorer}${h}" target="_blank" rel="noopener">${label}</a>` : "";
+  $("who").innerHTML = `You are the client <code>${esc(S.client)}</code> (the demo wallet: test tokens only) · ${Number(S.available).toFixed(3)} ${esc(S.token)} available in Filecoin Pay`;
+  const t = S.task;
+  $("task").innerHTML = t ? `<div class="task ${t.error ? "err" : ""}"><b>${t.done ? (t.error ? "Failed: " : "Done: ") : '<span class="spin"></span>'}${esc(t.title)}</b>
+    <ol>${t.steps.map((s) => `<li>${s.done ? "✓" : "…"} ${esc(s.text)}</li>`).join("")}</ol>${t.error ? `<div>${esc(t.error)}</div>` : ""}
+    ${t.done ? "" : '<div class="muted">Each step waits for a block on Filecoin Calibration (about 30–60 s).</div>'}</div>` : "";
+
+  // 1. provider
+  $("providers").innerHTML = S.providers.map((p) => `<button class="prov ${p.id === pick ? "on" : ""}" data-p="${esc(p.id)}" ${p.ready ? "" : "disabled"}>
+    <b>${esc(p.name)}</b><span class="muted">${esc(p.note ?? "")}</span><br>
+    ${p.ready ? `<span class="pill ${p.reachable ? "ok" : "bad"}">${p.reachable ? "Curio reachable" : "Curio not reachable"}</span>
+      <span class="pill off">${p.sets.length ? `${p.sets.length} data set${p.sets.length > 1 ? "s" : ""}` : "no data set yet"}</span>` : '<span class="pill off">not set up yet</span>'}</button>`).join("");
+  document.querySelectorAll(".prov").forEach((b) => (b.onclick = () => { pick = b.dataset.p; localStorage.setItem("pilot-provider", pick); checked = new Set(); render(); }));
+  const P = S.providers.find((p) => p.id === pick) ?? S.providers[0];
+  const set = currentSet(P);
+
+  // 2. data set
+  const files = Object.entries(set?.files ?? {}).sort((a, b) => Number(a[0]) - Number(b[0]));
+  const picker = `<div class="sets">
+    <span class="muted">Data set:</span>
+    ${P.sets.length ? `<select id="setsel">${P.sets.map((x) => `<option value="${x.dataSetId}" ${x.dataSetId === set?.dataSetId ? "selected" : ""}>#${x.dataSetId} — ${esc(x.label ?? "data set")} (${Object.keys(x.files ?? {}).length} pieces)</option>`).join("")}</select>` : ""}
+    <button class="b" id="newset" ${busy() || !P.ready ? "disabled" : ""}>New data set…</button></div>`;
+  $("setcard").innerHTML = `<h2>2. Your data at ${esc(P.name)}</h2>` + picker + (!set
+    ? `<p class="muted">You have no data set with this provider yet. A data set is created together with its first files: either the eight synthetic
+       financial documents (loan agreements, KYC forms, invoices, trade confirmations, all with fake people and accounts), or files you drop here.</p>
+       <div class="drop" id="drop">Drop files here to create a data set with them</div>
+       <div class="row" style="margin-top:12px"><button class="b primary" id="samples" ${busy() || !P.ready ? "disabled" : ""}>Create one with the sample documents</button></div>`
+    : `<p class="muted">Data set #${set.dataSetId}: ${files.length} pieces, stored and proven by the provider. Click a name to read a file back from the provider.
+       Tick files and remove them: you sign, the provider submits it, and PDP drops them at its next proving period.</p>
+       <div class="tw"><table><thead><tr><th class="pick"></th><th>Piece</th><th>File</th><th>What</th></tr></thead><tbody>${files.map(([id, f]) =>
+       `<tr><td class="pick">${f.removing ? "" : `<input type="checkbox" data-id="${id}" ${checked.has(id) ? "checked" : ""}>`}</td>
+         <td>#${id}</td><td><a onclick="view('${set.dataSetId}','${id}','${esc(f.name)}')">${esc(f.name)}</a></td>
+         <td>${f.kind === "output" ? '<span class="pill paid">job result</span>' : "your file"}${f.removable ? ' <span class="pill late">the provider may remove this</span>' : ""}${f.removing ? ' <span class="pill expired">removal scheduled</span>' : ""}</td></tr>`).join("")}</tbody></table></div>
+       <div class="row" style="margin-top:12px">
+         <label class="b">Add files<input type="file" hidden multiple id="picker" ${busy() ? "disabled" : ""}></label>
+         <button class="b" id="rm" ${busy() || !checked.size ? "disabled" : ""}>Remove ${checked.size || ""} selected</button>
+         <span class="muted">Text files work with the jobs below.</span></div>
+       <div class="drop" id="drop" style="margin-top:12px">Drop files here to add them to data set #${set.dataSetId}</div>`);
+
+  const sel = $("setsel");
+  if (sel) sel.onchange = (e) => { setPick[P.id] = e.target.value; localStorage.setItem("pilot-sets", JSON.stringify(setPick)); checked = new Set(); render(); };
+  $("newset").onclick = () => { $("newsetcard").hidden = !$("newsetcard").hidden; renderNewSet(P); };
+  if ($("samples")) $("samples").onclick = () => post("/api/pilot/new-set", { provider: P.id });
+  if ($("picker")) $("picker").onchange = (e) => addFiles(e.target.files, set?.dataSetId);
+  if ($("rm")) $("rm").onclick = () => {
+    if (!confirm(`Remove ${checked.size} file(s) from data set #${set.dataSetId}? PDP drops them at the provider's next proving period. This cannot be undone.`)) return;
+    post("/api/pilot/remove-files", { dataSetId: set.dataSetId, pieceIds: [...checked] });
+    checked = new Set();
+  };
+  document.querySelectorAll('input[type=checkbox][data-id]').forEach((b) => (b.onchange = () => {
+    b.checked ? checked.add(b.dataset.id) : checked.delete(b.dataset.id); render();
+  }));
+  const drop = $("drop");
+  if (drop) {
+    drop.ondragover = (e) => { e.preventDefault(); drop.classList.add("over"); };
+    drop.ondragleave = () => drop.classList.remove("over");
+    drop.ondrop = (e) => { e.preventDefault(); drop.classList.remove("over"); if (!busy()) addFiles(e.dataTransfer.files, set?.dataSetId); };
+  }
+  if ($("newsetcard").hidden === false) renderNewSet(P);
+
+  // 3. order
+  jobType = jobType ?? S.jobTypes[0]?.type;
+  $("ordercard").innerHTML = `<h2>3. Order a job from ${esc(P.name)}</h2>
+    <p class="muted">Over data set ${set ? `#${set.dataSetId}` : "— none yet"}. The price is put on hold in Filecoin Pay. The provider runs the program next to your
+    files, adds the results to your data set, and is paid only if it does so before the deadline (about 20 minutes).</p>
+    <div class="row"><select id="jt">${S.jobTypes.map((j) => `<option value="${esc(j.type)}" ${j.type === jobType ? "selected" : ""}>${esc(j.name)} — ${esc(j.price)} ${esc(S.token)}</option>`).join("")}</select>
+    <select id="pol">${(S.policies ?? []).map((x) => `<option value="${esc(x.id)}" ${x.id === policy ? "selected" : ""}>${esc(x.label)}</option>`).join("")}</select>
+    <button class="b primary" id="orderbtn" ${busy() || !set ? "disabled" : ""}>Order</button></div>
+    <p class="muted" style="margin:8px 0 0">${policy === "replace-inputs"
+      ? "After delivery the provider may remove the files this job read, and nothing else. Use it to keep only the redacted copies. This cannot be undone."
+      : policy === "replace-previous" ? "After delivery the provider may remove the results of earlier jobs, so only the newest one stays."
+      : "Nothing is ever removed from your data set."}</p>`;
+  $("jt").onchange = (e) => (jobType = e.target.value);
+  $("pol").onchange = (e) => { policy = e.target.value; render(); };
+  $("orderbtn").onclick = () => {
+    if (policy !== "keep" && !confirm("The provider will be allowed to remove those files from your data set after it delivers. This cannot be undone. Continue?")) return;
+    post("/api/pilot/order", { dataSetId: set.dataSetId, type: jobType, policy });
+  };
+
+  // jobs
+  const status = { waiting: "waiting for the provider", paid: "delivered and paid", late: "late: deadline passed", expired: "refunded" };
+  const left = (j) => {
+    if (j.status !== "waiting" || !S.block || !j.deadline) return "";
+    const blocks = Number(j.deadline) - Number(S.block);
+    return blocks > 0 ? `<div class="count">${blocks} blocks left (~${Math.round(blocks / 2)} min)</div>` : "";
+  };
+  $("jobs").innerHTML = S.jobs.map((j) => `<tr><td>#${esc(j.id)} ${esc(j.name)}<br><span class="muted">${j.inputs} files · ${esc(j.price)} ${esc(S.token)} · data set #${esc(j.dataSetId)}</span></td>
+    <td>${esc(S.providers.find((p) => p.id === j.provider)?.name ?? j.provider)}</td>
+    <td><span class="pill ${esc(j.status)}">${esc(status[j.status] ?? j.status ?? "…")}</span>${left(j)}</td>
+    <td>${(j.outputs ?? []).map((o) => `<a onclick="view('${esc(j.dataSetId)}','${o.pieceId}','${esc(o.name)} (job #${esc(j.id)})')">${esc(o.name)}</a> <span class="muted">#${o.pieceId}</span>`).join("<br>")}</td>
+    <td>${[tx(j.postTx, "ordered"), tx(j.paidTx, "paid"), tx(j.expireTx, "refunded")].filter(Boolean).join(" · ")}
+      ${j.status === "late" ? `<div><button class="b" onclick="post('/api/pilot/expire',{jobId:'${esc(j.id)}'})" ${busy() ? "disabled" : ""}>Get my money back</button></div>` : ""}</td></tr>`).join("")
+    || `<tr><td colspan="5" class="muted">No jobs ordered from this console yet.</td></tr>`;
+}
+
+function renderNewSet(P) {
+  const c = $("newsetcard");
+  c.innerHTML = `<h2>New data set with ${esc(P.name)}</h2>
+    <p class="muted">A data set is created together with its first files, in one signature. You can hold several with the same provider:
+    one per project, or a throwaway one for trying jobs that replace files.</p>
+    <div class="drop" id="drop2">Drop files here to create a data set with them</div>
+    <div class="row" style="margin-top:12px">
+      <label class="b">Choose files<input type="file" hidden multiple id="picker2" ${busy() ? "disabled" : ""}></label>
+      <button class="b" id="samples2" ${busy() ? "disabled" : ""}>Use the sample documents instead</button>
+      <button class="b" id="cancel2">Cancel</button></div>`;
+  $("picker2").onchange = (e) => { c.hidden = true; addFiles(e.target.files); };
+  $("samples2").onclick = () => { c.hidden = true; post("/api/pilot/new-set", { provider: P.id }); };
+  $("cancel2").onclick = () => { c.hidden = true; render(); };
+  const d = $("drop2");
+  d.ondragover = (e) => { e.preventDefault(); d.classList.add("over"); };
+  d.ondragleave = () => d.classList.remove("over");
+  d.ondrop = (e) => { e.preventDefault(); c.hidden = true; if (!busy()) addFiles(e.dataTransfer.files); };
+}
+
+async function refresh() {
+  try { S = await fetch("/api/pilot/state").then((r) => r.json()); if (S.error) throw new Error(S.error); render(); }
+  catch (e) { $("who").textContent = `The console is not available: ${e.message}`; }
+}
+refresh(); setInterval(refresh, 6000);
+</script>
+</body>
+</html>

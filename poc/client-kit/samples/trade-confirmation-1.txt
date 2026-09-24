@@ -1,0 +1,10 @@
+TRADE CONFIRMATION TC-000001
+
+Client: Lukas Rossi, High Street 25, 28013 Madrid
+Trade date: 18/09/2026   Settlement: T+2
+Instrument: tokenized fund units, Delta Receivables Pool
+Side: SELL   Quantity: 2590   Price: 119.77 EUR
+On-chain settlement address: 0x1ca6ed3b8c9b1d09a939da0a61353314b90d4bdc
+Cash leg: ING (INGBNL2AXXX), IBAN NL39MHYN3228088642
+
+Please contact your relationship manager Lukas Rossi at +34 604876452 with any questions.

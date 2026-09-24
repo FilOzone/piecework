@@ -1,0 +1,13 @@
+{
+  "name": "piecework-client-kit",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Buy compute from the storage provider that holds your data, on Filecoin.",
+  "scripts": { "start": "node console.mjs --config client.config.json" },
+  "dependencies": {
+    "@filoz/synapse-core": "^0.9.0",
+    "multiformats": "^13.3.6",
+    "viem": "^2.56.8"
+  }
+}

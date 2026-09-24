@@ -7,3 +7,5 @@ integration/out/
 integration/cache/
 poc/provider-kit/node_modules/
 poc/provider-kit/kit.config.json
+poc/client-kit/node_modules/
+poc/client-kit/client.config.json

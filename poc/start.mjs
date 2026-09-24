@@ -33,7 +33,7 @@ import { foundry, filecoinCalibration } from "viem/chains";
 import { privateKeyToAccount, generatePrivateKey } from "viem/accounts";
 import * as FOC from "./foc.mjs";
 import { CID } from "multiformats/cid";
-import { createPilot } from "./pilot.mjs";
+import { createPilot } from "./client-kit/pilot.mjs";
 
 const execFile = promisify(execFileCb);
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -655,6 +655,21 @@ async function curioApi(req, res, url) {
     const st = adds.get(m[1]);
     return st ? reply(200, st) : reply(404, { error: "unknown transaction" });
   }
+  // The client removing its own pieces: it signs, we submit to PDPVerifier, exactly as Curio does.
+  // PDP drops them at the next proving period; Warm Storage asks the data set's authorizer first.
+  if (req.method === "DELETE" && (m = url.pathname.match(/^\/pdp\/data-sets\/(\d+)\/pieces\/\d+$/))) {
+    const dataSetId = Number(m[1]);
+    const owner = Object.keys(ST.clients).find((a) => ST.clients[a].dataSetId === dataSetId) ?? extraSets[dataSetId]?.payer;
+    if (!owner) return reply(404, { error: "data set not held here" });
+    const { pieceIds, extraData } = JSON.parse(await body());
+    const r = await send(providerAcct, C.pdp, ABI.PDPVerifier, "schedulePieceDeletions",
+      [BigInt(dataSetId), pieceIds.map((x) => BigInt(x)), extraData], "remove the client's pieces");
+    const c = extraSets[dataSetId] ?? ST.clients[owner];
+    for (const id of pieceIds) if (c?.pieces?.[id]) c.pieces[id].removing = true;
+    saveState();
+    say(`curio api: the client asked to remove ${pieceIds.length} piece(s) from data set #${dataSetId}; PDP drops them at the next proving period.`);
+    return reply(200, { txHash: r.tx });
+  }
   return false;
 }
 
@@ -666,16 +681,17 @@ async function pilotApi(req, res, url, json) {
   try {
     let m;
     if (req.method === "GET" && url.pathname === "/api/pilot/state") return json(200, await pilot.state());
-    if (req.method === "GET" && (m = url.pathname.match(/^\/api\/pilot\/file\/(\w+)\/(\d+)$/))) {
+    if (req.method === "GET" && (m = url.pathname.match(/^\/api\/pilot\/file\/(\d+)\/(\d+)$/))) {
       const b = await pilot.file(m[1], m[2]);
       res.writeHead(200, { "content-type": "text/plain; charset=utf-8" }); return res.end(b);
     }
     if (req.method === "POST") {
       const chunks = []; for await (const ch of req) chunks.push(ch);
       const a = JSON.parse(Buffer.concat(chunks).toString() || "{}");
-      if (url.pathname === "/api/pilot/store") { await pilot.store(a.provider); return json(200, { ok: true }); }
-      if (url.pathname === "/api/pilot/upload") { await pilot.uploadFile(a.provider, a.name, a.data); return json(200, { ok: true }); }
-      if (url.pathname === "/api/pilot/order") { await pilot.order(a.provider, a.type, a.policy); return json(200, { ok: true }); }
+      if (url.pathname === "/api/pilot/new-set") { await pilot.createSet(a.provider, { files: a.files, label: a.label }); return json(200, { ok: true }); }
+      if (url.pathname === "/api/pilot/add-files") { await pilot.addFiles(a.dataSetId, a.files); return json(200, { ok: true }); }
+      if (url.pathname === "/api/pilot/remove-files") { await pilot.removeFiles(a.dataSetId, a.pieceIds); return json(200, { ok: true }); }
+      if (url.pathname === "/api/pilot/order") { await pilot.order(a.dataSetId, a.type, a.policy); return json(200, { ok: true }); }
       if (url.pathname === "/api/pilot/expire") { await pilot.expire(a.jobId); return json(200, { ok: true }); }
     }
     return json(404, { error: "unknown action" });
@@ -883,14 +899,16 @@ function serve() {
           return json(404, { error: "unknown action" });
         } catch (e) { return json(400, { ok: false, error: reason(e) }); }
       }
-      const file = path.join(app, url.pathname === "/" ? "index.html" : path.normalize(url.pathname));
-      if (file.startsWith(app) && fs.existsSync(file) && fs.statSync(file).isFile()) {
+      // the client console is the client kit's page, served from there so there is only one copy of it
+      const file = url.pathname === "/client.html" ? path.join(HERE, "client-kit", "client.html")
+        : path.join(app, url.pathname === "/" ? "index.html" : path.normalize(url.pathname));
+      if ((file.startsWith(app) || url.pathname === "/client.html") && fs.existsSync(file) && fs.statSync(file).isFile()) {
         const type = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".svg": "image/svg+xml" }[path.extname(file)] ?? "application/octet-stream";
         res.writeHead(200, { "content-type": `${type}; charset=utf-8` });
         return res.end(fs.readFileSync(file));
       }
       res.writeHead(404); res.end("not found");
-    } catch (e) { json(500, { error: reason(e) }); }
+    } catch (e) { say("http error:", req.method, req.url, "-", reason(e)); json(500, { error: reason(e) }); }
   }).listen(WEB_PORT, "127.0.0.1");
 }
 
