@@ -7,13 +7,6 @@
     "note": "The demo program playing a Curio provider, with the provider kit running the jobs."
   },
   {
-    "id": "laptop-test",
-    "name": "Luca's laptop (second, throwaway data set)",
-    "address": "0xA0C38545600fe067D79Cac5215049eEb4BF387d0",
-    "curioUrl": "http://localhost:8080",
-    "note": "Same provider, a separate data set for trying things that change files."
-  },
-  {
     "id": "james",
     "name": "James Bluett (ezpdpz-calib)",
     "address": "0xa3971A7234a3379A1813d9867B531e7EeB20ae07",

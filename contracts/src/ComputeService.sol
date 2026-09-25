@@ -138,6 +138,7 @@ contract ComputeService is IDataSetAuthorizer {
 
     event JobPosted(uint256 indexed jobId, address indexed client, address indexed provider, uint256 railId, bytes32 imageDigest, uint256 dataSetId, uint256[] inputPieceIds, uint256 price, uint256 deadline);
     event RemovalAllowed(uint256 indexed jobId, uint256 dataSetId, address indexed provider, uint256[] pieceIds);
+    event RemovalRevoked(uint256 indexed dataSetId, address indexed provider, uint256[] pieceIds);
     event JobPaid(uint256 indexed jobId, uint256[] outputPieceIds, uint256 epoch);
     event JobExpired(uint256 indexed jobId);
 
@@ -276,6 +277,16 @@ contract ComputeService is IDataSetAuthorizer {
         payments.modifyRailPayment(j.railId, 0, j.price);
         payments.terminateRail(j.railId);
         emit JobPaid(jobId, outputPieceIds, block.number);
+    }
+
+    /// @notice The client takes back a removal permission it granted, before the provider has used it.
+    ///         A permission is only ever granted by the client, when a job it ordered delivers; this lets the
+    ///         client change its mind after seeing the result, for as long as the pieces are still there.
+    ///         Permissions already used are gone anyway, so revoking them does nothing.
+    function revokeRemoval(uint256 dataSetId, address provider, uint256[] calldata pieceIds) external {
+        if (dataSets.getDataSet(dataSetId).payer != msg.sender) revert NotDataSetOwner(dataSetId, msg.sender);
+        for (uint256 i = 0; i < pieceIds.length; i++) mayRemove[dataSetId][provider][pieceIds[i]] = false;
+        emit RemovalRevoked(dataSetId, provider, pieceIds);
     }
 
     /// @notice Anyone, after the deadline with no delivery: terminates the rail and releases the escrow

@@ -1,0 +1,12 @@
+{
+  "workspace:v1": {
+    "name": "A private workspace next to my data",
+    "dockerImage": "alpine:3.20",
+    "command": [
+      "sleep",
+      "infinity"
+    ],
+    "rate": "0.002",
+    "note": "A container with your files mounted read-only at /data. Nothing leaves the provider; you pay for every epoch it runs, and closing it stops the charge."
+  }
+}

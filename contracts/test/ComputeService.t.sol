@@ -416,4 +416,68 @@ contract ComputeServiceTest is Test {
             "not a piece the client did not list"
         );
     }
+
+    /// The client can take a permission back, as long as the provider has not used it.
+    function test_removals_clientCanRevoke() public {
+        uint256 id = postJobRemoving(one(0));
+        uint256[] memory outs = addOutput();
+        vm.prank(PROVIDER);
+        cs.commitOutputs(id, outs);
+        assertTrue(cs.mayRemove(dataSetId, PROVIDER, 0), "granted on delivery");
+
+        vm.prank(CLIENT);
+        cs.revokeRemoval(dataSetId, PROVIDER, one(0));
+        assertFalse(cs.mayRemove(dataSetId, PROVIDER, 0), "taken back");
+    }
+
+    /// Only the client who pays for the data set can revoke.
+    function test_removals_onlyTheClientRevokes() public {
+        uint256 id = postJobRemoving(one(0));
+        uint256[] memory outs = addOutput();
+        vm.prank(PROVIDER);
+        cs.commitOutputs(id, outs);
+
+        vm.prank(STRANGER);
+        vm.expectRevert(abi.encodeWithSelector(ComputeService.NotDataSetOwner.selector, dataSetId, STRANGER));
+        cs.revokeRemoval(dataSetId, PROVIDER, one(0));
+        assertTrue(cs.mayRemove(dataSetId, PROVIDER, 0), "still granted");
+    }
+
+    /// The client removing its own files needs no grant at all: it pays for the data set, so its own signature
+    /// is enough, for any piece, as often as it likes. This is the path the client console uses.
+    function test_removals_clientSignsForItsOwnFiles() public {
+        uint256 pk = 0xC11E27;
+        address client = vm.addr(pk);
+        vm.startPrank(PROVIDER);
+        uint256 ds = pdp.createDataSet(client);
+        pdp.addPiece(ds, "notes.txt", "baga-1");
+        pdp.addPiece(ds, "papers.pdf", "baga-2");
+        vm.stopPrank();
+
+        bytes32 digest = keccak256("the client's own schedule-removals digest");
+        (uint8 v, bytes32 r, bytes32 sSig) = vm.sign(pk, digest);
+        bytes memory sig = abi.encodePacked(r, sSig, v);
+
+        // no job, no delivery, nothing granted to anyone
+        assertFalse(cs.mayRemove(ds, PROVIDER, 0), "the provider may not");
+        assertTrue(
+            cs.isAuthorized(ds, client, cs.SCHEDULE_PIECE_REMOVALS_TYPEHASH(), digest, sig, abi.encode(uint256(1), one(0))),
+            "the client may"
+        );
+        assertTrue(
+            cs.isAuthorized(ds, client, cs.SCHEDULE_PIECE_REMOVALS_TYPEHASH(), digest, sig, abi.encode(uint256(1), one(1))),
+            "any piece of its own"
+        );
+        assertTrue(
+            cs.isAuthorized(ds, client, cs.SCHEDULE_PIECE_REMOVALS_TYPEHASH(), digest, sig, abi.encode(uint256(1), one(0))),
+            "as often as it likes"
+        );
+
+        // somebody else's signature is still refused
+        (uint8 v2, bytes32 r2, bytes32 s2) = vm.sign(uint256(0xBAD), digest);
+        assertFalse(
+            cs.isAuthorized(ds, client, cs.SCHEDULE_PIECE_REMOVALS_TYPEHASH(), digest, abi.encodePacked(r2, s2, v2), abi.encode(uint256(1), one(0))),
+            "a stranger may not"
+        );
+    }
 }

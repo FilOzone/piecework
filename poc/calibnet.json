@@ -1,9 +1,9 @@
 {
   "network": "calibnet",
   "chainId": 314159,
-  "computeService": "0x9F3011BE4bd383f85f05816611bF7Ea080195505",
-  "tx": "0xd4eb10227d78a7b6edadbd9e167ff84531d62195c121cbd65f2292d9a1514a0c",
-  "block": 4093570,
+  "computeService": "0x204D9872448B0404D39C657aAEBffb17767EDdb9",
+  "tx": "0x7b277d7d6fa660adea0fdf8fee06ea2e2892a41031d5dca866f8db1a6d621024",
+  "block": 4097816,
   "constructorArgs": [
     "0x09a0fDc2723fAd1A7b8e3e00eE5DF73841df55a0",
     "0xb3042734b608a1B16e9e86B374A3f3e389B4cDf0",
@@ -11,8 +11,18 @@
     "0x518411c2062E119Aaf7A8B12A2eDf9a939347655",
     "0x1B68d64f01bAa42014B9774605867BF4eDC0320f"
   ],
-  "deployedAt": "2026-09-23T03:35:06.090650Z",
+  "deployedAt": "2026-09-24T14:41:39.171Z",
   "previous": [
+    {
+      "computeService": "0x2e19EDA823e5DA64BC004DEA1f863CffA1078B56",
+      "tx": "0xb3dace660eb61814aaf932976ee268f93c8808e95cecc54c22780ab41e774a50",
+      "deployedAt": "2026-09-24T14:35:34.787Z"
+    },
+    {
+      "computeService": "0x9F3011BE4bd383f85f05816611bF7Ea080195505",
+      "tx": "0xd4eb10227d78a7b6edadbd9e167ff84531d62195c121cbd65f2292d9a1514a0c",
+      "deployedAt": "2026-09-23T03:35:06.090650Z"
+    },
     {
       "computeService": "0x04347c64F010f256f529aC94BC8Fe7A81abDf45A",
       "tx": "0xb1be459e2358862adbbd0b4be060b25c47114051e39331eba4d11842a928a37b",

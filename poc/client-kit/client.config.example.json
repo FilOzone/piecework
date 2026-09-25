@@ -6,15 +6,17 @@
   ],
   "explorer": "https://filecoin-testnet.blockscout.com/tx/",
   "token": "USDFC",
-  "computeService": "0x9F3011BE4bd383f85f05816611bF7Ea080195505",
+  "computeService": "0x204D9872448B0404D39C657aAEBffb17767EDdb9",
   "contracts": {
     "usdfc": "0xb3042734b608a1B16e9e86B374A3f3e389B4cDf0",
     "payments": "0x09a0fDc2723fAd1A7b8e3e00eE5DF73841df55a0",
     "pdp": "0x85e366Cf9DD2c0aE37E963d9556F5f4718d6417C",
     "fwss": "0x02925630df557F957f70E112bA06e50965417CA0",
-    "view": "0x1B68d64f01bAa42014B9774605867BF4eDC0320f"
+    "view": "0x1B68d64f01bAa42014B9774605867BF4eDC0320f",
+    "computeService": "0x204D9872448B0404D39C657aAEBffb17767EDdb9"
   },
-  "clientKeyFile": "~/.piecework-client/client.key",
   "workDir": "~/.piecework-client",
-  "port": 8070
+  "port": 8070,
+  "signer": "browser",
+  "comment": "signer: \"browser\" uses the wallet in your browser (MetaMask). For \"keyfile\", set signer to \"keyfile\" and clientKeyFile to a file holding the key."
 }

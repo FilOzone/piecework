@@ -43,6 +43,10 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ABI = JSON.parse(fs.readFileSync(path.join(HERE, "abi.json"), "utf8"));
 const JOBS = JSON.parse(fs.readFileSync(path.join(HERE, "jobs.json"), "utf8"));
 const BY_DIGEST = Object.fromEntries(Object.keys(JOBS).map((name) => [keccak256(toHex(name)), name]));
+// Services sold by the epoch rather than by the job: the client opens a session, this kit starts the service
+// next to the client's data and says it is ready, which is when the meter starts.
+const SERVICES = fs.existsSync(path.join(HERE, "services.json")) ? JSON.parse(fs.readFileSync(path.join(HERE, "services.json"), "utf8")) : {};
+const SERVICE_BY_DIGEST = Object.fromEntries(Object.keys(SERVICES).map((name) => [keccak256(toHex(name)), name]));
 
 const arg = (k) => { const i = process.argv.indexOf(k); return i > 0 ? process.argv[i + 1] : undefined; };
 const cfg = JSON.parse(fs.readFileSync(arg("--config") ?? path.join(HERE, "kit.config.json"), "utf8"));
@@ -62,6 +66,13 @@ const WORK = (cfg.workDir ?? "~/.piecework-kit").replace(/^~/, os.homedir());
 const STATE = path.join(WORK, "state.json");
 fs.mkdirSync(WORK, { recursive: true });
 let state = fs.existsSync(STATE) ? JSON.parse(fs.readFileSync(STATE, "utf8")) : { lastBlock: 0, jobs: {} };
+// Job and session numbers start again from 1 in a new ComputeService, so what we remember about the old one
+// would hide the new work. Start clean whenever the contract we are pointed at changes.
+if (state.computeService && state.computeService !== cfg.contracts.computeService) {
+  console.log(`ComputeService changed to ${cfg.contracts.computeService}; forgetting the jobs and sessions of ${state.computeService}.`);
+  state = { lastBlock: 0, jobs: {}, sessions: {} };
+}
+state.computeService = cfg.contracts.computeService;
 const save = () => fs.writeFileSync(STATE, JSON.stringify(state, (k, v) => (typeof v === "bigint" ? v.toString() : v), 2));
 
 const read = (address, abi, functionName, args = []) => pub.readContract({ address, abi, functionName, args });
@@ -92,11 +103,14 @@ async function pieceNames(dataSetId) {
   const key = String(dataSetId);
   if (nameCache[key]) return nameCache[key];
   const head = Number(await pub.getBlockNumber());
-  const span = cfg.nameLookbackBlocks ?? 20000; // about a week on Calibration
+  // Public Calibration nodes refuse an eth_getLogs range of more than a few hundred blocks: ask in steps of 100.
+  // (With 2000 every request was refused and the client's file names were silently lost.)
+  const step = cfg.nameLookbackStep ?? 100;
+  const requests = cfg.nameLookbackRequests ?? 45;
   const names = {};
-  for (let to = head; to > head - span; to -= 2000) {
+  for (let to = head, n = 0; n < requests; to -= step, n++) {
     const logs = await pub.getContractEvents({ address: cfg.contracts.fwss, abi: ABI.FWSS, eventName: "PieceAdded",
-      args: { dataSetId }, fromBlock: BigInt(Math.max(0, to - 1999)), toBlock: BigInt(to) }).catch(() => []);
+      args: { dataSetId }, fromBlock: BigInt(Math.max(0, to - step + 1)), toBlock: BigInt(to) }).catch(() => []);
     for (const ev of logs) {
       const i = ev.args.keys.indexOf("name");
       if (i >= 0) names[String(ev.args.pieceId)] = ev.args.values[i];
@@ -200,6 +214,97 @@ async function removePieces(jobId, dataSetId, clientDataSetId, pieceIds) {
   say(`Job #${jobId}: the client asked to replace ${pieceIds.length} old file${pieceIds.length > 1 ? "s" : ""}; removal scheduled (tx ${r.transactionHash}). PDP removes them at my next proving period.`);
 }
 
+// ---------------------------------------------------------------- pay for time (sessions)
+//
+// The client opens a session on ComputeService naming a service and a rate per epoch. This kit starts the
+// service in a container with the client's files mounted read-only, then calls sessionReady, which is the
+// moment the rate starts. It collects what it has earned every so often (settleRail), and when either side
+// closes the session it shuts the container down. Closing stops the charge at that epoch.
+
+const container = (id) => `piecework-session-${id}`;
+const toSettle = new Set(Object.values(state.sessions ?? {}).filter((s) => !s.closed).map((s) => s.railId));
+
+async function startSession(ev) {
+  const { sessionId, client, dataSetId, imageDigest, rate, railId } = ev;
+  const key = String(sessionId);
+  if (state.sessions?.[key]) return;
+  const name = SERVICE_BY_DIGEST[imageDigest];
+  const spec = SERVICES[name];
+  if (!spec) return say(`Session #${sessionId}: I do not offer ${imageDigest.slice(0, 10)}…; not mine to run.`);
+  const s = await read(cfg.contracts.computeService, ABI.ComputeService, "sessions", [sessionId]);
+  if (Number(s[7]) !== 1) return; // not open any more
+  state.sessions ??= {};
+  const S = (state.sessions[key] = { id: key, name: spec.name, client, dataSetId: String(dataSetId), railId: String(railId),
+    rate: formatUnits(rate, 18), stage: "starting", since: new Date().toISOString() });
+  save();
+  say(`Session #${sessionId}: "${spec.name}" for ${client} over data set #${dataSetId}, ${formatUnits(rate, 18)} ${cfg.token ?? "USDFC"} per epoch.`);
+  const dir = path.join(WORK, `session-${sessionId}`);
+  fs.rmSync(dir, { recursive: true, force: true });
+  fs.mkdirSync(path.join(dir, "data"), { recursive: true });
+  try {
+    const names = await pieceNames(dataSetId).catch(() => ({}));
+    const next = Number(await read(cfg.contracts.pdp, ABI.PDPVerifier, "getNextPieceId", [dataSetId]));
+    let files = 0;
+    for (let id = 0; id < next; id++) { // everything of the client's that is still live in the data set
+      if (!(await read(cfg.contracts.pdp, ABI.PDPVerifier, "pieceLive", [dataSetId, BigInt(id)]))) continue;
+      const c = await read(cfg.contracts.pdp, ABI.PDPVerifier, "getPieceCid", [dataSetId, BigInt(id)]);
+      const given = names[String(id)];
+      const safe = given && /^[\w .()-]{1,80}$/.test(given) ? given : `piece-${id}`;
+      fs.writeFileSync(path.join(dir, "data", fs.existsSync(path.join(dir, "data", safe)) ? `${id}-${safe}` : safe),
+        await fetchPiece(CID.decode(hexToBytes(c.data)).toString()));
+      files++;
+    }
+    S.files = files;
+    await execFile("docker", ["run", "-d", "--rm", "--name", container(sessionId), "--network", "none",
+      "-v", `${dir}/data:/data:ro`, spec.dockerImage, ...(spec.command ?? ["sleep", "infinity"])], { maxBuffer: 1 << 26 });
+    say(`Session #${sessionId}: service running with ${files} of the client's files at /data. Telling the contract it is ready.`);
+    const r = await send(cfg.contracts.computeService, ABI.ComputeService, "sessionReady", [sessionId]);
+    S.stage = "running"; S.readyTx = r.transactionHash; S.readyBlock = Number(r.blockNumber); save();
+    toSettle.add(String(railId));
+    say(`Session #${sessionId}: the meter starts at block ${r.blockNumber} (tx ${r.transactionHash}).`);
+  } catch (e) {
+    S.stage = "failed"; S.error = e.shortMessage ?? e.message; save();
+    say(`Session #${sessionId}: could not start (${S.error}). Closing it so the client is not charged.`);
+    await stopSessionContainer(sessionId);
+    await send(cfg.contracts.computeService, ABI.ComputeService, "closeSession", [sessionId]).catch(() => {});
+  }
+}
+
+async function stopSessionContainer(id) { try { await execFile("docker", ["rm", "-f", container(id)]); } catch { /* already gone */ } }
+
+async function onSessionClosed(ev) {
+  const key = String(ev.sessionId);
+  const S = state.sessions?.[key];
+  if (!S || S.closed) return;
+  S.closed = new Date().toISOString();
+  S.stage = ev.rateStoppedAtClose ? "closed" : "closed (client was short of funds)";
+  save();
+  await stopSessionContainer(ev.sessionId);
+  say(`Session #${ev.sessionId}: closed by ${ev.closedBy === account.address ? "me" : "the client"}; service shut down`
+    + (ev.rateStoppedAtClose ? " and the charge stopped at this epoch." : "; the client was underfunded, so the rail runs to its safety margin."));
+  await settle(true);
+}
+
+// Collect what the running sessions have earned so far. Filecoin Pay pays out to this provider's account.
+let lastSettle = 0;
+async function settle(force = false) {
+  if (!toSettle.size) return;
+  const now = Date.now();
+  if (!force && now - lastSettle < (cfg.settleEveryMs ?? 10 * 60_000)) return;
+  lastSettle = now;
+  const block = await pub.getBlockNumber();
+  for (const railId of [...toSettle]) {
+    try {
+      const before = (await read(cfg.contracts.payments, ABI.FilecoinPayV1, "accounts", [cfg.contracts.usdfc, account.address]))[0];
+      const r = await send(cfg.contracts.payments, ABI.FilecoinPayV1, "settleRail", [BigInt(railId), block]);
+      const after = (await read(cfg.contracts.payments, ABI.FilecoinPayV1, "accounts", [cfg.contracts.usdfc, account.address]))[0];
+      if (after > before) say(`Collected ${formatUnits(after - before, 18)} ${cfg.token ?? "USDFC"} from rail #${railId} (tx ${r.transactionHash}).`);
+    } catch { /* nothing to collect yet */ }
+    const done = await read(cfg.contracts.payments, ABI.FilecoinPayV1, "getRail", [BigInt(railId)]).then(() => false, () => true);
+    if (done) toSettle.delete(railId);
+  }
+}
+
 // ---------------------------------------------------------------- health and dashboard
 
 const health = { checkedAt: null, curio: null, gas: null, images: {}, block: null };
@@ -266,6 +371,17 @@ async function main() {
       const head = Number(await pub.getBlockNumber());
       for (let from = state.lastBlock + 1; from <= head; from += 1000) {
         const to = Math.min(head, from + 999);
+        for (const l of await pub.getContractEvents({ address: cfg.contracts.computeService, abi: ABI.ComputeService,
+          eventName: "SessionOpened", fromBlock: BigInt(from), toBlock: BigInt(to) })) {
+          if (getAddress(l.args.provider) !== account.address || busy.has(`s${l.args.sessionId}`)) continue;
+          busy.add(`s${l.args.sessionId}`);
+          startSession(l.args).catch((e) => say(`Session #${l.args.sessionId} failed: ${e.shortMessage ?? e.message}`))
+            .finally(() => busy.delete(`s${l.args.sessionId}`));
+        }
+        for (const l of await pub.getContractEvents({ address: cfg.contracts.computeService, abi: ABI.ComputeService,
+          eventName: "SessionClosed", fromBlock: BigInt(from), toBlock: BigInt(to) })) {
+          await onSessionClosed(l.args).catch((e) => say(`Session #${l.args.sessionId}: ${e.shortMessage ?? e.message}`));
+        }
         const logs = await pub.getContractEvents({ address: cfg.contracts.computeService, abi: ABI.ComputeService,
           eventName: "JobPosted", fromBlock: BigInt(from), toBlock: BigInt(to) });
         for (const l of logs) {
@@ -281,8 +397,13 @@ async function main() {
         }
         state.lastBlock = to; save();
       }
+      await settle().catch(() => {});
     } catch (e) { say(`(chain read failed, retrying: ${e.shortMessage ?? e.message})`); }
     await sleep(cfg.pollMs ?? 10_000);
   }
 }
+process.on("SIGINT", async () => { // leave nothing running that the client is still paying for
+  for (const [id, S] of Object.entries(state.sessions ?? {})) if (!S.closed) await stopSessionContainer(id);
+  process.exit(0);
+});
 main().catch((e) => { console.error("Could not start:", e.shortMessage ?? e.message); process.exit(1); });

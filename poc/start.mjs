@@ -34,6 +34,7 @@ import { privateKeyToAccount, generatePrivateKey } from "viem/accounts";
 import * as FOC from "./foc.mjs";
 import { CID } from "multiformats/cid";
 import { createPilot } from "./client-kit/pilot.mjs";
+import { pilotRequest } from "./client-kit/api.mjs";
 
 const execFile = promisify(execFileCb);
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -368,6 +369,8 @@ const container = (id) => `focs-${NETWORK}-session-${id}`;
 
 async function onSessionOpened({ sessionId, client, provider, railId, imageDigest }) {
   if (provider !== A.provider) return;
+  // with --external-kit the provider kit runs the services too, and two programs must not both answer
+  if (EXTERNAL_KIT) return plog(`Session #${sessionId} requested; the provider kit starts the service and bills for it.`);
   sessionInfo[sessionId] = { client, railId };
   plog(`Session #${sessionId} requested (${IMAGE_BY_DIGEST[imageDigest] ?? "unknown program"}). Starting the service next to your data…`);
   try {
@@ -679,22 +682,7 @@ let pilot = null;
 async function pilotApi(req, res, url, json) {
   if (!pilot) return json(503, { error: "the client console needs calibnet mode and the demo wallet" });
   try {
-    let m;
-    if (req.method === "GET" && url.pathname === "/api/pilot/state") return json(200, await pilot.state());
-    if (req.method === "GET" && (m = url.pathname.match(/^\/api\/pilot\/file\/(\d+)\/(\d+)$/))) {
-      const b = await pilot.file(m[1], m[2]);
-      res.writeHead(200, { "content-type": "text/plain; charset=utf-8" }); return res.end(b);
-    }
-    if (req.method === "POST") {
-      const chunks = []; for await (const ch of req) chunks.push(ch);
-      const a = JSON.parse(Buffer.concat(chunks).toString() || "{}");
-      if (url.pathname === "/api/pilot/new-set") { await pilot.createSet(a.provider, { files: a.files, label: a.label }); return json(200, { ok: true }); }
-      if (url.pathname === "/api/pilot/add-files") { await pilot.addFiles(a.dataSetId, a.files); return json(200, { ok: true }); }
-      if (url.pathname === "/api/pilot/remove-files") { await pilot.removeFiles(a.dataSetId, a.pieceIds); return json(200, { ok: true }); }
-      if (url.pathname === "/api/pilot/order") { await pilot.order(a.dataSetId, a.type, a.policy); return json(200, { ok: true }); }
-      if (url.pathname === "/api/pilot/expire") { await pilot.expire(a.jobId); return json(200, { ok: true }); }
-    }
-    return json(404, { error: "unknown action" });
+    return await pilotRequest({ pilot, req, res, url, json, signer: { address: demoAcct?.address } });
   } catch (e) { return json(400, { error: reason(e) }); }
 }
 
@@ -975,8 +963,13 @@ async function calibnetCommand() {
     say("Deploy transaction sent:", hash, "— waiting for confirmation (about a minute)…");
     const r = await pub.waitForTransactionReceipt({ hash, timeout: 600_000 });
     const computeService = getAddress(r.contractAddress);
+    const was = loadJSON(DEPLOY_FILE, {}); // keep the addresses we have used before, so old transactions stay readable
+    const previous = was.computeService
+      ? [{ computeService: was.computeService, tx: was.tx, deployedAt: was.deployedAt, note: process.argv[process.argv.indexOf("--deploy") + 1]?.startsWith("--") === false ? process.argv[process.argv.indexOf("--deploy") + 1] : undefined },
+        ...(was.previous ?? [])]
+      : (was.previous ?? []);
     fs.writeFileSync(DEPLOY_FILE, JSON.stringify({ network: "calibnet", chainId: 314159, computeService, tx: hash,
-      block: Number(r.blockNumber), constructorArgs: args, deployedAt: new Date().toISOString() }, null, 2) + "\n");
+      block: Number(r.blockNumber), constructorArgs: args, deployedAt: new Date().toISOString(), previous }, null, 2) + "\n");
     return say("ComputeService deployed at", computeService, "(written to poc/calibnet.json)");
   }
   if (process.argv.includes("--add-demo-files")) { // new sample files into the demo client's existing data set
@@ -1035,7 +1028,10 @@ async function main() {
     plog(`I hold your data set #${cl().dataSetId} on FWSS (${(await listFiles()).length} files; storage paid through Filecoin Pay; proofs of possession not run yet: I do not run a prover).`, r);
   }
   if (CAL) await recoverFromChain();
-  if (CAL && demoAcct) pilot = createPilot({ HERE, RUN, NET, C, ABI, pub, demoAcct, say, demoDataSet: () => {
+  // the demo program signs for the console with its own demo wallet (the client kit can use a browser wallet instead)
+  const pilotSigner = demoAcct && { mode: "keyfile", address: demoAcct.address, account: () => demoAcct,
+    submit: (request) => demoWallet.writeContract({ ...request, account: demoAcct, chain: NET.chain }) };
+  if (CAL && demoAcct) pilot = createPilot({ HERE, RUN, NET, C, ABI, pub, signer: pilotSigner, say, demoDataSet: () => {
     const c = cl(demoAcct.address);
     return c && { dataSetId: c.dataSetId, files: Object.fromEntries(Object.entries(c.pieces).map(([id, p]) => [id, { name: p.name, cid: p.cid, kind: p.kind }])) };
   } });

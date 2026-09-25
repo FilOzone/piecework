@@ -2,11 +2,10 @@
 # One-command setup for the PieceWork client kit: your own console for buying compute
 # from the storage provider that holds your data.
 #
-#   ./setup.sh                       asks for the key file to use
-#   ./setup.sh --key ~/.piecework-client/client.key --start
+#   ./setup.sh                       signs with the wallet in your browser (MetaMask)
+#   ./setup.sh --key ~/.piecework-client/client.key --start     signs with a key file instead
 #
 # It checks Node, installs the dependencies, writes client.config.json, and (with --start) opens the console.
-# Nothing leaves your machine: the key path is only written into the config.
 set -e
 cd "$(dirname "$0")"
 
@@ -15,7 +14,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --key) KEY="$2"; shift 2 ;;
     --start) START=1; shift ;;
-    -h|--help) sed -n '2,9p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,8p' "$0"; exit 0 ;;
     *) echo "unknown option: $1"; exit 1 ;;
   esac
 done
@@ -33,29 +32,30 @@ echo "Node $(node -p 'process.versions.node'), npm $(npm -v) - fine."
 say "Installing the kit's dependencies (about a minute)"
 npm install --silent --no-audit --no-fund
 
-if [ -z "$KEY" ]; then
-  printf '\nPath to a file holding the private key of the wallet you want to pay with.\n'
-  printf 'It stays on this machine. On Calibration this should be a test wallet with test tFIL and USDFC.\n'
-  printf 'Path [~/.piecework-client/client.key]: '
-  read -r KEY
-  [ -n "$KEY" ] || KEY="~/.piecework-client/client.key"
-fi
-KEY_EXPANDED=$(printf '%s' "$KEY" | sed "s|^~|$HOME|")
-[ -f "$KEY_EXPANDED" ] || fail "No file at $KEY_EXPANDED. Put the key there (one line, 0x...), then run this again."
-chmod 600 "$KEY_EXPANDED" 2>/dev/null || true
-
 say "Writing client.config.json"
-node -e '
+if [ -n "$KEY" ]; then
+  KEY_EXPANDED=$(printf '%s' "$KEY" | sed "s|^~|$HOME|")
+  [ -f "$KEY_EXPANDED" ] || fail "No file at $KEY_EXPANDED. Put the key there (one line, 0x...), then run this again."
+  chmod 600 "$KEY_EXPANDED" 2>/dev/null || true
+  node -e '
 const fs = require("fs");
-const example = JSON.parse(fs.readFileSync("client.config.example.json", "utf8"));
-example.clientKeyFile = process.argv[1];
-fs.writeFileSync("client.config.json", JSON.stringify(example, null, 2) + "\n");
+const c = JSON.parse(fs.readFileSync("client.config.example.json", "utf8"));
+c.signer = "keyfile"; c.clientKeyFile = process.argv[1]; delete c.comment;
+fs.writeFileSync("client.config.json", JSON.stringify(c, null, 2) + "\n");
 const { privateKeyToAccount } = require("viem/accounts");
-const key = fs.readFileSync(process.argv[1].replace(/^~/, process.env.HOME), "utf8").trim();
-console.log("Paying wallet:", privateKeyToAccount(key).address);
+console.log("Paying wallet:", privateKeyToAccount(fs.readFileSync(process.argv[1].replace(/^~/, process.env.HOME), "utf8").trim()).address);
 ' "$KEY"
-echo "Config written. Edit client.config.json to change the network, the port, or the ComputeService address."
-echo "Edit providers.json to add the provider you want to buy from."
+  echo "Signing with that key file. It stays on this machine."
+else
+  node -e '
+const fs = require("fs");
+const c = JSON.parse(fs.readFileSync("client.config.example.json", "utf8"));
+c.signer = "browser"; delete c.comment;
+fs.writeFileSync("client.config.json", JSON.stringify(c, null, 2) + "\n");
+'
+  echo "Signing with the wallet in your browser: you connect it on the page, and approve each step there."
+fi
+echo "Edit client.config.json to change the network or the port, and providers.json to add a provider."
 
 say "Ready"
 echo "Start the console with:   node console.mjs --config client.config.json"

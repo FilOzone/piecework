@@ -35,7 +35,7 @@ th,td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--line);vertic
 th{font-size:.75rem;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-3);font-weight:600}
 .tw{overflow-x:auto}
 .pill{display:inline-block;font:600 .72rem var(--body);letter-spacing:.05em;text-transform:uppercase;padding:3px 8px;border-radius:99px;background:var(--accent-soft);color:var(--accent);white-space:nowrap}
-.pill.paid,.pill.ok{background:var(--money-soft);color:var(--money)} .pill.late,.pill.expired,.pill.bad{background:var(--bad-soft);color:var(--bad)}
+.pill.paid,.pill.ok{background:var(--money-soft);color:var(--money)} .pill.warn{background:var(--warn-soft);color:var(--warn)} .pill.late,.pill.expired,.pill.bad{background:var(--bad-soft);color:var(--bad)}
 .pill.off{background:var(--surface-2);color:var(--ink-3);border:1px solid var(--line)}
 .task{border-left:4px solid var(--accent);background:var(--accent-soft);border-radius:0 10px 10px 0;padding:12px 16px}
 .task.err{border-color:var(--bad);background:var(--bad-soft)}
@@ -60,13 +60,16 @@ td.pick{width:28px} input[type=checkbox]{width:16px;height:16px;accent-color:var
       data set, and is paid only when it delivers. Every step below is a real transaction.</p>
     <div class="muted" id="who">Loading…</div>
   </div>
+  <div id="wallet"></div>
+  <div class="card" id="money" hidden></div>
   <div id="task"></div>
   <div class="card"><h2>1. Choose a provider</h2>
     <p class="muted" style="margin:0 0 10px">Providers are listed in <code>poc/providers.json</code>. Each one runs Curio with PDP and the PieceWork provider kit.</p>
-    <div class="providers" id="providers"></div></div>
+    <div class="providers" id="providers"></div><div id="addprov"></div></div>
   <div class="card" id="setcard"></div>
   <div class="card" id="newsetcard" hidden></div>
   <div class="card" id="ordercard"></div>
+  <div class="card" id="timecard"></div>
   <div class="card"><h2>Your jobs</h2><div class="tw"><table><thead><tr><th>Job</th><th>Provider</th><th>Status</th><th>Results</th><th>Transactions</th></tr></thead>
     <tbody id="jobs"></tbody></table></div></div>
   <div class="card" id="viewer" hidden></div>
@@ -75,13 +78,27 @@ td.pick{width:28px} input[type=checkbox]{width:16px;height:16px;accent-color:var
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 let S = null, pick = localStorage.getItem("pilot-provider") ?? "laptop", jobType = null, policy = "keep";
+let walletMsg = null, answering = false, addingProvider = false, service = null;
+let keepNew = !!localStorage.getItem("pilot-keepnew"); // files added from here on are never removable
 let setPick = JSON.parse(localStorage.getItem("pilot-sets") ?? "{}"); // provider id -> data set id
 let checked = new Set(); // piece ids ticked for removal
 const busy = () => S?.task && !S.task.done;
 
+// Shown straight away, before the program has a task to report: reading files in the browser takes a moment,
+// and the first refresh is a second away.
+let local = null;
+function saying(text) { local = text; render(); }
 async function post(path, body) {
-  const r = await fetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }).then((x) => x.json());
-  if (r.error) alert(r.error);
+  try {
+    const r = await fetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }).then((x) => x.json());
+    if (r.error) {
+      local = null;
+      alert(/another action is still running/i.test(r.error)
+        ? "Something else is still running. Wait for it to finish, or press \"Stop waiting\" in the panel at the top of the page."
+        : r.error);
+    }
+  } catch (e) { local = null; alert(e.message); }
+  local = null;
   refresh();
 }
 // Files the browser holds -> [{ name, data(base64) }]
@@ -93,9 +110,14 @@ const readFiles = (list) => Promise.all([...list].map((f) => new Promise((res, r
 })));
 async function addFiles(list, dataSetId) {
   if (!list.length) return;
-  const files = await readFiles(list);
-  if (dataSetId) return post("/api/pilot/add-files", { dataSetId, files });
-  return post("/api/pilot/new-set", { provider: pick, files });
+  if (busy()) return alert("Another action is still running. Wait for it to finish, or press \"Stop waiting\".");
+  const names = [...list].map((f) => f.name).join(", ");
+  saying(`Reading ${list.length} file${list.length > 1 ? "s" : ""} from your computer: ${names}`);
+  let files;
+  try { files = await readFiles(list); } catch (e) { local = null; return alert(e.message); }
+  saying(`Sending ${list.length > 1 ? "them" : names} to the provider…`);
+  if (dataSetId) return post("/api/pilot/add-files", { dataSetId, files, protect: keepNew });
+  return post("/api/pilot/new-set", { provider: pick, files, protect: keepNew });
 }
 async function view(dataSetId, pieceId, name) {
   const v = $("viewer"); v.hidden = false;
@@ -110,11 +132,38 @@ function currentSet(P) {
 
 function render() {
   const tx = (h, label) => h ? `<a href="${S.explorer}${h}" target="_blank" rel="noopener">${label}</a>` : "";
-  $("who").innerHTML = `You are the client <code>${esc(S.client)}</code> (the demo wallet: test tokens only) · ${Number(S.available).toFixed(3)} ${esc(S.token)} available in Filecoin Pay`;
+  $("who").innerHTML = S.client
+    ? `You are the client <code>${esc(S.client)}</code> (${S.signer === "browser" ? "your browser wallet" : "a key file on this machine"})`
+    : "No wallet connected yet.";
+  $("money").innerHTML = !S.client ? "" : `<div class="row" style="justify-content:space-between">
+    <div><b>${Number(S.available).toFixed(3)} ${esc(S.token)}</b> in Filecoin Pay <span class="muted">(this is what pays for jobs)</span><br>
+      <span class="muted">${Number(S.wallet ?? 0).toFixed(3)} ${esc(S.token)} and ${Number(S.gas ?? 0).toFixed(3)} tFIL in your wallet</span></div>
+    <div class="row"><input id="dep" value="1" style="font:inherit;padding:8px 10px;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--ink);width:80px">
+      <button class="b" id="depbtn" ${busy() || Number(S.wallet ?? 0) <= 0 ? "disabled" : ""}>Move into Filecoin Pay</button></div></div>
+    ${Number(S.wallet ?? 0) < 1 || Number(S.gas ?? 0) < 1 ? `<p class="muted" style="margin:10px 0 0">Running low on test tokens. Paste
+      <code>${esc(S.client)}</code> into one of these: ${Object.entries(S.faucets ?? {}).map(([k, v]) =>
+      `<a href="${esc(v)}" target="_blank" rel="noopener">${esc(k)}</a>`).join(" · ")}.
+      They arrive in your wallet; then move some into Filecoin Pay with the button above.</p>` : ""}`;
+  if ($("depbtn")) $("depbtn").onclick = () => post("/api/pilot/deposit", { amount: $("dep").value.trim() });
+  $("wallet").innerHTML = S.client && !walletMsg ? "" : `<div class="card"><h2>Connect your wallet</h2>
+    <p class="muted">Everything below is signed by your own wallet: creating data sets, adding and removing files, ordering and cancelling jobs.
+    This program never sees your key.</p>
+    ${walletMsg ? `<p class="pill bad" style="white-space:normal">${esc(walletMsg)}</p>` : ""}
+    <button class="b primary" onclick="connectWallet()">Connect wallet</button></div>`;
+  $("money").hidden = !S.client;
+  if (!S.client) { $("providers").innerHTML = ""; $("addprov").innerHTML = ""; $("timecard").innerHTML = ""; $("setcard").innerHTML = ""; $("ordercard").innerHTML = ""; $("jobs").innerHTML = ""; return; }
   const t = S.task;
-  $("task").innerHTML = t ? `<div class="task ${t.error ? "err" : ""}"><b>${t.done ? (t.error ? "Failed: " : "Done: ") : '<span class="spin"></span>'}${esc(t.title)}</b>
-    <ol>${t.steps.map((s) => `<li>${s.done ? "✓" : "…"} ${esc(s.text)}</li>`).join("")}</ol>${t.error ? `<div>${esc(t.error)}</div>` : ""}
-    ${t.done ? "" : '<div class="muted">Each step waits for a block on Filecoin Calibration (about 30–60 s).</div>'}</div>` : "";
+  const secs = t && !t.done && t.startedAt ? Math.round((Date.now() - t.startedAt) / 1000) : 0;
+  $("task").innerHTML = local
+    ? `<div class="task"><b><span class="spin"></span>${esc(local)}</b></div>`
+    : t ? `<div class="task ${t.error ? "err" : ""}"><b>${t.done ? (t.error ? "Failed: " : "Done: ") : '<span class="spin"></span>'}${esc(t.title)}</b>
+      <ol>${t.steps.map((s) => `<li>${s.done ? "✓" : "…"} ${esc(s.text)}</li>`).join("")}</ol>${t.error ? `<div>${esc(t.error)}</div>` : ""}
+      ${t.done ? "" : `<div class="muted">Running for ${secs} s. Each step waits for a block on Filecoin Calibration (about 30–60 s), and adding files
+        also waits for the provider to submit it. Everything else on this page is disabled until it finishes.
+        <button class="b" id="stopwait" style="padding:4px 10px;margin-left:8px">Stop waiting</button></div>`}</div>` : "";
+  if ($("stopwait")) $("stopwait").onclick = () => {
+    if (confirm("Stop waiting for this? The provider may still finish it in the background; the page will show the result if it does.")) post("/api/pilot/stop-waiting", {});
+  };
 
   // 1. provider
   $("providers").innerHTML = S.providers.map((p) => `<button class="prov ${p.id === pick ? "on" : ""}" data-p="${esc(p.id)}" ${p.ready ? "" : "disabled"}>
@@ -122,6 +171,23 @@ function render() {
     ${p.ready ? `<span class="pill ${p.reachable ? "ok" : "bad"}">${p.reachable ? "Curio reachable" : "Curio not reachable"}</span>
       <span class="pill off">${p.sets.length ? `${p.sets.length} data set${p.sets.length > 1 ? "s" : ""}` : "no data set yet"}</span>` : '<span class="pill off">not set up yet</span>'}</button>`).join("");
   document.querySelectorAll(".prov").forEach((b) => (b.onclick = () => { pick = b.dataset.p; localStorage.setItem("pilot-provider", pick); checked = new Set(); render(); }));
+  $("addprov").innerHTML = addingProvider
+    ? `<div class="row" style="margin-top:12px;align-items:flex-end">
+         ${["name", "address", "curioUrl"].map((f) => `<label class="muted" style="display:block">${f === "curioUrl" ? "Curio URL" : f === "address" ? "Payee address" : "Name"}<br>
+           <input id="np-${f}" placeholder="${f === "curioUrl" ? "https://sp.example.net" : f === "address" ? "0x…" : "Their name"}"
+             style="font:inherit;padding:8px 10px;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--ink);width:${f === "name" ? 160 : 300}px"></label>`).join("")}
+         <button class="b primary" id="np-add">Add</button><button class="b" id="np-cancel">Cancel</button></div>
+       <p class="muted" style="margin:8px 0 0">The payee address is the one they are registered with, the one their Curio uses for PDP.
+       They must be running the PieceWork provider kit, otherwise a job you order will simply expire and you get your money back.</p>`
+    : `<button class="b" id="np-open" style="margin-top:12px">Add another provider…</button>`;
+  if ($("np-open")) $("np-open").onclick = () => { addingProvider = true; render(); };
+  if ($("np-cancel")) $("np-cancel").onclick = () => { addingProvider = false; render(); };
+  if ($("np-add")) $("np-add").onclick = async () => {
+    const body = { name: $("np-name").value, address: $("np-address").value, curioUrl: $("np-curioUrl").value };
+    if (!body.address || !body.curioUrl) return alert("The payee address and the Curio URL are both needed.");
+    addingProvider = false;
+    await post("/api/pilot/add-provider", body);
+  };
   const P = S.providers.find((p) => p.id === pick) ?? S.providers[0];
   const set = currentSet(P);
 
@@ -141,10 +207,13 @@ function render() {
        <div class="tw"><table><thead><tr><th class="pick"></th><th>Piece</th><th>File</th><th>What</th></tr></thead><tbody>${files.map(([id, f]) =>
        `<tr><td class="pick">${f.removing ? "" : `<input type="checkbox" data-id="${id}" ${checked.has(id) ? "checked" : ""}>`}</td>
          <td>#${id}</td><td><a onclick="view('${set.dataSetId}','${id}','${esc(f.name)}')">${esc(f.name)}</a></td>
-         <td>${f.kind === "output" ? '<span class="pill paid">job result</span>' : "your file"}${f.removable ? ' <span class="pill late">the provider may remove this</span>' : ""}${f.removing ? ' <span class="pill expired">removal scheduled</span>' : ""}</td></tr>`).join("")}</tbody></table></div>
+         <td>${f.kind === "output" ? '<span class="pill paid">job result</span>' : "your file"}${f.protected ? ' <span class="pill ok">kept: never removed</span>' : ""}${f.removable ? ` <span class="pill warn" title="You chose &quot;replace&quot; when you ordered job #${esc(f.removableJob ?? "")}, so this file can now be cleared away.">you allowed removal${f.removableJob ? ` (job #${esc(f.removableJob)})` : ""}</span>` : ""}${f.removing ? ' <span class="pill off">removal scheduled</span>' : ""}${f.gone ? ' <span class="pill off">removed</span>' : ""}</td></tr>`).join("")}</tbody></table></div>
        <div class="row" style="margin-top:12px">
          <label class="b">Add files<input type="file" hidden multiple id="picker" ${busy() ? "disabled" : ""}></label>
          <button class="b" id="rm" ${busy() || !checked.size ? "disabled" : ""}>Remove ${checked.size || ""} selected</button>
+         <button class="b" id="keep" ${busy() || !checked.size ? "disabled" : ""}>${[...checked].every((id) => set.files[id]?.protected) && checked.size ? "Allow these to be removed" : "Never remove these"}</button>
+         ${[...checked].some((id) => set.files[id]?.removable) ? `<button class="b" id="revoke" ${busy() ? "disabled" : ""}>Take the permission back</button>` : ""}
+         <label class="muted" style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="keepnew" ${keepNew ? "checked" : ""}> never remove files I add from here on</label>
          <span class="muted">Text files work with the jobs below.</span></div>
        <div class="drop" id="drop" style="margin-top:12px">Drop files here to add them to data set #${set.dataSetId}</div>`);
 
@@ -158,35 +227,74 @@ function render() {
     post("/api/pilot/remove-files", { dataSetId: set.dataSetId, pieceIds: [...checked] });
     checked = new Set();
   };
+  if ($("revoke")) $("revoke").onclick = () => post("/api/pilot/revoke-removal", { dataSetId: set.dataSetId, pieceIds: [...checked].filter((id) => set.files[id]?.removable) });
+  if ($("keep")) $("keep").onclick = () => {
+    const on = ![...checked].every((id) => set.files[id]?.protected);
+    post("/api/pilot/protect-files", { dataSetId: set.dataSetId, pieceIds: [...checked], on });
+    checked = new Set();
+  };
+  if ($("keepnew")) $("keepnew").onchange = (e) => { keepNew = e.target.checked; localStorage.setItem("pilot-keepnew", keepNew ? "1" : ""); };
   document.querySelectorAll('input[type=checkbox][data-id]').forEach((b) => (b.onchange = () => {
     b.checked ? checked.add(b.dataset.id) : checked.delete(b.dataset.id); render();
   }));
   const drop = $("drop");
   if (drop) {
+    if (busy()) drop.textContent = "Something else is running: wait for it to finish before dropping files";
     drop.ondragover = (e) => { e.preventDefault(); drop.classList.add("over"); };
     drop.ondragleave = () => drop.classList.remove("over");
-    drop.ondrop = (e) => { e.preventDefault(); drop.classList.remove("over"); if (!busy()) addFiles(e.dataTransfer.files, set?.dataSetId); };
+    drop.ondrop = (e) => { e.preventDefault(); drop.classList.remove("over"); addFiles(e.dataTransfer.files, set?.dataSetId); };
   }
   if ($("newsetcard").hidden === false) renderNewSet(P);
 
   // 3. order
   jobType = jobType ?? S.jobTypes[0]?.type;
+  const ext = S.jobTypes.find((j) => j.type === jobType)?.inputExtension ?? "";
+  const eligible = files.filter(([, f]) => f.kind === "input" && !f.removing && !f.gone && f.name.endsWith(ext));
+  const ticked = [...checked].filter((id) => set?.files[id] && !set.files[id].removing && !set.files[id].gone);
+  const wrongKind = ticked.filter((id) => !set.files[id].name.endsWith(ext));
   $("ordercard").innerHTML = `<h2>3. Order a job from ${esc(P.name)}</h2>
     <p class="muted">Over data set ${set ? `#${set.dataSetId}` : "— none yet"}. The price is put on hold in Filecoin Pay. The provider runs the program next to your
     files, adds the results to your data set, and is paid only if it does so before the deadline (about 20 minutes).</p>
+    <p class="muted"><b>This job will read ${ticked.length && !wrongKind.length
+      ? `the ${ticked.length} file${ticked.length > 1 ? "s" : ""} you ticked above`
+      : `all ${eligible.length} ${esc(ext)} file${eligible.length === 1 ? "" : "s"} of yours in the data set`}.</b>
+      ${wrongKind.length ? `<span class="pill bad">${wrongKind.length} ticked file${wrongKind.length > 1 ? "s are" : " is"} not ${esc(ext)}: untick ${wrongKind.length > 1 ? "them" : "it"} first</span>`
+        : ticked.length ? " Untick everything to run over the whole data set." : " Tick some above to run over a few of them instead."}</p>
     <div class="row"><select id="jt">${S.jobTypes.map((j) => `<option value="${esc(j.type)}" ${j.type === jobType ? "selected" : ""}>${esc(j.name)} — ${esc(j.price)} ${esc(S.token)}</option>`).join("")}</select>
     <select id="pol">${(S.policies ?? []).map((x) => `<option value="${esc(x.id)}" ${x.id === policy ? "selected" : ""}>${esc(x.label)}</option>`).join("")}</select>
     <button class="b primary" id="orderbtn" ${busy() || !set ? "disabled" : ""}>Order</button></div>
     <p class="muted" style="margin:8px 0 0">${policy === "replace-inputs"
-      ? "After delivery the provider may remove the files this job read, and nothing else. Use it to keep only the redacted copies. This cannot be undone."
+      ? "After delivery the provider may remove the files this job read, and nothing else — except any you marked \"never remove\". Use it to keep only the redacted copies. This cannot be undone."
       : policy === "replace-previous" ? "After delivery the provider may remove the results of earlier jobs, so only the newest one stays."
       : "Nothing is ever removed from your data set."}</p>`;
-  $("jt").onchange = (e) => (jobType = e.target.value);
+  $("jt").onchange = (e) => { jobType = e.target.value; render(); };
   $("pol").onchange = (e) => { policy = e.target.value; render(); };
   $("orderbtn").onclick = () => {
+    if (wrongKind.length) return alert(`${wrongKind.length} of the files you ticked are not ${ext} files, which is what this job reads. Untick them first.`);
     if (policy !== "keep" && !confirm("The provider will be allowed to remove those files from your data set after it delivers. This cannot be undone. Continue?")) return;
-    post("/api/pilot/order", { dataSetId: set.dataSetId, type: jobType, policy });
+    post("/api/pilot/order", { dataSetId: set.dataSetId, type: jobType, policy, pieceIds: ticked });
   };
+
+  // 4. pay for time
+  const svc = (S.services ?? []);
+  service = service ?? svc[0]?.type;
+  const live = (S.sessions ?? []).filter((x) => x.status !== "closed");
+  $("timecard").innerHTML = !svc.length ? "" : `<h2>4. Or pay for time instead</h2>
+    <p class="muted">The other way to buy: a rate per epoch for a service running next to your files, rather than a price for a result.
+    Nothing is charged until the provider says the service is running, and closing it stops the charge at that epoch.</p>
+    <div class="row"><select id="svc">${svc.map((x) => `<option value="${esc(x.type)}" ${x.type === service ? "selected" : ""}>${esc(x.name)} — ${esc(x.rate)} ${esc(S.token)} per epoch</option>`).join("")}</select>
+      <button class="b primary" id="startsvc" ${busy() || !set || live.length ? "disabled" : ""}>Start it</button>
+      ${live.length ? '<span class="muted">One at a time in this console.</span>' : `<span class="muted">About ${esc(((Number(svc.find((x) => x.type === service)?.rate ?? 0)) * 120).toFixed(2))} ${esc(S.token)} an hour (1 epoch = 30 s).</span>`}</div>
+    ${(S.sessions ?? []).length ? `<div class="tw" style="margin-top:12px"><table><thead><tr><th>Session</th><th>Status</th><th>Running</th><th>Spent</th><th></th></tr></thead><tbody>
+      ${S.sessions.map((x) => `<tr><td>#${esc(x.id)} ${esc(x.name ?? "")}<br><span class="muted">${esc(x.rate)} ${esc(S.token)} per epoch · data set #${esc(x.dataSetId)}</span></td>
+        <td><span class="pill ${x.status === "running" ? "ok" : x.status === "closed" ? "off" : ""}">${esc(x.status)}</span></td>
+        <td>${x.epochs ? `${x.epochs} epochs (~${Math.round(x.epochs / 2)} min)` : "—"}</td>
+        <td>${esc(x.spent ?? "0")} ${esc(S.token)}</td>
+        <td>${x.status === "closed" ? [tx(x.openTx, "opened"), tx(x.closeTx, "stopped")].filter(Boolean).join(" · ")
+          : `<button class="b" onclick="post('/api/pilot/close-session',{sessionId:'${esc(x.id)}'})" ${busy() ? "disabled" : ""}>Stop and stop paying</button>`}</td></tr>`).join("")}
+      </tbody></table></div>` : ""}`;
+  if ($("svc")) $("svc").onchange = (e) => { service = e.target.value; render(); };
+  if ($("startsvc")) $("startsvc").onclick = () => post("/api/pilot/open-session", { dataSetId: set.dataSetId, type: service });
 
   // jobs
   const status = { waiting: "waiting for the provider", paid: "delivered and paid", late: "late: deadline passed", expired: "refunded" };
@@ -213,10 +321,19 @@ function renderNewSet(P) {
     <div class="row" style="margin-top:12px">
       <label class="b">Choose files<input type="file" hidden multiple id="picker2" ${busy() ? "disabled" : ""}></label>
       <button class="b" id="samples2" ${busy() ? "disabled" : ""}>Use the sample documents instead</button>
-      <button class="b" id="cancel2">Cancel</button></div>`;
+      <button class="b" id="cancel2">Cancel</button></div>
+    <p class="muted" style="margin-top:16px">Already have a data set with this provider, made somewhere else? Put its number here and the console
+    will read it from the chain: who pays for it, who holds it, and what is in it.</p>
+    <div class="row"><input id="adoptid" placeholder="data set number" style="font:inherit;padding:8px 10px;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--ink);width:180px">
+      <button class="b" id="adoptbtn" ${busy() ? "disabled" : ""}>Add it to the console</button></div>`;
   $("picker2").onchange = (e) => { c.hidden = true; addFiles(e.target.files); };
   $("samples2").onclick = () => { c.hidden = true; post("/api/pilot/new-set", { provider: P.id }); };
   $("cancel2").onclick = () => { c.hidden = true; render(); };
+  $("adoptbtn").onclick = () => {
+    const id = $("adoptid").value.trim();
+    if (!/^\d+$/.test(id)) return alert("A data set number is a whole number, for example 38216.");
+    c.hidden = true; post("/api/pilot/adopt-set", { provider: P.id, dataSetId: Number(id) });
+  };
   const d = $("drop2");
   d.ondragover = (e) => { e.preventDefault(); d.classList.add("over"); };
   d.ondragleave = () => d.classList.remove("over");
@@ -224,10 +341,60 @@ function renderNewSet(P) {
 }
 
 async function refresh() {
-  try { S = await fetch("/api/pilot/state").then((r) => r.json()); if (S.error) throw new Error(S.error); render(); }
-  catch (e) { $("who").textContent = `The console is not available: ${e.message}`; }
+  try {
+    S = await fetch("/api/pilot/state").then((r) => r.json());
+    if (S.error) throw new Error(S.error);
+    // the program was restarted while the page stayed open: pick the wallet up again without asking
+    if (S.signer === "browser" && !S.client && window.ethereum) {
+      const [a] = await window.ethereum.request({ method: "eth_accounts" }).catch(() => []);
+      if (a) {
+        await fetch("/api/pilot/connect", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ address: a }) });
+        S = await fetch("/api/pilot/state").then((r) => r.json());
+      }
+    }
+    render();
+  } catch (e) { $("who").textContent = `The console is not available: ${e.message}`; }
 }
-refresh(); setInterval(refresh, 6000);
+
+// ---------------------------------------------------------------- your wallet, when it lives in the browser
+
+async function connectWallet() {
+  if (!window.ethereum) { walletMsg = "No wallet found in this browser. Install MetaMask, or set \"signer\": \"keyfile\" in client.config.json."; return render(); }
+  try {
+    const [a] = await window.ethereum.request({ method: "eth_requestAccounts" });
+    const want = "0x" + Number(S.chainId).toString(16);
+    if ((await window.ethereum.request({ method: "eth_chainId" })) !== want)
+      await window.ethereum.request({ method: "wallet_switchEthereumChain", params: [{ chainId: want }] });
+    await fetch("/api/pilot/connect", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ address: a }) });
+    walletMsg = null; window.ethereum.on?.("accountsChanged", () => location.reload());
+  } catch (e) { walletMsg = e.message; }
+  refresh();
+}
+
+// Anything that needs your wallet waits on the program until this loop takes it there.
+async function answerAsks() {
+  if (answering) return;
+  const { ask } = await fetch("/api/pilot/ask").then((r) => r.json()).catch(() => ({}));
+  if (!ask) return;
+  answering = true;
+  try {
+    const params = ask.kind === "eth_signTypedData_v4" ? [S.client, JSON.stringify(ask.payload)]
+      : ask.kind === "personal_sign" ? [ask.payload.message, S.client] : ask.payload;
+    const result = await window.ethereum.request({ method: ask.kind, params });
+    await fetch("/api/pilot/answer", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: ask.id, result }) });
+  } catch (e) {
+    await fetch("/api/pilot/answer", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: ask.id, error: e.message ?? String(e) }) });
+  } finally { answering = false; refresh(); }
+}
+
+// a near miss must not make the browser open the file and lose the page
+window.addEventListener("dragover", (e) => e.preventDefault());
+window.addEventListener("drop", (e) => e.preventDefault());
+
+refresh();
+setInterval(() => refresh(), 6000);
+setInterval(() => { if (busy()) render(); }, 1000); // keep the "running for N s" counter moving
+setInterval(() => { if (S?.signer === "browser" && S?.client) answerAsks(); }, 1500);
 </script>
 </body>
 </html>
