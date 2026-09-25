@@ -15,5 +15,7 @@
     "payments": "0x09a0fDc2723fAd1A7b8e3e00eE5DF73841df55a0",
     "usdfc": "0xb3042734b608a1B16e9e86B374A3f3e389B4cDf0"
   },
-  "pollMs": 10000
+  "pollMs": 10000,
+  "blockChunk": 300,
+  "_blockChunk": "how many blocks to ask for in one eth_getLogs call. Public nodes cap this at 360; raise it if the first rpc in the list is your own Lotus."
 }

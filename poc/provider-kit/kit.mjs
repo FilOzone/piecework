@@ -354,6 +354,10 @@ async function main() {
   dashboard();
   setInterval(() => checkHealth(false).catch(() => {}), 60_000);
   if (!state.lastBlock) state.lastBlock = Number(await pub.getBlockNumber()) - 100;
+  {
+    const behind = Number(await pub.getBlockNumber()) - state.lastBlock;
+    if (behind > 2000) say(`Catching up ${behind.toLocaleString()} blocks since I last ran; this takes a few minutes.`);
+  }
   const busy = new Set();
   const pending = new Map(); // jobs seen in this run, so a failed one can be retried
   setInterval(async () => { // retry jobs that failed before delivering, while the deadline allows it
@@ -369,8 +373,12 @@ async function main() {
   for (;;) {
     try {
       const head = Number(await pub.getBlockNumber());
-      for (let from = state.lastBlock + 1; from <= head; from += 1000) {
-        const to = Math.min(head, from + 999);
+      // Public Filecoin nodes cap an eth_getLogs range: Glif and Ankr refuse anything over 360 blocks
+      // ("block range exceeds maximum of 360"), and a chunk that is always refused never gets past a restart.
+      // Your own Lotus will serve a wider range; raise blockChunk in the configuration if you run one.
+      const chunk = Math.max(1, cfg.blockChunk ?? 300);
+      for (let from = state.lastBlock + 1; from <= head; from += chunk) {
+        const to = Math.min(head, from + chunk - 1);
         for (const l of await pub.getContractEvents({ address: cfg.contracts.computeService, abi: ABI.ComputeService,
           eventName: "SessionOpened", fromBlock: BigInt(from), toBlock: BigInt(to) })) {
           if (getAddress(l.args.provider) !== account.address || busy.has(`s${l.args.sessionId}`)) continue;
