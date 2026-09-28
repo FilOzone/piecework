@@ -250,7 +250,7 @@ let looking = false;
 async function lookUpSets() {
   if (looking) return;
   looking = true;
-  mySets = await PW.findDataSets(pick).catch(() => []);
+  mySets = await PW.findDataSets(pick).catch((e) => { error = e.shortMessage ?? e.message; return []; });
   looking = false;
   render();
 }

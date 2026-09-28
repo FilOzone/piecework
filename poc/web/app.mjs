@@ -237,6 +237,8 @@ async function inWindow(fn) {
 // created, but does not index it, so the filtering happens here.
 export async function findDataSets(providerId) {
   const p = provider(providerId);
+  if (!ABI.FilecoinWarmStorageService.some((x) => x.type === "event" && x.name === "DataSetCreated"))
+    throw new Error("this page cannot look up your data sets: its copy of the Warm Storage interface is missing DataSetCreated");
   const logs = await inWindow((fromBlock, toBlock) => pub.getContractEvents({ address: C.fwss,
     abi: ABI.FilecoinWarmStorageService, eventName: "DataSetCreated", fromBlock, toBlock }).catch(() => []));
   const mine = [];
