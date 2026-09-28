@@ -195,10 +195,10 @@ export async function readSet(providerId, dataSetId, jobs = {}) {
     if (Number(j.dataSetId) !== Number(dataSetId)) continue;
     for (const o of j.outputs ?? []) if (files[o.pieceId]) Object.assign(files[o.pieceId], { kind: "output", name: `${o.name} (job #${j.jobId})` });
   }
-  const m = await marks(dataSetId, p.address).catch(() => null);
+  const m = await marks(dataSetId, p.address, Object.keys(files)).catch(() => null);
   if (m) for (const [pid, f] of Object.entries(files)) {
     if (m.scheduled.has(pid)) f.removing = true;
-    else if (m.granted.has(pid) && m.still[pid]) f.removable = true;
+    else if (m.still[pid]) f.removable = true;
   }
   return { dataSetId: Number(dataSetId), provider: p.id, files, authorizer: d.payer };
 }
@@ -257,41 +257,70 @@ export async function findDataSets(providerId) {
   return out.sort((a, b) => a.id - b.id);
 }
 
+// Jobs and sessions are numbered by the contract, so they can be counted rather than searched for: no window,
+// nothing missed, nothing remembered. A deployment with thousands of them would want an index; one with tens
+// should not pretend it does.
+const nextId = (name) => pub.readContract({ address: C.cs, abi: ABI.ComputeService, functionName: name }).then(Number);
+
 export async function findJobs() {
-  const logs = await inWindow((fromBlock, toBlock) => pub.getContractEvents({ address: C.cs, abi: ABI.ComputeService,
-    eventName: "JobPosted", args: { client: me }, fromBlock, toBlock }).catch(() => []));
+  const next = await nextId("nextJobId");
   const byDigest = Object.fromEntries(Object.keys(CFG.jobs).map((t) => [keccak256(toHex(t)), t]));
   const jobs = {};
-  for (const l of logs) {
-    const type = byDigest[l.args.imageDigest];
-    const p = CFG.providers.find((x) => getAddress(x.address) === getAddress(l.args.provider));
-    jobs[String(l.args.jobId)] = {
-      jobId: String(l.args.jobId), type: type ?? l.args.imageDigest.slice(0, 10), provider: p?.id ?? l.args.provider,
-      dataSetId: Number(l.args.dataSetId), inputs: l.args.inputPieceIds.length, price: formatUnits(l.args.price, 18),
-      deadline: Number(l.args.deadline), fromBlock: Number(l.blockNumber), tx: l.transactionHash,
-    };
+  for (let id = Math.max(1, next - 200); id < next; id++) {
+    const j = await pub.readContract({ address: C.cs, abi: ABI.ComputeService, functionName: "jobs", args: [BigInt(id)] }).catch(() => null);
+    if (!j?.[0] || getAddress(j[0]) !== me) continue;
+    const p = CFG.providers.find((x) => getAddress(x.address) === getAddress(j[1]));
+    jobs[String(id)] = { jobId: String(id), type: byDigest[j[6]] ?? j[6].slice(0, 10), provider: p?.id ?? j[1],
+      dataSetId: Number(j[5]), price: formatUnits(j[3], 18), deadline: Number(j[4]),
+      status: ["none", "waiting", "paid", "refunded"][Number(j[8])], outputs: [] };
   }
-  for (const [id, j] of Object.entries(jobs)) Object.assign(j, await jobStatus(id, j.fromBlock, j.type).catch(() => ({})));
+  for (const [id, j] of Object.entries(jobs)) {
+    if (j.status === "paid") Object.assign(j, await jobOutputs(id, j.dataSetId, j.type).catch(() => ({})));
+  }
   return jobs;
 }
 
-// Which pieces the provider has been allowed to clear away, and which it has already handed to PDP.
-async function marks(dataSetId, providerAddress) {
-  const granted = new Set(), scheduled = new Set();
-  for (const l of await inWindow((fromBlock, toBlock) => pub.getContractEvents({ address: C.cs, abi: ABI.ComputeService,
-    eventName: "RemovalAllowed", fromBlock, toBlock }).catch(() => []))) {
-    if (Number(l.args.dataSetId) === Number(dataSetId)) for (const p of l.args.pieceIds) granted.add(String(p));
+// What a paid job delivered: JobPaid names the pieces.
+async function jobOutputs(jobId, dataSetId, type) {
+  const names = CFG.jobs[type]?.outputs ?? [];
+  const paid = await inWindow((fromBlock, toBlock) => pub.getContractEvents({ address: C.cs, abi: ABI.ComputeService,
+    eventName: "JobPaid", args: { jobId: BigInt(jobId) }, fromBlock, toBlock }).catch(() => []));
+  if (!paid.length) return {};
+  const outputs = [];
+  for (const [i, pid] of (paid[0].args.outputPieceIds ?? []).entries()) {
+    const raw = await pub.readContract({ address: C.pdp, abi: ABI.PDPVerifier, functionName: "getPieceCid", args: [BigInt(dataSetId), pid] });
+    outputs.push({ pieceId: String(pid), name: names[i] ?? `result-${i + 1}`, cid: CID.decode(hexToBytes(raw.data)).toString() });
   }
+  return { outputs, paidTx: paid[0].transactionHash };
+}
+
+export async function findSessions() {
+  const next = await nextId("nextSessionId");
+  const out = {};
+  for (let id = Math.max(1, next - 200); id < next; id++) {
+    const x = await pub.readContract({ address: C.cs, abi: ABI.ComputeService, functionName: "sessions", args: [BigInt(id)] }).catch(() => null);
+    if (!x?.[0] || getAddress(x[0]) !== me) continue;
+    const type = Object.keys(CFG.services ?? {}).find((t) => keccak256(toHex(t)) === x[6]);
+    out[String(id)] = { sessionId: String(id), type: type ?? x[6].slice(0, 10), rate: formatUnits(x[3], 18),
+      dataSetId: Number(x[5]), status: ["none", "waiting for the provider", "running", "closed"][Number(x[7])] };
+  }
+  return out;
+}
+
+// Which pieces the provider may still clear away, and which it has already handed to PDP. mayRemove is the
+// contract's own answer and needs no searching; only the scheduling has to be looked for in events.
+async function marks(dataSetId, providerAddress, pieceIds) {
+  const still = {};
+  for (const pid of pieceIds) {
+    still[pid] = await pub.readContract({ address: C.cs, abi: ABI.ComputeService, functionName: "mayRemove",
+      args: [BigInt(dataSetId), getAddress(providerAddress), BigInt(pid)] }).catch(() => false);
+  }
+  const scheduled = new Set();
   for (const l of await inWindow((fromBlock, toBlock) => pub.getContractEvents({ address: C.pdp, abi: ABI.PDPVerifier,
     eventName: "PiecesScheduledForRemoval", fromBlock, toBlock }).catch(() => []))) {
     if (Number(l.args.setId) === Number(dataSetId)) for (const p of l.args.pieceIds) scheduled.add(String(p));
   }
-  const still = {};
-  for (const pid of granted) {
-    still[pid] = await pub.readContract({ address: C.cs, abi: ABI.ComputeService, functionName: "mayRemove",
-      args: [BigInt(dataSetId), getAddress(providerAddress), BigInt(pid)] }).catch(() => false);
-  }
-  return { granted, scheduled, still };
+  return { still, scheduled };
 }
 
 // ---------------------------------------------------------------- jobs

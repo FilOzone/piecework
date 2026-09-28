@@ -17,7 +17,7 @@ let set = null, jobs = {}, picked = new Set(), busy = null, error = null, blockN
 let jobType = Object.keys(CFG.jobs)[0], policy = "keep";
 let wrongChain = false;
 let typed = { dep: "1", label: "" }; // what the visitor has typed, kept across re-renders
-let sessions = store.get("sessions", {}), service = Object.keys(CFG.services ?? {})[0];
+let sessions = {}, service = Object.keys(CFG.services ?? {})[0];
 let mySets = null; // the data sets this wallet owns at the chosen provider, found on the chain
 async function checkChain() {
   if (!window.ethereum || !me) return;
@@ -63,13 +63,13 @@ function render() {
 
   // money
   $("money").hidden = false;
-  const low = Number(money?.wallet ?? 0) < 1 || Number(money?.gas ?? 0) < 1;
+  const low = Number(money?.wallet ?? 0) < 5 || Number(money?.gas ?? 0) < 5 || Number(money?.available ?? 0) < 1;
   $("money").innerHTML = `<div class="row" style="justify-content:space-between">
       <div><b>${Number(money?.available ?? 0).toFixed(3)} ${esc(CFG.token)}</b> in Filecoin Pay <span class="muted">(this is what pays for jobs)</span><br>
         <span class="muted">${Number(money?.wallet ?? 0).toFixed(3)} ${esc(CFG.token)} and ${Number(money?.gas ?? 0).toFixed(3)} tFIL in your wallet</span></div>
       <div class="row"><input type="text" id="dep" value="${esc(typed.dep)}" style="width:80px"><button class="b" id="depbtn" ${busy ? "disabled" : ""}>Move into Filecoin Pay</button></div>
     </div>
-    ${low ? `<p class="muted" style="margin:10px 0 0">Low on test tokens. Paste <code>${esc(me)}</code> into
+    ${low ? `<p class="muted" style="margin:10px 0 0">Running low. Paste <code>${esc(me)}</code> into
       ${Object.entries(CFG.faucets).map(([k, v]) => `<a href="${esc(v)}" target="_blank" rel="noopener">${esc(k)}</a>`).join(" · ")}.
       They arrive in your wallet; then move some into Filecoin Pay.</p>` : ""}`;
   $("dep").oninput = (e) => { typed.dep = e.target.value; };
@@ -202,14 +202,12 @@ function render() {
     $("svc").onchange = (e) => { service = e.target.value; render(); };
     $("startsvc").onclick = () => run("Starting the service", async () => {
       const r = await PW.openSession(pick, set.dataSetId, service);
-      sessions[r.sessionId] = { ...r, type: service, rate: svc[service].rate, status: "waiting for the provider" };
-      store.set("sessions", sessions);
+      sessions[r.sessionId] = { ...r, sessionId: r.sessionId, type: service, rate: svc[service].rate, status: "waiting for the provider" };
       await refreshMoney();
     });
     document.querySelectorAll("button[data-stop]").forEach((b) => (b.onclick = () => run("Stopping the service", async () => {
       await PW.closeSession(b.dataset.stop);
       sessions[b.dataset.stop].status = "closed";
-      store.set("sessions", sessions);
       await refreshMoney();
     })));
   }
@@ -283,6 +281,7 @@ async function poll() {
       me = await PW.connect();
       await refreshMoney();
       jobs = await PW.findJobs().catch(() => ({}));
+      sessions = await PW.findSessions().catch(() => ({}));
       const known = store.get("set-" + pick, null) ?? Object.values(jobs).find((j) => j.provider === pick)?.dataSetId;
       if (known) set = await PW.readSet(pick, known, jobs).catch(() => null);
     });

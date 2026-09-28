@@ -140,7 +140,7 @@ function render() {
       <span class="muted">${Number(S.wallet ?? 0).toFixed(3)} ${esc(S.token)} and ${Number(S.gas ?? 0).toFixed(3)} tFIL in your wallet</span></div>
     <div class="row"><input id="dep" value="1" style="font:inherit;padding:8px 10px;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--ink);width:80px">
       <button class="b" id="depbtn" ${busy() || Number(S.wallet ?? 0) <= 0 ? "disabled" : ""}>Move into Filecoin Pay</button></div></div>
-    ${Number(S.wallet ?? 0) < 1 || Number(S.gas ?? 0) < 1 ? `<p class="muted" style="margin:10px 0 0">Running low on test tokens. Paste
+    ${Number(S.wallet ?? 0) < 5 || Number(S.gas ?? 0) < 5 || Number(S.available ?? 0) < 1 ? `<p class="muted" style="margin:10px 0 0">Running low on test tokens. Paste
       <code>${esc(S.client)}</code> into one of these: ${Object.entries(S.faucets ?? {}).map(([k, v]) =>
       `<a href="${esc(v)}" target="_blank" rel="noopener">${esc(k)}</a>`).join(" · ")}.
       They arrive in your wallet; then move some into Filecoin Pay with the button above.</p>` : ""}`;

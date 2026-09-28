@@ -693,9 +693,9 @@ async function pilotApi(req, res, url, json) {
 async function recoverFromChain() {
   const latest = await pub.getBlockNumber();
   const readyBlock = async (id) => { // SessionReady carries the epoch billing started
-    for (let to = latest; to > latest - 20000n && to > 0n; to -= 2000n) {
+    for (let to = latest, n = 0; n < 45 && to > 0n; to -= 300n, n++) { // public nodes refuse a wider range
       const logs = await pub.getContractEvents({ address: C.cs, abi: ABI.ComputeService, eventName: "SessionReady",
-        args: { sessionId: BigInt(id) }, fromBlock: to - 1999n, toBlock: to }).catch(() => []);
+        args: { sessionId: BigInt(id) }, fromBlock: to - 299n > 0n ? to - 299n : 0n, toBlock: to }).catch(() => []);
       if (logs.length) return Number(logs[0].args.epoch);
     }
     return undefined;

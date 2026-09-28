@@ -505,13 +505,11 @@ export function createPilot({ HERE, RUN, NET, C, ABI, pub, signer, say, demoData
     const s = await pub.readContract({ address: C.cs, abi: ABI.ComputeService, functionName: "sessions", args: [BigInt(id)] });
     const status = SESSION_STATUS[Number(s[7])] ?? "unknown";
     if (!x.readyBlock && Number(s[7]) >= 2) {
-      const ready = await pub.getContractEvents({ address: C.cs, abi: ABI.ComputeService, eventName: "SessionReady",
-        fromBlock: BigInt(x.fromBlock), args: { sessionId: BigInt(id) } }).catch(() => []);
+      const ready = await findEvent(C.cs, ABI.ComputeService, "SessionReady", { sessionId: BigInt(id) });
       if (ready[0]) { x.readyBlock = Number(ready[0].args.epoch); save(); }
     }
     if (Number(s[7]) === 3 && !x.stopBlock) {
-      const closed = await pub.getContractEvents({ address: C.cs, abi: ABI.ComputeService, eventName: "SessionClosed",
-        fromBlock: BigInt(x.fromBlock), args: { sessionId: BigInt(id) } }).catch(() => []);
+      const closed = await findEvent(C.cs, ABI.ComputeService, "SessionClosed", { sessionId: BigInt(id) });
       if (closed[0]) { x.stopBlock = Number(closed[0].blockNumber); x.rateStopped = closed[0].args.rateStoppedAtClose; save(); }
     }
     const head = Number(await pub.getBlockNumber());
@@ -522,12 +520,24 @@ export function createPilot({ HERE, RUN, NET, C, ABI, pub, signer, say, demoData
 
   // ---------------------------------------------------------------- state for the page
 
+  // Public Filecoin nodes refuse an eth_getLogs range wider than a few hundred blocks, so every search walks
+  // backwards in steps. Anything that asked for "since block N" would quietly return nothing instead.
+  async function findEvent(address, abi, eventName, args, steps = 45) {
+    const head = Number(await pub.getBlockNumber());
+    for (let to = head, n = 0; n < steps && to > 0; to -= 300, n++) {
+      const logs = await pub.getContractEvents({ address, abi, eventName, args,
+        fromBlock: BigInt(Math.max(0, to - 299)), toBlock: BigInt(to) }).catch(() => []);
+      if (logs.length) return logs;
+    }
+    return [];
+  }
+
   async function jobStatus(jobId, j) {
     if (j.status === "paid" || j.status === "expired") return j;
     const c = await pub.readContract({ address: C.cs, abi: ABI.ComputeService, functionName: "jobs", args: [BigInt(jobId)] });
     const s = Number(c[8]);
     if (s === 2) {
-      const paid = await pub.getContractEvents({ address: C.cs, abi: ABI.ComputeService, eventName: "JobPaid", fromBlock: BigInt(j.fromBlock), args: { jobId: BigInt(jobId) } });
+      const paid = await findEvent(C.cs, ABI.ComputeService, "JobPaid", { jobId: BigInt(jobId) });
       const ids = paid[0]?.args.outputPieceIds ?? [];
       const names = JOBS[j.type]?.outputs ?? [];
       const outputs = [];
@@ -540,8 +550,7 @@ export function createPilot({ HERE, RUN, NET, C, ABI, pub, signer, say, demoData
       j.outputs = outputs; j.status = "paid"; j.paidTx = paid[0]?.transactionHash;
       if (set && j.policy && j.policy !== "keep") {
         // the contract says which pieces it granted, and only those: RemovalAllowed carries the list
-        const granted = await pub.getContractEvents({ address: C.cs, abi: ABI.ComputeService, eventName: "RemovalAllowed",
-          fromBlock: BigInt(j.fromBlock), args: { jobId: BigInt(jobId) } }).catch(() => []);
+        const granted = await findEvent(C.cs, ABI.ComputeService, "RemovalAllowed", { jobId: BigInt(jobId) });
         for (const pid of granted[0]?.args?.pieceIds ?? []) {
           const f = set.files[String(pid)];
           if (f) { f.removable = true; f.removableJob = String(jobId); f.removableContract = C.cs; }
@@ -572,19 +581,19 @@ export function createPilot({ HERE, RUN, NET, C, ABI, pub, signer, say, demoData
     save();
   }
 
+  // Jobs are numbered by the contract, so ask how many there are rather than searching a window of blocks for
+  // the ones we happen to have missed. A window silently stops finding anything older than itself.
   async function findLostJobs() {
-    const head = await pub.getBlockNumber();
-    const from = head > 2000n ? head - 2000n : 0n;
-    const logs = await pub.getContractEvents({ address: C.cs, abi: ABI.ComputeService, eventName: "JobPosted",
-      args: { client: me() }, fromBlock: from, toBlock: head }).catch(() => []);
-    for (const l of logs) {
-      const id = String(l.args.jobId);
-      if (st.jobs[id]) continue;
-      const set = st.sets[String(l.args.dataSetId)];
+    const next = Number(await pub.readContract({ address: C.cs, abi: ABI.ComputeService, functionName: "nextJobId" }));
+    for (let id = Math.max(1, next - 200); id < next; id++) {
+      if (st.jobs[String(id)]) continue;
+      const j = await pub.readContract({ address: C.cs, abi: ABI.ComputeService, functionName: "jobs", args: [BigInt(id)] }).catch(() => null);
+      if (!j?.[0] || getAddress(j[0]) !== me()) continue;
+      const set = st.sets[String(j[5])];
       if (!set) continue;
-      st.jobs[id] = { contract: C.cs, client: me(), provider: set.provider, type: Object.keys(JOBS).find((t) => keccak256(toHex(t)) === l.args.imageDigest) ?? "unknown",
-        dataSetId: Number(l.args.dataSetId), inputs: l.args.inputPieceIds.length, price: formatUnits(l.args.price, 18),
-        deadline: String(l.args.deadline), fromBlock: String(l.blockNumber), postTx: l.transactionHash };
+      st.jobs[String(id)] = { contract: C.cs, client: me(), provider: set.provider,
+        type: Object.keys(JOBS).find((t) => keccak256(toHex(t)) === j[6]) ?? "unknown",
+        dataSetId: Number(j[5]), price: formatUnits(j[3], 18), deadline: String(j[4]), fromBlock: "0" };
       say(`[client console] found job #${id} ordered earlier from ${providers().find((p) => p.id === set.provider)?.name ?? set.provider}`);
     }
     save();
