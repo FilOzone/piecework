@@ -38,7 +38,10 @@ th{font-size:.75rem;text-transform:uppercase;letter-spacing:.06em;color:var(--in
 .drop.over{border-color:var(--accent);background:var(--accent-soft);color:var(--accent)}
 a{color:var(--accent)}
   /* The mark sits with the title rather than above it: this page is one product, not a page with a badge on it. */
-  .title { display: flex; align-items: center; gap: 14px; }
+  /* The mark aligns with the first line, not with the middle of the block: on a narrow screen the title
+     wraps to three or four lines and a centred mark ends up floating beside the middle of them. */
+  .title { display: flex; align-items: flex-start; gap: 14px; }
+  .mark svg { margin-top: .06em; }
   .mark { flex: 0 0 auto; display: inline-flex; line-height: 0; }
   @media (max-width: 560px) { .mark svg { width: 34px; height: 34px; } .title { gap: 10px; } }
 </style>
@@ -109,7 +112,7 @@ a{color:var(--accent)}
 <script type="module">
   // Every published version has its own address, but a browser caches by file name, so a visitor who has been
   // here before can keep running the old code. The stamp changes with each release and makes that impossible.
-  const V = "20260928-1836";
+  const V = "20260928-2119";
   import(`./ui.mjs?v=${V}`);
 </script>
 </body>
