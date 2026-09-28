@@ -213,7 +213,10 @@ export async function readSet(providerId, dataSetId, jobs = {}) {
     if (m.scheduled.has(pid)) f.removing = true;
     else if (m.still[pid]) f.removable = true;
   }
-  return { dataSetId: Number(dataSetId), provider: p.id, files, authorizer: d.payer };
+  const authorizer = await pub.readContract({ address: C.view, abi: ABI.FilecoinWarmStorageServiceStateView,
+    functionName: "getDataSetAuthorizer", args: [BigInt(dataSetId)] }).catch(() => null);
+  const canReceiveResults = !!authorizer && getAddress(authorizer) === getAddress(C.cs);
+  return { dataSetId: Number(dataSetId), provider: p.id, files, authorizer, canReceiveResults };
 }
 
 // Public Filecoin nodes refuse a log range over a few hundred blocks, so ask in steps of 300.
@@ -337,6 +340,14 @@ async function marks(dataSetId, providerAddress, pieceIds) {
 }
 
 // ---------------------------------------------------------------- jobs
+
+// A data set made elsewhere - or one whose second step failed - cannot receive job results until the client
+// points it at ComputeService. One signature, and only the payer can do it.
+export async function allowResults(dataSetId) {
+  await onTheRightChain();
+  step(`Letting providers add job results to data set #${dataSetId}, only while a job is open`);
+  await send(C.fwss, FWSS_ABI, "setDataSetAuthorizer", [BigInt(dataSetId), C.cs]);
+}
 
 export async function order(providerId, dataSetId, type, policy, pieceIds) {
   const p = provider(providerId), spec = CFG.jobs[type];

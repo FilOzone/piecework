@@ -89,6 +89,9 @@ function render() {
     <p class="muted">${esc(p.note ?? "")}</p>
     ${CFG.providers.length > 1 ? `<div class="row"><select id="prov">${CFG.providers.map((x) =>
       `<option value="${esc(x.id)}" ${x.id === pick ? "selected" : ""}>${esc(x.name)}</option>`).join("")}</select></div>` : ""}
+    ${set && !set.canReceiveResults ? `<div class="task err" style="margin-bottom:12px"><b>This data set cannot receive job results yet</b>
+      <div class="muted">A job over it would run and then fail to deliver. One signature fixes it — only you can give it, because you pay for the data set.</div>
+      <button class="b primary" id="allowres" style="margin-top:8px" ${busy ? "disabled" : ""}>Allow job results</button></div>` : ""}
     ${set ? `<p class="muted">${set.label ? `<b>${esc(set.label)}</b> (data set #${set.dataSetId})` : `Data set #${set.dataSetId}`}: ${files.length} pieces. Tick files to run a job over just those, or to remove them.
        You can hold as many data sets with a provider as you like — one per project, or a throwaway one for jobs that replace files.</p>
       <div class="tw"><table><thead><tr><th style="width:26px"></th><th>Piece</th><th>File</th><th>What</th></tr></thead><tbody>
@@ -140,6 +143,10 @@ function render() {
     const label = (mySets.find((x) => String(x.id) === String(id)) ?? {}).label ?? "";
     run(`Reading data set #${id} from the chain`, async () => { set = { ...(await PW.readSet(pick, id, jobs)), label }; store.set("set-" + pick, id); });
   };
+  if ($("allowres")) $("allowres").onclick = () => run("Allowing job results", async () => {
+    await PW.allowResults(set.dataSetId);
+    set = { ...(await PW.readSet(pick, set.dataSetId, jobs)), label: set.label };
+  });
   if ($("forget")) $("forget").onclick = () => { set = null; store.set("set-" + pick, null); render(); };
   if ($("picker")) $("picker").onchange = (e) => { stage([...e.target.files]); e.target.value = ""; };
   if ($("label")) $("label").oninput = (e) => { typed.label = e.target.value; };
@@ -174,7 +181,7 @@ function render() {
       <div class="row">
         <select id="jt">${Object.entries(CFG.jobs).map(([t, j]) => `<option value="${esc(t)}" ${t === jobType ? "selected" : ""}>${esc(j.name)} — ${esc(j.price)} ${esc(CFG.token)}</option>`).join("")}</select>
         <select id="pol">${CFG.policies.map((x) => `<option value="${esc(x.id)}" ${x.id === policy ? "selected" : ""}>${esc(x.label)}</option>`).join("")}</select>
-        <button class="b primary" id="orderbtn" ${busy || !use.length ? "disabled" : ""}>Order</button>
+        <button class="b primary" id="orderbtn" ${busy || !use.length || !set.canReceiveResults ? "disabled" : ""}>Order</button>
       </div>
       <p class="muted" style="margin:8px 0 0">It will read <b>${use.length} file${use.length === 1 ? "" : "s"}</b>${picked.size ? " (the ones you ticked)" : ` — every ${esc(exts.join(", "))} file in the data set`}.
       ${policy === "replace-inputs" ? "After delivery the provider may remove exactly those files. This cannot be undone." : "Nothing is removed."}</p>`;
