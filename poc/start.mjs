@@ -1000,14 +1000,18 @@ async function main() {
   const setup = ["--new-provider-key", "--new-demo-client-key", "--register", "--deploy", "--add-demo-files"].some((f) => process.argv.includes(f));
   if (CAL && setup) { await calibnetCommand(); process.exit(0); }
 
+  say(`Starting (${NETWORK})…`);
   try { await execFile("docker", ["info"], XENV); }
   catch { throw new Error("Docker is not running. Open the Docker app, wait until it says 'running', then start again."); }
+  say("Docker is running.");
   const { stdout } = await execFile("docker", ["ps", "-aq", "--filter", `name=focs-${NETWORK}-session-`], XENV);
   for (const id of stdout.split("\n").filter(Boolean)) await execFile("docker", ["rm", "-f", id], XENV);
 
   if (CAL) {
     fs.mkdirSync(STORAGE, { recursive: true });
+    say("Connecting to Filecoin Calibration…");
     await connectCalibnet();
+    say(`Connected. ComputeService ${C.cs}.`);
     if (!C.cs) throw new Error("ComputeService is not deployed on calibnet yet. Run: node start.mjs --calibnet --deploy");
     ST = loadJSON(STATE_FILE, ST);
     extraSets = ST.extraSets ??= {};
@@ -1027,7 +1031,7 @@ async function main() {
     const r = await prepareLocalClient();
     plog(`I hold your data set #${cl().dataSetId} on FWSS (${(await listFiles()).length} files; storage paid through Filecoin Pay; proofs of possession not run yet: I do not run a prover).`, r);
   }
-  if (CAL) await recoverFromChain();
+  if (CAL) { say("Rebuilding open jobs and running sessions from the chain…"); await recoverFromChain(); }
   // the demo program signs for the console with its own demo wallet (the client kit can use a browser wallet instead)
   const pilotSigner = demoAcct && { mode: "keyfile", address: demoAcct.address, account: () => demoAcct,
     submit: (request) => demoWallet.writeContract({ ...request, account: demoAcct, chain: NET.chain }) };

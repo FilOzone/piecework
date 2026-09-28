@@ -542,6 +542,7 @@ export function createPilot({ HERE, RUN, NET, C, ABI, pub, signer, say, demoData
           if ((j.policy === "replace-inputs" && f.kind === "input") || (j.policy === "replace-previous" && f.kind === "output" && !outputs.some((o) => o.pieceId === pid))) {
             f.removable = true;
             f.removableJob = String(jobId);
+            f.removableContract = C.cs;
           }
       }
       save();
@@ -633,6 +634,10 @@ export function createPilot({ HERE, RUN, NET, C, ABI, pub, signer, say, demoData
   async function refreshRemovable(set, p) {
     for (const [pid, f] of Object.entries(set.files)) {
       if (!f.removable || f.removing) continue;
+      if (f.removableContract && f.removableContract !== C.cs) { // granted by a contract we no longer use: it is simply gone
+        delete f.removable; delete f.removableJob; delete f.removableContract; save();
+        continue;
+      }
       const still = await pub.readContract({ address: C.cs, abi: ABI.ComputeService, functionName: "mayRemove",
         args: [BigInt(set.dataSetId), getAddress(p.address), BigInt(pid)] });
       if (still) continue;
