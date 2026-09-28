@@ -1,5 +1,6 @@
 // The page. All of the thinking is in app.mjs; this draws it and keeps a little state in the browser.
-import * as PW from "./app.mjs";
+const V = new URL(import.meta.url).searchParams.get("v") ?? "";
+const PW = await import(`./app.mjs${V ? "?v=" + V : ""}`);
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
@@ -17,6 +18,7 @@ let jobType = Object.keys(CFG.jobs)[0], policy = "keep";
 let wrongChain = false;
 let typed = { dep: "1", adopt: "" }; // what the visitor has typed, kept across re-renders
 let sessions = store.get("sessions", {}), service = Object.keys(CFG.services ?? {})[0];
+let mySets = null; // the data sets this wallet owns at the chosen provider, found on the chain
 async function checkChain() {
   if (!window.ethereum || !me) return;
   const at = await window.ethereum.request({ method: "eth_chainId" }).catch(() => null);
@@ -103,10 +105,19 @@ function render() {
       <div class="drop" id="drop" style="margin-top:12px">Drop files here to add them to data set #${set.dataSetId}</div>`
     : `<p class="muted">Two ways to start: open a data set you already have with this provider, or make a new one from files you drop here.
         Making one costs a small reserve in Filecoin Pay, which you get back if you ever close it.</p>
-      <div class="row"><input type="text" id="adopt" value="${esc(typed.adopt)}" placeholder="data set number" style="width:180px">
-        <button class="b" id="adoptbtn" ${busy ? "disabled" : ""}>Open it</button></div>
+      ${mySets === null ? '<p class="muted">Looking for data sets you already have here…</p>'
+        : mySets.length ? `<div class="row"><select id="mysets">${mySets.map((id) => `<option value="${id}">Data set #${id}</option>`).join("")}</select>
+            <button class="b primary" id="openmine" ${busy ? "disabled" : ""}>Open it</button></div>`
+        : '<p class="muted">You have no data set with this provider yet.</p>'}
+      <div class="row" style="margin-top:8px"><input type="text" id="adopt" value="${esc(typed.adopt)}" placeholder="or a data set number" style="width:200px">
+        <button class="b" id="adoptbtn" ${busy ? "disabled" : ""}>Open that one</button></div>
       <div class="drop" id="drop" style="margin-top:12px">Drop files here to create a data set with them</div>`}`;
-  if ($("prov")) $("prov").onchange = (e) => { pick = e.target.value; store.set("provider", pick); set = null; render(); };
+  if ($("prov")) $("prov").onchange = (e) => { pick = e.target.value; store.set("provider", pick); set = null; mySets = null; render(); lookUpSets(); };
+  if (!set && mySets === null && !busy) lookUpSets();
+  if ($("openmine")) $("openmine").onclick = () => {
+    const id = $("mysets").value;
+    run(`Reading data set #${id} from the chain`, async () => { set = await PW.readSet(pick, id, jobs); store.set("set-" + pick, id); });
+  };
   if ($("adopt")) $("adopt").oninput = (e) => { typed.adopt = e.target.value; };
   if ($("adoptbtn")) $("adoptbtn").onclick = () => {
     const id = $("adopt").value.trim();
@@ -235,6 +246,14 @@ function addFiles(list) {
 }
 
 const refreshMoney = async () => { money = await PW.money().catch(() => money); };
+let looking = false;
+async function lookUpSets() {
+  if (looking) return;
+  looking = true;
+  mySets = await PW.findDataSets(pick).catch(() => []);
+  looking = false;
+  render();
+}
 
 // Watch the chain for what the provider is doing, without asking it anything.
 async function poll() {
