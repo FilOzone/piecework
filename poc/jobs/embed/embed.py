@@ -16,7 +16,8 @@ import time
 
 IN, OUT = "/in", "/out"
 MODEL = os.environ.get("MODEL", "BAAI/bge-small-en-v1.5")
-CHUNK = int(os.environ.get("CHUNK_CHARS", "800"))  # characters per chunk, split on blank lines where possible
+CHUNK = int(os.environ.get("CHUNK_CHARS", "400"))  # characters per chunk, split on blank lines where possible
+PREVIEW = int(os.environ.get("PREVIEW_CHARS", "300"))  # how much of the chunk is kept alongside the vector
 SEPARATOR = re.compile(r"\n={20,}\n")
 
 
@@ -51,13 +52,17 @@ def main():
     t0 = time.time()
     model = TextEmbedding(model_name=MODEL, providers=["CPUExecutionProvider"])
     t1 = time.time()
-    vectors = list(model.embed([c for _, _, c in items]))
+    # What a passage is about includes which document it is in: a file called payment-instruction-0442.txt is
+    # about payment instructions even where the sentences do not say so. The name is embedded with the text,
+    # and kept out of the preview, which stays the client's own words.
+    vectors = list(model.embed([f"{re.sub(r'[._-]+', ' ', os.path.splitext(f)[0])}. {c}" for f, _, c in items]))
     t2 = time.time()
 
     out_path = os.path.join(OUT, "embeddings.jsonl")
     with open(out_path, "w") as out:
         for (f, i, c), v in zip(items, vectors):
-            out.write(json.dumps({"file": f, "chunk": i, "preview": c[:80].replace("\n", " "),
+            out.write(json.dumps({"file": f, "chunk": i, "preview": c[:PREVIEW].replace("\n", " "),
+                                  "text": c,
                                   "vector": [round(float(x), 5) for x in v]}) + "\n")
     produced = os.path.getsize(out_path)
 

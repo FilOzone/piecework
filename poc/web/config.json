@@ -4,7 +4,7 @@
   "rpc": "https://api.calibration.node.glif.io/rpc/v1",
   "explorer": "https://filecoin-testnet.blockscout.com/tx/",
   "token": "tUSDFC",
-  "computeService": "0x204D9872448B0404D39C657aAEBffb17767EDdb9",
+  "computeService": "0x40c22bFDb4B95f0fB8EE827bB5a156215Da567d5",
   "contracts": {
     "usdfc": "0xb3042734b608a1B16e9e86B374A3f3e389B4cDf0",
     "payments": "0x09a0fDc2723fAd1A7b8e3e00eE5DF73841df55a0",
@@ -82,11 +82,23 @@
     }
   ],
   "services": {
-    "workspace:v1": {
-      "name": "A private workspace next to my data",
+    "embed-live:v1": {
+      "name": "Keep my data set searchable",
       "rate": "0.002",
       "lockupEpochs": 60,
-      "note": "A machine with your files mounted read-only, for as long as you keep it. Nothing leaves the provider; you pay for every epoch it runs, and closing it stops the charge at that epoch."
+      "note": "Whenever you add a document, it is turned into vectors next to your files and written back into the same data set. You never order anything \u2014 what you are buying is that your data set stays searchable as it changes."
+    },
+    "redact-live:v1": {
+      "name": "Keep my data set clean",
+      "rate": "0.002",
+      "lockupEpochs": 60,
+      "note": "Every document you add is scanned for personal and financial data, and a redacted copy plus a report are written back next to it. The rule you are buying: nothing lives in this data set without a clean twin, enforced where the data already is, so the original never travels."
+    },
+    "search:v1": {
+      "name": "Keep my data set answering questions",
+      "rate": "0.002",
+      "lockupEpochs": 60,
+      "note": "While this runs, add a file whose name starts with \"ask\" \u2014 the question inside it is answered from the vectors already stored next to your data, and the answer appears in your data set. Nothing about your documents leaves the provider. It needs \"Keep my data set searchable\" to have run first, so there are vectors to answer from."
     }
   }
 }

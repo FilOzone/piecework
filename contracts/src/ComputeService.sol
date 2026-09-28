@@ -125,6 +125,10 @@ contract ComputeService is IDataSetAuthorizer {
     mapping(uint256 => Job) public jobs;
     // open (posted, not yet paid or expired) jobs per data set, client and provider
     mapping(uint256 dataSetId => mapping(address client => mapping(address provider => uint256))) public openJobs;
+    // running (ready, not yet closed) sessions per data set, client and provider. A session that is being paid
+    // for by the epoch may write into the data set exactly as an open job may: the invariant is that a provider
+    // can add pieces only while the client is paying it to, and pay-for-time is the second way that is true.
+    mapping(uint256 dataSetId => mapping(address client => mapping(address provider => uint256))) public readySessions;
     // pieces the client lets the provider remove once that job has delivered (empty = nothing is ever removed)
     mapping(uint256 jobId => uint256[]) internal jobRemovals;
     // granted on delivery, spent when the provider schedules the removal: one piece, one removal
@@ -202,6 +206,7 @@ contract ComputeService is IDataSetAuthorizer {
         if (msg.sender != s.provider) revert NotProvider();
         if (s.status != SessionStatus.Open) revert WrongStatus();
         s.status = SessionStatus.Ready;
+        readySessions[s.dataSetId][s.client][s.provider]++;
         payments.modifyRailPayment(s.railId, s.rate, 0);
         emit SessionReady(sessionId, block.number);
     }
@@ -216,6 +221,7 @@ contract ComputeService is IDataSetAuthorizer {
         if (s.status != SessionStatus.Open && s.status != SessionStatus.Ready) revert WrongStatus();
         bool stopped = true;
         if (s.status == SessionStatus.Ready) {
+            readySessions[s.dataSetId][s.client][s.provider]--;
             try payments.modifyRailPayment(s.railId, 0, 0) {} catch { stopped = false; }
         }
         s.status = SessionStatus.Closed;
@@ -323,7 +329,9 @@ contract ComputeService is IDataSetAuthorizer {
         if (address(sessionKeys) != address(0) && sessionKeys.authorizationExpiry(payer, signer, operation) >= block.timestamp) {
             return true;
         }
-        if (operation == ADD_PIECES_TYPEHASH) return openJobs[dataSetId][payer][signer] > 0;
+        if (operation == ADD_PIECES_TYPEHASH) {
+            return openJobs[dataSetId][payer][signer] > 0 || readySessions[dataSetId][payer][signer] > 0;
+        }
         // Removals: only the pieces the client listed with a job that the provider then delivered, once each
         // (FWSS passes abi.encode(clientDataSetId, pieceIds), SignatureVerificationLib L274).
         if (operation == SCHEDULE_PIECE_REMOVALS_TYPEHASH) {

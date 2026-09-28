@@ -382,6 +382,72 @@ contract ComputeServiceTest is Test {
         assertFalse(cs.mayRemove(dataSetId, PROVIDER, 0));
     }
 
+    // ---------------------------------------------------------------- writing back during a session
+    //
+    // A provider may add pieces to a client's data set only while the client is paying it to. Until now that
+    // meant an open job. A session paid by the epoch is the second way it is true, and without it a service
+    // billed for time has nowhere to put what it produces.
+
+    /// A ready session lets the provider write into the data set; opening one is not enough, and closing ends it.
+    function test_session_providerMayAddPiecesWhileReady() public {
+        uint256 pk = 0xB0B;
+        address signer = vm.addr(pk);
+        vm.prank(signer);
+        uint256 ds = pdp.createDataSet(CLIENT);
+
+        bytes32 digest = keccak256("an add-pieces digest");
+        (uint8 v, bytes32 r, bytes32 sSig) = vm.sign(pk, digest);
+        bytes memory sig = abi.encodePacked(r, sSig, v);
+
+        helper.makeDeposit(CLIENT, CLIENT, 1 ether);
+        approveCS();
+
+        assertFalse(cs.isAuthorized(ds, CLIENT, cs.ADD_PIECES_TYPEHASH(), digest, sig, ""), "no session, no writing");
+
+        vm.prank(CLIENT);
+        uint256 id = cs.openSession(signer, IMAGE, R, L, ds);
+        assertFalse(cs.isAuthorized(ds, CLIENT, cs.ADD_PIECES_TYPEHASH(), digest, sig, ""), "open but not running");
+
+        vm.prank(signer);
+        cs.sessionReady(id);
+        assertTrue(cs.isAuthorized(ds, CLIENT, cs.ADD_PIECES_TYPEHASH(), digest, sig, ""), "running: may write");
+        assertTrue(cs.isAuthorized(ds, CLIENT, cs.ADD_PIECES_TYPEHASH(), digest, sig, ""), "as often as it needs to");
+
+        vm.prank(CLIENT);
+        cs.closeSession(id);
+        assertFalse(cs.isAuthorized(ds, CLIENT, cs.ADD_PIECES_TYPEHASH(), digest, sig, ""), "closed: no longer");
+    }
+
+    /// The permission belongs to that provider and that data set, not to anyone holding a session somewhere.
+    function test_session_writingIsScopedToThatProviderAndDataSet() public {
+        uint256 pk = 0xB0B;
+        address signer = vm.addr(pk);
+        vm.startPrank(signer);
+        uint256 ds = pdp.createDataSet(CLIENT);
+        uint256 other = pdp.createDataSet(CLIENT);
+        vm.stopPrank();
+
+        bytes32 digest = keccak256("an add-pieces digest");
+        (uint8 v, bytes32 r, bytes32 sSig) = vm.sign(pk, digest);
+        bytes memory sig = abi.encodePacked(r, sSig, v);
+
+        helper.makeDeposit(CLIENT, CLIENT, 1 ether);
+        approveCS();
+        vm.prank(CLIENT);
+        uint256 id = cs.openSession(signer, IMAGE, R, L, ds);
+        vm.prank(signer);
+        cs.sessionReady(id);
+
+        assertTrue(cs.isAuthorized(ds, CLIENT, cs.ADD_PIECES_TYPEHASH(), digest, sig, ""), "the data set it runs over");
+        assertFalse(cs.isAuthorized(other, CLIENT, cs.ADD_PIECES_TYPEHASH(), digest, sig, ""), "not another of the client's");
+
+        (uint8 v2, bytes32 r2, bytes32 s2) = vm.sign(uint256(0xBAD), digest);
+        assertFalse(
+            cs.isAuthorized(ds, CLIENT, cs.ADD_PIECES_TYPEHASH(), digest, abi.encodePacked(r2, s2, v2), ""),
+            "not a stranger while a session runs"
+        );
+    }
+
     /// Through the authorizer: the delivering provider's signature passes once, for the listed pieces only.
     function test_removals_authorizerAcceptsOnceForTheProvider() public {
         uint256 pk = 0xA11CE;

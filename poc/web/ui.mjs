@@ -29,6 +29,14 @@ async function checkChain() {
 
 PW.reportSteps((text) => { busy = text; render(); });
 
+// Whatever an action did — finished, was refused, or the provider went quiet halfway — what the page shows
+// afterwards is read back from the chain, never assumed from whether the call returned.
+async function reread() {
+  if (!set) return;
+  set = await PW.readSet(pick, set.dataSetId, jobs).catch(() => set);
+  mySets = null;
+}
+
 async function run(what, fn) {
   busy = what; error = null; render();
   try { return await fn(); }
@@ -156,7 +164,7 @@ function render() {
   document.querySelectorAll("a[data-drop]").forEach((a) => (a.onclick = () => { waiting.splice(Number(a.dataset.drop), 1); render(); }));
   if ($("rm")) $("rm").onclick = () => {
     if (!confirm(`Remove ${picked.size} file(s)? PDP drops them at the provider's next proving period. This cannot be undone.`)) return;
-    run("Removing files", async () => { await PW.removeFiles(pick, set.dataSetId, [...picked]); picked = new Set(); set = await PW.readSet(pick, set.dataSetId, jobs); });
+    run("Removing files", async () => { try { await PW.removeFiles(pick, set.dataSetId, [...picked]); picked = new Set(); } finally { await reread(); } });
   };
   document.querySelectorAll("input[type=checkbox][data-id]").forEach((b) => (b.onchange = () => {
     b.checked ? picked.add(b.dataset.id) : picked.delete(b.dataset.id); render();
@@ -211,8 +219,8 @@ function render() {
       Nothing is charged until the provider says it is running, and closing it stops the charge at that epoch.</p>
       <div class="row">
         <select id="svc">${Object.entries(svc).map(([t, x]) => `<option value="${esc(t)}" ${t === service ? "selected" : ""}>${esc(x.name)} — ${esc(x.rate)} ${esc(CFG.token)} per epoch</option>`).join("")}</select>
-        <button class="b primary" id="startsvc" ${busy || live.length ? "disabled" : ""}>Start it</button>
-        <span class="muted">${live.length ? "One at a time here." : `about ${(Number(spec.rate) * 120).toFixed(2)} ${esc(CFG.token)} an hour · 1 epoch = 30 s`}</span>
+        <button class="b primary" id="startsvc" ${busy ? "disabled" : ""}>Start it</button>
+        <span class="muted">about ${(Number(spec.rate) * 120).toFixed(2)} ${esc(CFG.token)} an hour · 1 epoch = 30 s${live.length ? ` · ${live.length} already running, costing ${(live.reduce((n, [, x]) => n + Number(x.rate), 0) * 120).toFixed(2)} an hour together` : ""}</span>
       </div>
       <p class="muted" style="margin:8px 0 0">${esc(spec.note ?? "")}</p>
       ${Object.keys(sessions).length ? `<div class="tw" style="margin-top:12px"><table>
@@ -221,7 +229,7 @@ function render() {
           <td>#${esc(id)} ${esc(svc[x.type]?.name ?? x.type)}<br><span class="muted">${esc(x.rate)} ${esc(CFG.token)} per epoch</span></td>
           <td><span class="pill ${x.status === "running" ? "ok" : x.status === "closed" ? "off" : ""}">${esc(x.status ?? "…")}</span></td>
           <td>${x.epochs ? `${x.epochs} epochs (~${Math.round(x.epochs / 2)} min)` : "—"}</td>
-          <td>${esc(x.spent ?? "0")} ${esc(CFG.token)}</td>
+          <td>${esc(x.owed ?? x.spent ?? "0")} ${esc(CFG.token)}${x.status === "running" ? ` <span class="muted">and counting</span>` : ""}</td>
           <td>${x.status === "closed"
             ? (x.tx ? `<a href="${esc(CFG.explorer + x.tx)}" target="_blank" rel="noopener">opened</a>` : "")
             : `<button class="b" data-stop="${esc(id)}" ${busy ? "disabled" : ""}>Stop and stop paying</button>`}</td></tr>`).join("")}
@@ -230,11 +238,12 @@ function render() {
     $("startsvc").onclick = () => run("Starting the service", async () => {
       const r = await PW.openSession(pick, set.dataSetId, service);
       sessions[r.sessionId] = { ...r, sessionId: r.sessionId, type: service, rate: svc[service].rate, status: "waiting for the provider" };
+      sessions = await PW.findSessions().catch(() => sessions);
       await refreshMoney();
     });
     document.querySelectorAll("button[data-stop]").forEach((b) => (b.onclick = () => run("Stopping the service", async () => {
       await PW.closeSession(b.dataset.stop);
-      sessions[b.dataset.stop].status = "closed";
+      sessions = await PW.findSessions().catch(() => sessions);
       await refreshMoney();
     })));
   }
@@ -269,12 +278,13 @@ function stage(list) {
 function addFiles(list) {
   if (!list.length) return;
   const names = list.map((f) => f.name).join(", ");
-  if (set) return run(`Adding ${names}`, async () => { await PW.addFiles(pick, set.dataSetId, list); set = await PW.readSet(pick, set.dataSetId, jobs); });
+  if (set) return run(`Adding ${names}`, async () => { try { await PW.addFiles(pick, set.dataSetId, list); } finally { await reread(); } });
   return run(`Creating ${typed.label ? `"${typed.label}"` : "a data set"} with ${names}`, async () => {
     const id = await PW.createSet(pick, list, typed.label);
     typed.label = "";
     store.set("set-" + pick, String(id));
     set = await PW.readSet(pick, id, jobs);
+    mySets = null;
   });
 }
 
@@ -300,6 +310,8 @@ async function poll() {
       if (set) set = await PW.readSet(pick, set.dataSetId, jobs).catch(() => set);
     }
   }
+  const live = await PW.findSessions().catch(() => null);
+  if (live) sessions = live;
   render();
 }
 

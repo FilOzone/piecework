@@ -86,7 +86,11 @@ async function send(address, abi, functionName, args) {
   onStep(`${lastStep} — confirm in your wallet (open MetaMask if it did not come to the front)`);
   const hash = await wallet.writeContract({ ...request, account: me, chain, gas });
   onStep(`${lastStep} — sent, waiting for a block (about 30 seconds)`);
-  return pub.waitForTransactionReceipt({ hash, timeout: 600_000 });
+  const receipt = await pub.waitForTransactionReceipt({ hash, timeout: 600_000 });
+  // A mined transaction is not a successful one. Without this check a reverted call looks exactly like a
+  // completed one to everything above, and the page reports work that never happened.
+  if (receipt.status !== "success") throw new Error(`the transaction was mined but reverted (${hash}); nothing changed on chain`);
+  return receipt;
 }
 
 // ---------------------------------------------------------------- money
@@ -108,6 +112,31 @@ export async function deposit(amount) {
   await send(C.payments, ABI.FilecoinPayV1, "deposit", [C.usdfc, me, value]);
 }
 
+// A provider submits our transaction and then tells us when it confirmed. That second half is a plain web
+// server, and it can go down while the transaction is already on chain: the work is done and the page is still
+// asking a machine that cannot answer. So watch both, and believe whichever speaks first. The chain is the
+// truth; the provider's answer is only the fast path.
+async function confirmed(watch, landed, { timeout = 10 * 60_000, grace = 120_000 } = {}) {
+  let said = null;
+  watch.then(() => (said = "ok"), (e) => (said = e instanceof Error ? e : new Error(String(e))));
+  let deadline = Date.now() + timeout, shortened = false;
+  for (;;) {
+    if (said === "ok") return;
+    if (await landed().catch(() => false)) return;
+    if (said instanceof Error && !shortened) {
+      // The provider gave up or errored. Give the chain a short grace period, then report its words.
+      shortened = true;
+      deadline = Math.min(deadline, Date.now() + grace);
+      onStep(`${lastStep} — the provider stopped answering; checking the chain directly`);
+    }
+    if (Date.now() > deadline) {
+      throw said instanceof Error ? said
+        : new Error("the provider never confirmed it and nothing appeared on chain; reload to see where it got to");
+    }
+    await new Promise((r) => setTimeout(r, 5000));
+  }
+}
+
 // ---------------------------------------------------------------- data sets
 
 const provider = (id) => CFG.providers.find((p) => p.id === id) ?? CFG.providers[0];
@@ -124,6 +153,9 @@ export async function createSet(providerId, files, label = "") {
       [C.usdfc, C.fwss, true, rateAllowance > rateUsage ? rateAllowance : rateUsage + parseUnits("0.1", 18),
         lockupUsage + parseUnits("2", 18), maxLockupPeriod || 1n << 40n]);
   }
+  // Which data sets are already ours, so a new one can be told apart from someone else's.
+  const before = (await pub.readContract({ address: C.view, abi: ABI.FilecoinWarmStorageServiceStateView,
+    functionName: "clientDataSets", args: [me] }).catch(() => [])).map(Number);
   const pieces = [];
   for (const f of files) {
     step(`Uploading ${f.name} to ${p.name}`);
@@ -137,10 +169,18 @@ export async function createSet(providerId, files, label = "") {
   const created = await SP.createDataSetAndAddPieces(wallet, { serviceURL: p.curioUrl, payee: getAddress(p.address),
     pieces: pieces.map(({ pieceCid, metadata }) => ({ pieceCid, metadata })), cdn: false,
     metadata: label ? { label } : undefined });
-  const done = await SP.waitForCreateDataSetAddPieces({ statusUrl: created.statusUrl, timeout: 10 * 60_000 });
+  let id = null;
+  await confirmed(
+    SP.waitForCreateDataSetAddPieces({ statusUrl: created.statusUrl, timeout: 10 * 60_000 }).then((d) => { id = Number(d.dataSetId); }),
+    async () => {
+      const fresh = (await pub.readContract({ address: C.view, abi: ABI.FilecoinWarmStorageServiceStateView,
+        functionName: "clientDataSets", args: [me] })).map(Number).filter((x) => !before.includes(x));
+      if (!fresh.length) return false;
+      id = Math.max(...fresh);
+      return true;
+    });
   // The provider tells us which data set it made, but another client creating one at the same moment can make
   // that answer wrong, and setting the authorizer on someone else's data set is refused. Check with the chain.
-  let id = Number(done.dataSetId);
   const owner = await pub.readContract({ address: C.view, abi: ABI.FilecoinWarmStorageServiceStateView,
     functionName: "getDataSet", args: [BigInt(id)] }).then((d) => d.payer, () => null);
   if (!owner || getAddress(owner) !== me) {
@@ -168,10 +208,14 @@ export async function addFiles(providerId, dataSetId, files) {
     rememberName(pieceCid, f.name);
     pieces.push({ pieceCid, metadata: { name: f.name } });
   }
+  const had = Number(await pub.readContract({ address: C.pdp, abi: ABI.PDPVerifier, functionName: "getNextPieceId", args: [BigInt(dataSetId)] }));
   step("Adding them to your data set (you sign, the provider submits)");
   const r = await SP.addPieces(wallet, { serviceURL: p.curioUrl, dataSetId: BigInt(dataSetId),
     clientDataSetId: await clientDataSetId(dataSetId), pieces });
-  await SP.waitForAddPieces({ statusUrl: r.statusUrl, timeout: 10 * 60_000 });
+  await confirmed(
+    SP.waitForAddPieces({ statusUrl: r.statusUrl, timeout: 10 * 60_000 }),
+    async () => Number(await pub.readContract({ address: C.pdp, abi: ABI.PDPVerifier,
+      functionName: "getNextPieceId", args: [BigInt(dataSetId)] })) >= had + pieces.length);
 }
 
 export async function removeFiles(providerId, dataSetId, pieceIds) {
@@ -318,7 +362,24 @@ export async function findSessions() {
     if (!x?.[0] || getAddress(x[0]) !== me) continue;
     const type = Object.keys(CFG.services ?? {}).find((t) => keccak256(toHex(t)) === x[6]);
     out[String(id)] = { sessionId: String(id), type: type ?? x[6].slice(0, 10), rate: formatUnits(x[3], 18),
-      dataSetId: Number(x[5]), status: ["none", "waiting for the provider", "running", "closed"][Number(x[7])] };
+      dataSetId: Number(x[5]), railId: String(x[2]), status: ["none", "waiting for the provider", "running", "closed"][Number(x[7])] };
+  }
+  if (!Object.keys(out).length) return out;
+  // When the meter started and when it stopped. A per-epoch charge that the page cannot show honestly is
+  // worse than no page at all, so these come from the events, not from what this browser remembers doing.
+  const head = Number(await pub.getBlockNumber());
+  for (const name of ["SessionReady", "SessionClosed"]) {
+    for (const l of await inWindow((fromBlock, toBlock) => pub.getContractEvents({ address: C.cs, abi: ABI.ComputeService,
+      eventName: name, fromBlock, toBlock }).catch(() => []))) {
+      const s = out[String(l.args.sessionId)];
+      if (s) s[name === "SessionReady" ? "readyBlock" : "closedBlock"] = Number(l.blockNumber);
+    }
+  }
+  for (const s of Object.values(out)) {
+    if (!s.readyBlock) { s.epochs = 0; s.owed = "0"; continue; }
+    s.epochs = Math.max(0, (s.closedBlock ?? head) - s.readyBlock);
+    s.owed = (s.epochs * Number(s.rate)).toFixed(3);
+    s.running = s.status === "running";
   }
   return out;
 }

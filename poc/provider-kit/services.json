@@ -1,12 +1,49 @@
 {
-  "workspace:v1": {
-    "name": "A private workspace next to my data",
-    "dockerImage": "alpine:3.20",
-    "command": [
-      "sleep",
-      "infinity"
+  "embed-live:v1": {
+    "name": "Keep my data set searchable",
+    "mode": "live",
+    "dockerImage": "piecework/embed:v1",
+    "outputs": [
+      "embeddings.jsonl",
+      "embeddings-report.txt"
+    ],
+    "inputExtensions": [
+      ".txt",
+      ".md",
+      ".csv"
     ],
     "rate": "0.002",
-    "note": "A container with your files mounted read-only at /data. Nothing leaves the provider; you pay for every epoch it runs, and closing it stops the charge."
+    "everyEpochs": 2,
+    "note": "Whenever you add a document, it is turned into vectors next to your files and the vectors are written back into the same data set. You never order anything; what you are buying is that your data set stays searchable as it changes."
+  },
+  "redact-live:v1": {
+    "name": "Keep my data set clean",
+    "mode": "live",
+    "dockerImage": "piecework/pii-redact:v1",
+    "outputs": [
+      "pii-report.txt",
+      "redacted-documents.txt"
+    ],
+    "inputExtensions": [
+      ".txt"
+    ],
+    "rate": "0.002",
+    "everyEpochs": 2,
+    "note": "Every document you add is scanned for personal and financial data, and a redacted copy plus a report are written back next to it. The rule you are buying is that nothing lives in this data set without a clean twin \u2014 enforced where the data already is, so the original never travels."
+  },
+  "search:v1": {
+    "name": "Keep my data set answering questions",
+    "mode": "live",
+    "dockerImage": "piecework/search:v1",
+    "inputMatch": "^ask[ ._-].*\\.txt$",
+    "context": {
+      "match": "^embeddings.*\\.jsonl$"
+    },
+    "outputs": [
+      "answer.txt"
+    ],
+    "rate": "0.002",
+    "everyEpochs": 2,
+    "note": "Add a file whose name starts with \"ask\" and the question inside it is answered from the vectors already stored next to your data. The answer is written back into the same data set. Nothing about your documents leaves the provider."
   }
 }

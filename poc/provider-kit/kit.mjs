@@ -175,7 +175,10 @@ async function runJob(ev) {
   J.stage = "running"; J.t.running = now(); save();
   const t0 = Date.now();
   const run = ["run", "--rm", "--network", "none", "-v", `${dir}/in:/in:ro`, "-v", `${dir}/out:/out`, spec.dockerImage];
-  await execFile("docker", spec.script ? [...run, "sh", "-c", spec.script] : run, { maxBuffer: 1 << 26 });
+  await slot(`Job #${jobId}`);
+  try {
+    await execFile("docker", spec.script ? [...run, "sh", "-c", spec.script] : run, { maxBuffer: 1 << 26 });
+  } finally { release(); }
   J.runSeconds = (Date.now() - t0) / 1000;
   say(`Job #${jobId}: program finished in ${J.runSeconds.toFixed(1)} s.`);
   if ((await pub.getBlockNumber()) > deadline) { J.stage = "late"; save(); return say(`Job #${jobId}: past the deadline; not delivering.`); }
@@ -222,6 +225,23 @@ async function removePieces(jobId, dataSetId, clientDataSetId, pieceIds) {
 // moment the rate starts. It collects what it has earned every so often (settleRail), and when either side
 // closes the session it shuts the container down. Closing stops the charge at that epoch.
 
+// A provider's machine is finite, and nothing above this line says so: ten jobs arriving together would start
+// ten containers. Work waits its turn here instead. Raise maxConcurrent if your hardware can take it.
+const MAX_RUNNING = Math.max(1, cfg.maxConcurrent ?? 2);
+let running = 0;
+const waiting = [];
+async function slot(what) {
+  if (running >= MAX_RUNNING) {
+    say(`${what}: ${running} already running (limit ${MAX_RUNNING}); queued.`);
+    await new Promise((resolve) => waiting.push(resolve));
+  }
+  running++;
+}
+function release() {
+  running--;
+  waiting.shift()?.();
+}
+
 const container = (id) => `piecework-session-${id}`;
 const toSettle = new Set(Object.values(state.sessions ?? {}).filter((s) => !s.closed).map((s) => s.railId));
 
@@ -238,7 +258,21 @@ async function startSession(ev) {
   const S = (state.sessions[key] = { id: key, name: spec.name, client, dataSetId: String(dataSetId), railId: String(railId),
     rate: formatUnits(rate, 18), stage: "starting", since: new Date().toISOString() });
   save();
+  S.type = SERVICE_BY_DIGEST[imageDigest];
   say(`Session #${sessionId}: "${spec.name}" for ${client} over data set #${dataSetId}, ${formatUnits(rate, 18)} ${cfg.token ?? "USDFC"} per epoch.`);
+
+  // A live service has nothing to hold open: the work is the watching. Start the meter, then keep the data
+  // set's property true for as long as the client pays for it.
+  if (spec.mode === "live") {
+    S.scanned = 0;
+    const r = await send(cfg.contracts.computeService, ABI.ComputeService, "sessionReady", [sessionId]);
+    S.stage = "running"; S.readyTx = r.transactionHash; S.readyBlock = Number(r.blockNumber); save();
+    toSettle.add(String(railId));
+    say(`Session #${sessionId}: watching data set #${dataSetId}. Every new file gets "${spec.name}" run over it and the `
+      + `result written back. The meter starts at block ${r.blockNumber} (tx ${r.transactionHash}).`);
+    watchLive(sessionId, spec);
+    return;
+  }
   const dir = path.join(WORK, `session-${sessionId}`);
   fs.rmSync(dir, { recursive: true, force: true });
   fs.mkdirSync(path.join(dir, "data"), { recursive: true });
@@ -271,7 +305,103 @@ async function startSession(ev) {
   }
 }
 
-async function stopSessionContainer(id) { try { await execFile("docker", ["rm", "-f", container(id)]); } catch { /* already gone */ } }
+// A service billed by the epoch that produces nothing is just a meter. These keep a property of the data set
+// true: whenever the client adds a file, the program runs over what is new and the results are written back
+// into the same data set. The contract allows that write for exactly as long as the session is running.
+const watchers = new Map();
+
+async function liveRound(sessionId) {
+  const key = String(sessionId);
+  const S = state.sessions?.[key];
+  if (!S || S.closed || S.busy) return;
+  const spec = SERVICES[S.type];
+  if (!spec) return;
+  const dataSetId = BigInt(S.dataSetId);
+  const next = Number(await read(cfg.contracts.pdp, ABI.PDPVerifier, "getNextPieceId", [dataSetId]));
+  if (next <= (S.scanned ?? 0)) return; // nothing new since the last look
+  const names = await pieceNames(dataSetId).catch(() => ({}));
+  const exts = spec.inputExtensions ?? [];
+  const match = spec.inputMatch ? new RegExp(spec.inputMatch, "i") : null;
+  const mine = new Set(S.mine ?? []);
+  const fresh = [];
+  for (let id = S.scanned ?? 0; id < next; id++) {
+    if (mine.has(String(id))) continue; // our own output, not new input
+    if (!(await read(cfg.contracts.pdp, ABI.PDPVerifier, "pieceLive", [dataSetId, BigInt(id)]))) continue;
+    const given = names[String(id)] ?? "";
+    if (match ? !match.test(given) : exts.length && !exts.some((e) => given.toLowerCase().endsWith(e))) continue;
+    fresh.push({ id, name: /^[\w .()-]{1,80}$/.test(given) ? given : `piece-${id}` });
+  }
+  S.scanned = next;
+  save();
+  if (!fresh.length) return;
+
+  S.busy = true;
+  const round = (S.rounds ?? 0) + 1;
+  say(`Session #${sessionId}: ${fresh.length} new file${fresh.length > 1 ? "s" : ""} in data set #${S.dataSetId} `
+    + `(${fresh.map((f) => f.name).join(", ")}); running "${spec.name}" over ${fresh.length > 1 ? "them" : "it"}.`);
+  const dir = path.join(WORK, `session-${sessionId}-round-${round}`);
+  fs.rmSync(dir, { recursive: true, force: true });
+  fs.mkdirSync(path.join(dir, "in"), { recursive: true });
+  fs.mkdirSync(path.join(dir, "out"), { recursive: true });
+  fs.mkdirSync(path.join(dir, "context"), { recursive: true });
+  try {
+    for (const f of fresh) {
+      const c = await read(cfg.contracts.pdp, ABI.PDPVerifier, "getPieceCid", [dataSetId, BigInt(f.id)]);
+      fs.writeFileSync(path.join(dir, "in", f.name), await fetchPiece(CID.decode(hexToBytes(c.data)).toString()));
+    }
+    // Some services answer from what is already in the data set — the vectors an earlier service wrote, for
+    // instance. Those go in read-only at /context, so the program can tell them apart from what just arrived.
+    if (spec.context?.match) {
+      const ctx = new RegExp(spec.context.match, "i");
+      for (let id = 0; id < next; id++) {
+        const given = names[String(id)] ?? "";
+        if (!ctx.test(given)) continue;
+        if (!(await read(cfg.contracts.pdp, ABI.PDPVerifier, "pieceLive", [dataSetId, BigInt(id)]))) continue;
+        const c = await read(cfg.contracts.pdp, ABI.PDPVerifier, "getPieceCid", [dataSetId, BigInt(id)]);
+        fs.writeFileSync(path.join(dir, "context", `${id}-${given}`), await fetchPiece(CID.decode(hexToBytes(c.data)).toString()));
+      }
+    }
+    const run = ["run", "--rm", "--network", "none", "-v", `${dir}/in:/in:ro`, "-v", `${dir}/context:/context:ro`,
+      "-v", `${dir}/out:/out`, spec.dockerImage];
+    await slot(`Session #${sessionId} round ${round}`);
+    try {
+      await execFile("docker", spec.script ? [...run, "sh", "-c", spec.script] : run, { maxBuffer: 1 << 26 });
+    } finally { release(); }
+    // Each round writes its own files: the client's data set keeps every round, not just the last one.
+    const files = spec.outputs
+      .filter((n) => fs.existsSync(path.join(dir, "out", n)))
+      .map((n) => ({ name: n.replace(/(\.[^.]+)$/, `-${round}$1`), bytes: new Uint8Array(fs.readFileSync(path.join(dir, "out", n))) }));
+    if (!files.length) throw new Error("the program produced nothing");
+    const { clientDataSetId } = await read(cfg.contracts.view, ABI.View, "getDataSet", [dataSetId]);
+    const stored = await storeResults(dataSetId, clientDataSetId, files);
+    S.mine = [...(S.mine ?? []), ...stored.pieceIds.map(String)];
+    S.rounds = round;
+    S.scanned = Number(await read(cfg.contracts.pdp, ABI.PDPVerifier, "getNextPieceId", [dataSetId]));
+    S.lastRound = { at: new Date().toISOString(), inputs: fresh.map((f) => f.name), outputs: files.map((f) => f.name), tx: stored.tx };
+    say(`Session #${sessionId}: written back as piece${stored.pieceIds.length > 1 ? "s" : ""} #${stored.pieceIds.join(", #")} `
+      + `(${files.map((f) => f.name).join(", ")}, tx ${stored.tx}). The client did not have to ask.`);
+  } catch (e) {
+    say(`Session #${sessionId}: this round failed (${e.shortMessage ?? e.message}); the service keeps running and will try the next file.`);
+  } finally {
+    S.busy = false;
+    save();
+  }
+}
+
+function watchLive(sessionId, spec) {
+  const every = Math.max(1, spec.everyEpochs ?? 2) * 30_000;
+  const t = setInterval(() => liveRound(sessionId).catch(() => {}), every);
+  watchers.set(String(sessionId), t);
+  liveRound(sessionId).catch(() => {});
+}
+
+async function stopSessionContainer(id) {
+  const t = watchers.get(String(id));
+  if (t) { clearInterval(t); watchers.delete(String(id)); }
+  return stopSessionContainerOnly(id);
+}
+
+async function stopSessionContainerOnly(id) { try { await execFile("docker", ["rm", "-f", container(id)]); } catch { /* already gone */ } }
 
 async function onSessionClosed(ev) {
   const key = String(ev.sessionId);

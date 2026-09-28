@@ -1,9 +1,9 @@
 {
   "network": "calibnet",
   "chainId": 314159,
-  "computeService": "0x204D9872448B0404D39C657aAEBffb17767EDdb9",
-  "tx": "0x7b277d7d6fa660adea0fdf8fee06ea2e2892a41031d5dca866f8db1a6d621024",
-  "block": 4097816,
+  "computeService": "0x40c22bFDb4B95f0fB8EE827bB5a156215Da567d5",
+  "tx": "0x367c0b55f267edd2151ef3a47642c94104a0aa6be6b146395b4eabf042739afd",
+  "block": 4109452,
   "constructorArgs": [
     "0x09a0fDc2723fAd1A7b8e3e00eE5DF73841df55a0",
     "0xb3042734b608a1B16e9e86B374A3f3e389B4cDf0",
@@ -11,8 +11,14 @@
     "0x518411c2062E119Aaf7A8B12A2eDf9a939347655",
     "0x1B68d64f01bAa42014B9774605867BF4eDC0320f"
   ],
-  "deployedAt": "2026-09-24T14:41:39.171Z",
+  "deployedAt": "2026-09-28T15:39:38.500Z",
   "previous": [
+    {
+      "computeService": "0x204D9872448B0404D39C657aAEBffb17767EDdb9",
+      "tx": "0x7b277d7d6fa660adea0fdf8fee06ea2e2892a41031d5dca866f8db1a6d621024",
+      "deployedAt": "2026-09-24T14:41:39.171Z",
+      "note": "sessions may write into the data set; live services"
+    },
     {
       "computeService": "0x2e19EDA823e5DA64BC004DEA1f863CffA1078B56",
       "tx": "0xb3dace660eb61814aaf932976ee268f93c8808e95cecc54c22780ab41e774a50",
