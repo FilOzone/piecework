@@ -1,0 +1,42 @@
+{
+  "network": "calibration",
+  "chainId": 314159,
+  "rpc": "https://api.calibration.node.glif.io/rpc/v1",
+  "explorer": "https://filecoin-testnet.blockscout.com/tx/",
+  "token": "USDFC",
+  "computeService": "0x204D9872448B0404D39C657aAEBffb17767EDdb9",
+  "contracts": {
+    "usdfc": "0xb3042734b608a1B16e9e86B374A3f3e389B4cDf0",
+    "payments": "0x09a0fDc2723fAd1A7b8e3e00eE5DF73841df55a0",
+    "pdp": "0x85e366Cf9DD2c0aE37E963d9556F5f4718d6417C",
+    "fwss": "0x02925630df557F957f70E112bA06e50965417CA0",
+    "view": "0x1B68d64f01bAa42014B9774605867BF4eDC0320f"
+  },
+  "faucets": {
+    "tFIL": "https://faucet.calibnet.chainsafe-fil.io/funds.html",
+    "USDFC": "https://forest-explorer.chainsafe.dev/faucet/calibnet_usdfc",
+    "USDFC (mint against tFIL)": "https://stg.usdfc.net"
+  },
+  "providers": [
+    {
+      "id": "james",
+      "name": "James Bluett (ezpdpz-calib)",
+      "address": "0xa3971A7234a3379A1813d9867B531e7EeB20ae07",
+      "curioUrl": "https://calib.ezpdpz.net",
+      "note": "Curio with PDP in Cheltenham, UK; registry id 9 on Calibration. Runs the PieceWork provider kit."
+    }
+  ],
+  "jobs": {
+    "pii-redact:v1": { "name": "Find and remove personal data in my documents", "inputExtension": ".txt", "price": "0.5",
+      "outputs": ["pii-report.txt", "redacted-documents.txt"], "deadlineEpochs": 40 },
+    "embed:v1": { "name": "Make my documents searchable by meaning (embeddings)", "inputExtension": ".txt", "price": "0.3",
+      "outputs": ["embeddings.jsonl", "embeddings-report.txt"], "deadlineEpochs": 40 },
+    "indexer:v1": { "name": "Build a search index of my files", "inputExtension": ".txt", "price": "0.5",
+      "outputs": ["search-index.txt"], "deadlineEpochs": 40 }
+  },
+  "policies": [
+    { "id": "keep", "label": "Keep everything (default)" },
+    { "id": "replace-previous", "label": "Keep only the newest result" },
+    { "id": "replace-inputs", "label": "Replace the originals" }
+  ]
+}

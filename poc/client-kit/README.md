@@ -41,6 +41,33 @@ and open <http://localhost:8070>.
    not, you press the refund button and get everything back.
 5. Every result can be read back from the provider by clicking its name.
 
+## Driving it from a script, or from an agent
+
+The page has no logic of its own: it calls an HTTP API (`api.mjs`), and so can anything else. `piecework`
+is that API on the command line — point it at a running console with `--url` or `PIECEWORK_URL`:
+
+```
+piecework status                        who you are, what you have, what is running
+piecework files 38216                   the files in a data set
+piecework add 38216 report.txt          put a file in (it is uploaded to the provider)
+piecework order 38216 embed:v1 --wait   order a job and wait for the result pieces
+piecework get 38216 17 -o report.txt    read a result back from the provider
+piecework rm 38216 3 4                  remove files (you sign, the provider submits)
+piecework session start 38216 workspace:v1    start paying by the epoch
+piecework deposit 3                     move USDFC from your wallet into Filecoin Pay
+```
+
+`order` takes `--files 3,4,7` to run over part of a data set, `--policy replace-inputs` to let the provider
+clear away the files it read, and `--wait` to block until delivery. Every command takes `--json` for feeding
+another program, and exits non-zero on failure, so a pipeline behaves the way a shell expects:
+
+```
+piecework add 38216 ./new-contracts.txt && piecework order 38216 pii-redact:v1 --wait --policy replace-inputs
+```
+
+That is: put files in, have them processed where they are stored, keep only the redacted copies. No browser
+anywhere in it.
+
 ## What happens to your files after a job
 
 When you order a job you choose one of three:
@@ -63,6 +90,8 @@ and only once each. Nothing else in your data set can be touched.
 | `providers.json` | the providers you can buy from |
 | `jobs.json` | the jobs you can order, and their prices |
 | `client.config.json` | your settings: network, contracts, key file, port |
+| `piecework.mjs` | the same API on the command line |
+| `api.mjs` | the HTTP interface, shared by the page and the command line |
 | `samples/` | synthetic financial documents to try the jobs with (fake people and accounts) |
 
 ## Your key

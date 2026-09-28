@@ -1,0 +1,203 @@
+// The page. All of the thinking is in app.mjs; this draws it and keeps a little state in the browser.
+import * as PW from "./app.mjs";
+
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const CFG = PW.CFG;
+
+// what this browser remembers: which provider, which data set, and the jobs it has ordered
+const store = {
+  get: (k, d) => { try { return JSON.parse(localStorage.getItem("pw-" + k)) ?? d; } catch { return d; } },
+  set: (k, v) => { try { localStorage.setItem("pw-" + k, JSON.stringify(v)); } catch { /* private window */ } },
+};
+
+let me = null, money = null, pick = store.get("provider", CFG.providers[0].id);
+let set = null, jobs = store.get("jobs", {}), picked = new Set(), busy = null, error = null, blockNow = 0;
+let jobType = Object.keys(CFG.jobs)[0], policy = "keep";
+
+PW.reportSteps((text) => { busy = text; render(); });
+
+async function run(what, fn) {
+  busy = what; error = null; render();
+  try { return await fn(); }
+  catch (e) { error = e.shortMessage ?? e.message ?? String(e); }
+  finally { busy = null; render(); }
+}
+
+$("csaddr").textContent = CFG.computeService;
+
+// ---------------------------------------------------------------- drawing
+
+function render() {
+  $("task").innerHTML = busy ? `<div class="task"><b><span class="spin"></span>${esc(busy)}</b>
+      <div class="muted">Each step is a real transaction on Filecoin Calibration and waits for a block, about 30 seconds.</div></div>`
+    : error ? `<div class="task err"><b>Failed</b><div>${esc(error)}</div></div>` : "";
+
+  $("who").innerHTML = me ? `You are <code>${esc(me)}</code>` : "Not connected.";
+  $("wallet").hidden = !!me;
+  if (!me) {
+    $("wallet").innerHTML = `<h2>Connect your wallet</h2>
+      <p class="muted">Everything below is signed by you: creating a data set, adding files, ordering work, taking your money back.
+      You need MetaMask on Filecoin Calibration, with test tFIL for gas and test USDFC to pay with — the links appear once you connect.</p>
+      <button class="b primary" id="connect">Connect wallet</button>`;
+    $("connect").onclick = () => run("Connecting", async () => { me = await PW.connect(); store.set("me", me); await refreshMoney(); });
+    for (const id of ["money", "setcard", "ordercard", "jobscard"]) $(id).hidden = true;
+    return;
+  }
+
+  // money
+  $("money").hidden = false;
+  const low = Number(money?.wallet ?? 0) < 1 || Number(money?.gas ?? 0) < 1;
+  $("money").innerHTML = `<div class="row" style="justify-content:space-between">
+      <div><b>${Number(money?.available ?? 0).toFixed(3)} ${esc(CFG.token)}</b> in Filecoin Pay <span class="muted">(this is what pays for jobs)</span><br>
+        <span class="muted">${Number(money?.wallet ?? 0).toFixed(3)} ${esc(CFG.token)} and ${Number(money?.gas ?? 0).toFixed(3)} tFIL in your wallet</span></div>
+      <div class="row"><input type="text" id="dep" value="1" style="width:80px"><button class="b" id="depbtn" ${busy ? "disabled" : ""}>Move into Filecoin Pay</button></div>
+    </div>
+    ${low ? `<p class="muted" style="margin:10px 0 0">Low on test tokens. Paste <code>${esc(me)}</code> into
+      ${Object.entries(CFG.faucets).map(([k, v]) => `<a href="${esc(v)}" target="_blank" rel="noopener">${esc(k)}</a>`).join(" · ")}.
+      They arrive in your wallet; then move some into Filecoin Pay.</p>` : ""}`;
+  $("depbtn").onclick = () => run("Moving funds", async () => { await PW.deposit($("dep").value.trim()); await refreshMoney(); });
+
+  // provider and data set
+  $("setcard").hidden = false;
+  const p = CFG.providers.find((x) => x.id === pick) ?? CFG.providers[0];
+  const files = Object.entries(set?.files ?? {}).sort((a, b) => Number(a[0]) - Number(b[0]));
+  $("setcard").innerHTML = `<h2>Your data at ${esc(p.name)}</h2>
+    <p class="muted">${esc(p.note ?? "")}</p>
+    ${CFG.providers.length > 1 ? `<div class="row"><select id="prov">${CFG.providers.map((x) =>
+      `<option value="${esc(x.id)}" ${x.id === pick ? "selected" : ""}>${esc(x.name)}</option>`).join("")}</select></div>` : ""}
+    ${set ? `<p class="muted">Data set #${set.dataSetId}: ${files.length} pieces. Tick files to run a job over just those, or to remove them.</p>
+      <div class="tw"><table><thead><tr><th style="width:26px"></th><th>Piece</th><th>File</th><th></th></tr></thead><tbody>
+      ${files.map(([pid, f]) => `<tr>
+        <td><input type="checkbox" data-id="${pid}" ${picked.has(pid) ? "checked" : ""}></td>
+        <td>#${pid}</td>
+        <td><a href="${esc(PW.fileUrl(p.id, f.cid))}" target="_blank" rel="noopener">${esc(f.name)}</a></td>
+        <td class="muted"><code>${esc(f.cid.slice(0, 14))}…</code></td></tr>`).join("")}
+      </tbody></table></div>
+      <div class="row" style="margin-top:12px">
+        <label class="b">Add files<input type="file" hidden multiple id="picker"></label>
+        <button class="b" id="rm" ${picked.size && !busy ? "" : "disabled"}>Remove ${picked.size || ""} selected</button>
+        <button class="b" id="forget">Use a different data set</button></div>
+      <div class="drop" id="drop" style="margin-top:12px">Drop files here to add them to data set #${set.dataSetId}</div>`
+    : `<p class="muted">Two ways to start: open a data set you already have with this provider, or make a new one from files you drop here.
+        Making one costs a small reserve in Filecoin Pay, which you get back if you ever close it.</p>
+      <div class="row"><input type="text" id="adopt" placeholder="data set number" style="width:180px">
+        <button class="b" id="adoptbtn" ${busy ? "disabled" : ""}>Open it</button></div>
+      <div class="drop" id="drop" style="margin-top:12px">Drop files here to create a data set with them</div>`}`;
+  if ($("prov")) $("prov").onchange = (e) => { pick = e.target.value; store.set("provider", pick); set = null; render(); };
+  if ($("adoptbtn")) $("adoptbtn").onclick = () => {
+    const id = $("adopt").value.trim();
+    if (!/^\d+$/.test(id)) return alert("A data set number is a whole number, for example 38216.");
+    run(`Reading data set #${id} from the chain`, async () => { set = await PW.readSet(pick, id); store.set("set-" + pick, id); });
+  };
+  if ($("forget")) $("forget").onclick = () => { set = null; store.set("set-" + pick, null); render(); };
+  if ($("picker")) $("picker").onchange = (e) => addFiles([...e.target.files]);
+  if ($("rm")) $("rm").onclick = () => {
+    if (!confirm(`Remove ${picked.size} file(s)? PDP drops them at the provider's next proving period. This cannot be undone.`)) return;
+    run("Removing files", async () => { await PW.removeFiles(pick, set.dataSetId, [...picked]); picked = new Set(); set = await PW.readSet(pick, set.dataSetId); });
+  };
+  document.querySelectorAll("input[type=checkbox][data-id]").forEach((b) => (b.onchange = () => {
+    b.checked ? picked.add(b.dataset.id) : picked.delete(b.dataset.id); render();
+  }));
+  const drop = $("drop");
+  if (drop) {
+    drop.ondragover = (e) => { e.preventDefault(); drop.classList.add("over"); };
+    drop.ondragleave = () => drop.classList.remove("over");
+    drop.ondrop = (e) => { e.preventDefault(); drop.classList.remove("over"); addFiles([...e.dataTransfer.files]); };
+  }
+
+  // ordering
+  $("ordercard").hidden = !set;
+  if (set) {
+    const spec = CFG.jobs[jobType];
+    const eligible = files.filter(([, f]) => f.name.endsWith(spec.inputExtension ?? ""));
+    const use = picked.size ? [...picked] : eligible.map(([pid]) => pid);
+    $("ordercard").innerHTML = `<h2>Order a job</h2>
+      <p class="muted">The price is held in Filecoin Pay. The provider runs the program next to your files, adds the results to your data set,
+      and is paid only if it does so before the deadline. If it does not, you take the money back.</p>
+      <div class="row">
+        <select id="jt">${Object.entries(CFG.jobs).map(([t, j]) => `<option value="${esc(t)}" ${t === jobType ? "selected" : ""}>${esc(j.name)} — ${esc(j.price)} ${esc(CFG.token)}</option>`).join("")}</select>
+        <select id="pol">${CFG.policies.map((x) => `<option value="${esc(x.id)}" ${x.id === policy ? "selected" : ""}>${esc(x.label)}</option>`).join("")}</select>
+        <button class="b primary" id="orderbtn" ${busy || !use.length ? "disabled" : ""}>Order</button>
+      </div>
+      <p class="muted" style="margin:8px 0 0">It will read <b>${use.length} file${use.length === 1 ? "" : "s"}</b>${picked.size ? " (the ones you ticked)" : ` — every ${esc(spec.inputExtension)} file in the data set`}.
+      ${policy === "replace-inputs" ? "After delivery the provider may remove exactly those files. This cannot be undone." : "Nothing is removed."}</p>`;
+    $("jt").onchange = (e) => { jobType = e.target.value; render(); };
+    $("pol").onchange = (e) => { policy = e.target.value; render(); };
+    $("orderbtn").onclick = () => {
+      if (policy === "replace-inputs" && !confirm("The provider will be allowed to remove the files this job reads, once it has delivered. Continue?")) return;
+      run("Ordering the job", async () => {
+        const r = await PW.order(pick, set.dataSetId, jobType, policy, use);
+        jobs[r.jobId] = { ...r, type: jobType, provider: pick, dataSetId: set.dataSetId, inputs: use.length, status: "waiting", fromBlock: r.jobId };
+        store.set("jobs", jobs);
+        picked = new Set();
+        await refreshMoney();
+        poll();
+      });
+    };
+  }
+
+  // jobs
+  const list = Object.entries(jobs).sort((a, b) => Number(b[0]) - Number(a[0]));
+  $("jobscard").hidden = !list.length;
+  if (list.length) $("jobscard").innerHTML = `<h2>Your jobs</h2><div class="tw"><table>
+    <thead><tr><th>Job</th><th>Status</th><th>Results</th><th></th></tr></thead><tbody>
+    ${list.map(([id, j]) => `<tr>
+      <td>#${esc(id)} ${esc(CFG.jobs[j.type]?.name ?? j.type)}<br><span class="muted">${j.inputs} files · ${esc(CFG.jobs[j.type]?.price ?? "")} ${esc(CFG.token)} · data set #${esc(j.dataSetId)}</span></td>
+      <td><span class="pill ${esc(j.status)}">${esc({ waiting: "waiting for the provider", paid: "delivered and paid", refunded: "refunded" }[j.status] ?? j.status)}</span>
+        ${j.status === "waiting" && blockNow && j.deadline > blockNow ? `<div class="muted">${j.deadline - blockNow} blocks left</div>`
+          : j.status === "waiting" && blockNow ? '<div class="muted">deadline passed</div>' : ""}</td>
+      <td>${(j.outputs ?? []).map((o) => `<a href="${esc(PW.fileUrl(j.provider, o.cid))}" target="_blank" rel="noopener">${esc(o.name)}</a>`).join("<br>")}</td>
+      <td>${j.tx ? `<a href="${esc(CFG.explorer + j.tx)}" target="_blank" rel="noopener">ordered</a>` : ""}
+        ${j.paidTx ? ` · <a href="${esc(CFG.explorer + j.paidTx)}" target="_blank" rel="noopener">paid</a>` : ""}
+        ${j.status === "waiting" && blockNow && j.deadline < blockNow ? `<div><button class="b" data-refund="${esc(id)}">Get my money back</button></div>` : ""}</td>
+    </tr>`).join("")}</tbody></table></div>`;
+  document.querySelectorAll("button[data-refund]").forEach((b) => (b.onclick = () => run("Cancelling the job", async () => {
+    await PW.refund(b.dataset.refund);
+    jobs[b.dataset.refund].status = "refunded"; store.set("jobs", jobs);
+    await refreshMoney();
+  })));
+}
+
+function addFiles(list) {
+  if (!list.length) return;
+  const names = list.map((f) => f.name).join(", ");
+  if (set) return run(`Adding ${names}`, async () => { await PW.addFiles(pick, set.dataSetId, list); set = await PW.readSet(pick, set.dataSetId); });
+  return run(`Creating a data set with ${names}`, async () => {
+    const id = await PW.createSet(pick, list);
+    store.set("set-" + pick, String(id));
+    set = await PW.readSet(pick, id);
+  });
+}
+
+const refreshMoney = async () => { money = await PW.money().catch(() => money); };
+
+// Watch the chain for what the provider is doing, without asking it anything.
+async function poll() {
+  blockNow = await PW.block().catch(() => blockNow);
+  for (const [id, j] of Object.entries(jobs)) {
+    if (j.status !== "waiting") continue;
+    const s = await PW.jobStatus(id, j.fromBlock ?? 0, j.type).catch(() => null);
+    if (!s) continue;
+    if (s.status === "paid") { Object.assign(j, { status: "paid", outputs: s.outputs, paidTx: s.paidTx }); store.set("jobs", jobs); await refreshMoney(); }
+    else if (s.status === "refunded") { j.status = "refunded"; store.set("jobs", jobs); }
+  }
+  render();
+}
+
+// ---------------------------------------------------------------- start
+
+(async function start() {
+  render();
+  if (window.ethereum) {
+    const [a] = await window.ethereum.request({ method: "eth_accounts" }).catch(() => []);
+    if (a) await run("Connecting", async () => {
+      me = await PW.connect();
+      await refreshMoney();
+      const known = store.get("set-" + pick, null);
+      if (known) set = await PW.readSet(pick, known).catch(() => null);
+    });
+  }
+  render();
+  setInterval(() => { if (me && !busy) poll(); }, 10_000);
+})();

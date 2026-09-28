@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PieceWork</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧾</text></svg>">
+<style>
+:root{--ground:#EEF3F8;--surface:#fff;--surface-2:#F5F8FC;--line:#D5DFEA;--ink:#0E1A2B;--ink-2:#4A5A70;--ink-3:#7A889B;
+  --accent:#0A74E8;--accent-ink:#fff;--accent-soft:#E1EEFD;--money:#0B8F7F;--money-soft:#DDF3EF;--warn:#A86200;--warn-soft:#FDF0DA;--bad:#B42318;--bad-soft:#FDE7E5;
+  --mono:ui-monospace,SFMono-Regular,Menlo,monospace;--body:system-ui,-apple-system,"Segoe UI",sans-serif}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--ground:#0A111C;--surface:#111B2A;--surface-2:#0E1724;--line:#243349;--ink:#E4ECF6;
+  --ink-2:#A6B4C7;--ink-3:#7485A0;--accent:#4C9DFF;--accent-ink:#06121F;--accent-soft:#132A47;--money:#3CC7B3;--money-soft:#0F2E2B;--warn:#F0AE4A;--warn-soft:#33250F;--bad:#FF7A6E;--bad-soft:#3A1614}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--ground);color:var(--ink);font:16px/1.5 var(--body);padding:24px 16px 48px}
+.wrap{max-width:980px;margin:0 auto;display:flex;flex-direction:column;gap:18px}
+h1{font-size:1.7rem;margin:0} h2{font-size:1.15rem;margin:0 0 10px}
+.muted{color:var(--ink-3);font-size:.9rem} .lede{color:var(--ink-2);max-width:70ch;margin:.4em 0 0}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:18px}
+code{font:.82rem var(--mono);word-break:break-all}
+button.b{font:600 .95rem var(--body);border:1px solid var(--line);background:var(--surface);color:var(--ink);padding:9px 14px;border-radius:8px;cursor:pointer}
+button.b.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+button.b:disabled{opacity:.45;cursor:not-allowed}
+select,input[type=text],input[type=number]{font:inherit;padding:8px 10px;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--ink)}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+table{width:100%;border-collapse:collapse;font-size:.9rem}
+th,td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-size:.75rem;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-3);font-weight:600}
+.tw{overflow-x:auto}
+.pill{display:inline-block;font:600 .72rem var(--body);letter-spacing:.05em;text-transform:uppercase;padding:3px 8px;border-radius:99px;background:var(--accent-soft);color:var(--accent);white-space:nowrap}
+.pill.paid,.pill.ok{background:var(--money-soft);color:var(--money)} .pill.bad,.pill.refunded{background:var(--bad-soft);color:var(--bad)}
+.pill.off{background:var(--surface-2);color:var(--ink-3);border:1px solid var(--line)} .pill.warn{background:var(--warn-soft);color:var(--warn)}
+.task{border-left:4px solid var(--accent);background:var(--accent-soft);border-radius:0 10px 10px 0;padding:12px 16px}
+.task.err{border-color:var(--bad);background:var(--bad-soft)}
+.spin{display:inline-block;width:12px;height:12px;border:2px solid var(--line);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite;vertical-align:-1px;margin-right:6px}
+@keyframes spin{to{transform:rotate(360deg)}}
+.drop{border:2px dashed var(--line);border-radius:10px;padding:18px;text-align:center;color:var(--ink-3);background:var(--surface-2)}
+.drop.over{border-color:var(--accent);background:var(--accent-soft);color:var(--accent)}
+a{color:var(--accent)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div>
+    <div class="muted">PieceWork · runs entirely in your browser</div>
+    <h1>Run programs over your data, where it is stored</h1>
+    <p class="lede">Your files live in a data set at a storage provider on Filecoin Calibration. Here you order work over them: the price is
+      held in Filecoin Pay, the provider runs the program next to your files, writes the results back into your data set, and is paid only
+      when it delivers. Nothing here runs on anyone's server — your wallet signs, and your browser talks to the provider and to the chain.</p>
+    <div class="muted" id="who">Not connected.</div>
+  </div>
+  <div id="task"></div>
+  <div class="card" id="wallet"></div>
+  <div class="card" id="money" hidden></div>
+  <div class="card" id="setcard" hidden></div>
+  <div class="card" id="ordercard" hidden></div>
+  <div class="card" id="jobscard" hidden></div>
+  <div class="card"><h2>What this is</h2>
+    <p class="muted">A proof of concept for buying compute from the storage provider that already holds your data, paid through Filecoin Pay.
+    Everything is on the Calibration test network with test tokens; nothing here has value. The contract is
+    <code id="csaddr"></code>. Code: <a href="https://github.com/lucaniz/foc-compute" target="_blank" rel="noopener">lucaniz/foc-compute</a>.</p></div>
+</div>
+<script type="module" src="./ui.mjs"></script>
+</body>
+</html>
