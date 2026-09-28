@@ -16,7 +16,7 @@ let me = null, money = null, pick = store.get("provider", CFG.providers[0].id);
 let set = null, jobs = {}, picked = new Set(), busy = null, error = null, blockNow = 0;
 let jobType = Object.keys(CFG.jobs)[0], policy = "keep";
 let wrongChain = false;
-let typed = { dep: "1", adopt: "" }; // what the visitor has typed, kept across re-renders
+let typed = { dep: "1" }; // what the visitor has typed, kept across re-renders
 let sessions = store.get("sessions", {}), service = Object.keys(CFG.services ?? {})[0];
 let mySets = null; // the data sets this wallet owns at the chosen provider, found on the chain
 async function checkChain() {
@@ -109,21 +109,13 @@ function render() {
       ${mySets === null ? '<p class="muted">Looking for data sets you already have here…</p>'
         : mySets.length ? `<div class="row"><select id="mysets">${mySets.map((id) => `<option value="${id}">Data set #${id}</option>`).join("")}</select>
             <button class="b primary" id="openmine" ${busy ? "disabled" : ""}>Open it</button>
-            <span class="muted">or make another one below</span></div>`
+            <span class="muted">or make a new one below</span></div>`
         : '<p class="muted">You have no data set with this provider yet.</p>'}
-      <div class="row" style="margin-top:8px"><input type="text" id="adopt" value="${esc(typed.adopt)}" placeholder="or a data set number" style="width:200px">
-        <button class="b" id="adoptbtn" ${busy ? "disabled" : ""}>Open that one</button></div>
       <div class="drop" id="drop" style="margin-top:12px">Drop files here to create a data set with them</div>`}`;
   if ($("prov")) $("prov").onchange = (e) => { pick = e.target.value; store.set("provider", pick); set = null; mySets = null; render(); lookUpSets(); };
   if (!set && mySets === null && !busy) lookUpSets();
   if ($("openmine")) $("openmine").onclick = () => {
     const id = $("mysets").value;
-    run(`Reading data set #${id} from the chain`, async () => { set = await PW.readSet(pick, id, jobs); store.set("set-" + pick, id); });
-  };
-  if ($("adopt")) $("adopt").oninput = (e) => { typed.adopt = e.target.value; };
-  if ($("adoptbtn")) $("adoptbtn").onclick = () => {
-    const id = $("adopt").value.trim();
-    if (!/^\d+$/.test(id)) return alert("A data set number is a whole number, for example 38216.");
     run(`Reading data set #${id} from the chain`, async () => { set = await PW.readSet(pick, id, jobs); store.set("set-" + pick, id); });
   };
   if ($("forget")) $("forget").onclick = () => { set = null; store.set("set-" + pick, null); render(); };
