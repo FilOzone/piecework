@@ -51,12 +51,17 @@ export async function connect() {
 // Every step is a real transaction; the page says which one it is waiting for.
 export let onStep = () => {};
 export function reportSteps(fn) { onStep = fn; }
-const step = (text) => onStep(text);
+let lastStep = "";
+const step = (text) => { lastStep = text; onStep(text); };
 
 async function send(address, abi, functionName, args) {
   const { request } = await pub.simulateContract({ account: me, address, abi, functionName, args });
   const gas = (await pub.estimateContractGas({ account: me, address, abi, functionName, args })) * 3n / 2n;
+  // MetaMask does not always raise its window for a second transaction in the same flow, and a page that
+  // just spins looks broken. Say what is waiting, and where.
+  onStep(`${lastStep} — confirm in your wallet (open MetaMask if it did not come to the front)`);
   const hash = await wallet.writeContract({ ...request, account: me, chain, gas });
+  onStep(`${lastStep} — sent, waiting for a block (about 30 seconds)`);
   return pub.waitForTransactionReceipt({ hash, timeout: 600_000 });
 }
 

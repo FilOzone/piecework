@@ -30,9 +30,12 @@ $("csaddr").textContent = CFG.computeService;
 
 function render() {
   $("task").innerHTML = busy ? `<div class="task"><b><span class="spin"></span>${esc(busy)}</b>
-      <div class="muted">Each step is a real transaction on Filecoin Calibration and waits for a block, about 30 seconds.</div></div>`
+      <div class="muted">Each step is a real transaction on Filecoin Calibration and waits for a block, about 30 seconds.
+      If nothing seems to happen, open your wallet: it may be holding a request without showing it.
+      <button class="b" id="giveup" style="padding:4px 10px;margin-left:8px">Stop waiting</button></div></div>`
     : error ? `<div class="task err"><b>Failed</b><div>${esc(error)}</div></div>` : "";
 
+  if ($("giveup")) $("giveup").onclick = () => { busy = null; error = "You stopped waiting. If you confirmed in your wallet, the transaction may still go through — reload in a minute to see."; render(); };
   $("who").innerHTML = me ? `You are <code>${esc(me)}</code>` : "Not connected.";
   $("wallet").hidden = !!me;
   if (!me) {
