@@ -88,7 +88,8 @@ function render() {
     <p class="muted">${esc(p.note ?? "")}</p>
     ${CFG.providers.length > 1 ? `<div class="row"><select id="prov">${CFG.providers.map((x) =>
       `<option value="${esc(x.id)}" ${x.id === pick ? "selected" : ""}>${esc(x.name)}</option>`).join("")}</select></div>` : ""}
-    ${set ? `<p class="muted">Data set #${set.dataSetId}: ${files.length} pieces. Tick files to run a job over just those, or to remove them.</p>
+    ${set ? `<p class="muted">Data set #${set.dataSetId}: ${files.length} pieces. Tick files to run a job over just those, or to remove them.
+       You can hold as many data sets with a provider as you like — one per project, or a throwaway one for jobs that replace files.</p>
       <div class="tw"><table><thead><tr><th style="width:26px"></th><th>Piece</th><th>File</th><th>What</th></tr></thead><tbody>
       ${files.map(([pid, f]) => `<tr>
         <td><input type="checkbox" data-id="${pid}" ${picked.has(pid) ? "checked" : ""}></td>
@@ -101,13 +102,14 @@ function render() {
       <div class="row" style="margin-top:12px">
         <label class="b">Add files<input type="file" hidden multiple id="picker"></label>
         <button class="b" id="rm" ${picked.size && !busy ? "" : "disabled"}>Remove ${picked.size || ""} selected</button>
-        <button class="b" id="forget">Use a different data set</button></div>
+        <button class="b" id="forget">Switch data set, or start another</button></div>
       <div class="drop" id="drop" style="margin-top:12px">Drop files here to add them to data set #${set.dataSetId}</div>`
     : `<p class="muted">Two ways to start: open a data set you already have with this provider, or make a new one from files you drop here.
         Making one costs a small reserve in Filecoin Pay, which you get back if you ever close it.</p>
       ${mySets === null ? '<p class="muted">Looking for data sets you already have here…</p>'
         : mySets.length ? `<div class="row"><select id="mysets">${mySets.map((id) => `<option value="${id}">Data set #${id}</option>`).join("")}</select>
-            <button class="b primary" id="openmine" ${busy ? "disabled" : ""}>Open it</button></div>`
+            <button class="b primary" id="openmine" ${busy ? "disabled" : ""}>Open it</button>
+            <span class="muted">or make another one below</span></div>`
         : '<p class="muted">You have no data set with this provider yet.</p>'}
       <div class="row" style="margin-top:8px"><input type="text" id="adopt" value="${esc(typed.adopt)}" placeholder="or a data set number" style="width:200px">
         <button class="b" id="adoptbtn" ${busy ? "disabled" : ""}>Open that one</button></div>
