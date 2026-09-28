@@ -37,13 +37,57 @@ th{font-size:.75rem;text-transform:uppercase;letter-spacing:.06em;color:var(--in
 .drop{border:2px dashed var(--line);border-radius:10px;padding:18px;text-align:center;color:var(--ink-3);background:var(--surface-2)}
 .drop.over{border-color:var(--accent);background:var(--accent-soft);color:var(--accent)}
 a{color:var(--accent)}
+  /* The mark sits with the title rather than above it: this page is one product, not a page with a badge on it. */
+  .title { display: flex; align-items: center; gap: 14px; }
+  .mark { flex: 0 0 auto; display: inline-flex; line-height: 0; }
+  @media (max-width: 560px) { .mark svg { width: 34px; height: 34px; } .title { gap: 10px; } }
 </style>
 </head>
 <body>
 <div class="wrap">
   <div>
     <div class="muted">PieceWork · runs entirely in your browser</div>
-    <h1>Run programs over your data, where it is stored</h1>
+    <h1 class="title"><span class="mark" aria-hidden="true"><svg viewBox="0 0 52 50" width="46" height="46">
+      <!-- The Filecoin mark, exactly as filecoin.io publishes it (filecoin-project/filecoin.io,
+           static/images/filecoin-logo.svg). Nothing inside this nested svg is ours. -->
+      <svg x="0" y="4" width="40" height="40" viewBox="0 0 40 40">
+        <style>
+        .st1-logo {
+        fill-rule: evenodd;
+        clip-rule: evenodd;
+        fill: #fff
+        }
+        </style>
+        <defs>
+        <filter id="a-logo" filterUnits="userSpaceOnUse" x="0" y="0" width="40" height="40">
+        <feColorMatrix values="1 0 0 0 0 0 1 0 0 0 0 0 1 0 0 0 0 0 1 0" />
+        </filter>
+        </defs>
+        <mask maskUnits="userSpaceOnUse" x="0" y="0" width="40" height="40" id="b-logo_1">
+        <g filter="url(#a-logo)">
+        <path id="a-logo_1" class="st1-logo" d="M0 0h40v40H0V0z" />
+        </g>
+        </mask>
+        <path d="M20 40C9 40 0 31 0 19.9.1 8.9 9-.1 20.1 0 31.1.1 40 9 40 20.2 39.9 31.1 31 40 20 40" mask="url(#b-logo_1)" fill-rule="evenodd" clip-rule="evenodd" fill="#0090ff" />
+        <path class="st1-logo" d="M21.9 17.6l-.6 3.2 5.7.8-.4 1.5-5.6-.8c-.4 1.3-.6 2.7-1.1 3.9-.5 1.4-1 2.8-1.6 4.1-.8 1.7-2.2 2.9-4.1 3.2-1.1.2-2.3.1-3.2-.6-.3-.2-.6-.6-.6-.9 0-.4.2-.9.5-1.1.2-.1.7 0 1 .1.3.3.6.7.8 1.1.6.8 1.4.9 2.2.3.9-.8 1.4-1.9 1.7-3 .6-2.4 1.2-4.7 1.7-7.1v-.4l-5.3-.8.2-1.5 5.5.8.7-3.1-5.7-.9.2-1.6 5.9.8c.2-.6.3-1.1.5-1.6.5-1.8 1-3.6 2.2-5.2 1.2-1.6 2.6-2.6 4.7-2.5.9 0 1.8.3 2.4 1 .1.1.3.3.3.5 0 .4 0 .9-.3 1.2-.4.3-.9.2-1.3-.2-.3-.3-.5-.6-.8-.9-.6-.8-1.5-.9-2.2-.2-.5.5-1 1.2-1.3 1.9-.7 2.1-1.2 4.3-1.9 6.5l5.5.8-.4 1.5-5.3-.8" />
+      </svg>
+      <!-- Onchain Cloud's cloud, in the place it sits there. The white stroke underneath is the thin gap the
+           FOC mark leaves between the disc and the badge; the blue on top is the outline itself. -->
+      <g transform="translate(24,30) scale(0.55)">
+        <path id="pw-cloud" d="M10 27C4 27 0 23 0 18C0 13 4 9 9 9C10 4 15 0 21 0C28 0 34 5 35 12C38 13 40 16 40 19C40 23 36 27 32 27Z"
+              fill="#fff" stroke="#fff" stroke-width="9" stroke-linejoin="round"/>
+        <use href="#pw-cloud" fill="#fff" stroke="#0090FF" stroke-width="3.4"/>
+      </g>
+      <!-- And what PieceWork adds: the work, done on the pieces. -->
+      <g transform="translate(34,0) scale(0.55)">
+        <rect x="0" y="0" width="28" height="28" rx="7.5" fill="#fff" stroke="#fff" stroke-width="8"/>
+        <rect x="0" y="0" width="28" height="28" rx="7.5" fill="#fff" stroke="#0090FF" stroke-width="3"/>
+        <rect x="6.5" y="6.5" width="6.5" height="6.5" rx="1.5" fill="#0090FF"/>
+        <rect x="15" y="6.5" width="6.5" height="6.5" rx="1.5" fill="#0090FF"/>
+        <rect x="6.5" y="15" width="6.5" height="6.5" rx="1.5" fill="#0090FF"/>
+        <rect x="15.9" y="15.9" width="4.7" height="4.7" rx="1" fill="#fff" stroke="#0090FF" stroke-width="1.8"/>
+      </g>
+    </svg></span>Run programs over your data, where it is stored</h1>
     <p class="lede">Your files live in a data set at a storage provider on Filecoin Calibration. Here you order work over them: the price is
       held in Filecoin Pay, the provider runs the program next to your files, writes the results back into your data set, and is paid only
       when it delivers. Nothing here runs on anyone's server — your wallet signs, and your browser talks to the provider and to the chain.</p>
@@ -65,7 +109,7 @@ a{color:var(--accent)}
 <script type="module">
   // Every published version has its own address, but a browser caches by file name, so a visitor who has been
   // here before can keep running the old code. The stamp changes with each release and makes that impossible.
-  const V = "20260928-1741";
+  const V = "20260928-1836";
   import(`./ui.mjs?v=${V}`);
 </script>
 </body>

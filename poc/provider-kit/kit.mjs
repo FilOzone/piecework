@@ -328,11 +328,17 @@ async function liveRound(sessionId) {
   const exts = spec.inputExtensions ?? [];
   const match = spec.inputMatch ? new RegExp(spec.inputMatch, "i") : null;
   const mine = new Set(S.mine ?? []);
+  // Knowing only the pieces this session wrote is not enough: a second session over the same data set finds the
+  // first one's results, treats them as new input, and redacts the redaction. A service has to recognise its own
+  // output by name, whoever produced it, or the data set grows a layer with every session.
+  const ours = (spec.outputs ?? []).map((n) =>
+    new RegExp(`^${n.replace(/(\.[^.]+)$/, "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(-[\\w-]+)?\\${n.slice(n.lastIndexOf("."))}$`, "i"));
   const fresh = [];
   for (let id = S.scanned ?? 0; id < next; id++) {
     if (mine.has(String(id))) continue; // our own output, not new input
     if (!(await read(cfg.contracts.pdp, ABI.PDPVerifier, "pieceLive", [dataSetId, BigInt(id)]))) continue;
     const given = names[String(id)] ?? "";
+    if (ours.some((r) => r.test(given))) continue; // something this service wrote, in this session or an earlier one
     if (match ? !match.test(given) : exts.length && !exts.some((e) => given.toLowerCase().endsWith(e))) continue;
     fresh.push({ id, name: /^[\w .()-]{1,80}$/.test(given) ? given : `piece-${id}` });
   }
@@ -375,7 +381,7 @@ async function liveRound(sessionId) {
     // Each round writes its own files: the client's data set keeps every round, not just the last one.
     const files = spec.outputs
       .filter((n) => fs.existsSync(path.join(dir, "out", n)))
-      .map((n) => ({ name: n.replace(/(\.[^.]+)$/, `-${round}$1`), bytes: new Uint8Array(fs.readFileSync(path.join(dir, "out", n))) }));
+      .map((n) => ({ name: n.replace(/(\.[^.]+)$/, `-s${sessionId}r${round}$1`), bytes: new Uint8Array(fs.readFileSync(path.join(dir, "out", n))) }));
     if (!files.length) throw new Error("the program produced nothing");
     const { clientDataSetId } = await read(cfg.contracts.view, ABI.View, "getDataSet", [dataSetId]);
     const stored = await storeResults(dataSetId, clientDataSetId, files);
