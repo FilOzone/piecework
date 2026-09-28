@@ -17,6 +17,7 @@ let set = null, jobs = {}, picked = new Set(), busy = null, error = null, blockN
 let jobType = Object.keys(CFG.jobs)[0], policy = "keep";
 let wrongChain = false;
 let typed = { dep: "1", label: "" }; // what the visitor has typed, kept across re-renders
+let waiting = []; // files chosen but not yet uploaded, gathered from wherever they came from
 let sessions = {}, service = Object.keys(CFG.services ?? {})[0];
 let mySets = null; // the data sets this wallet owns at the chosen provider, found on the chain
 async function checkChain() {
@@ -100,10 +101,18 @@ function render() {
           : f.removable ? ' <span class="pill warn">you allowed removal</span>' : ""}</td></tr>`).join("")}
       </tbody></table></div>
       <div class="row" style="margin-top:12px">
-        <label class="b">Add files<input type="file" hidden multiple id="picker"></label>
+        <label class="b">Choose files<input type="file" hidden multiple id="picker"></label>
         <button class="b" id="rm" ${picked.size && !busy ? "" : "disabled"}>Remove ${picked.size || ""} selected</button>
         <button class="b" id="forget">Switch data set, or start a new one</button></div>
-      <div class="drop" id="drop" style="margin-top:12px">Drop files here to add them to data set #${set.dataSetId}</div>`
+      <div class="drop" id="drop" style="margin-top:12px">Drop files here to add them to data set #${set.dataSetId}</div>
+      ${waiting.length ? `<div class="card" style="margin-top:12px;background:var(--surface-2)">
+      <b>${waiting.length} file${waiting.length > 1 ? "s" : ""} ready to upload</b>
+      <div class="tw"><table><tbody>${waiting.map((f, i) => `<tr><td>${esc(f.name)}</td>
+        <td class="muted">${(f.size / 1024).toFixed(1)} kB</td>
+        <td><a data-drop="${i}">remove</a></td></tr>`).join("")}</tbody></table></div>
+      <div class="row" style="margin-top:10px">
+        <button class="b primary" id="confirmup" ${busy ? "disabled" : ""}>${set ? `Upload to data set #${set.dataSetId}` : "Create the data set with these"}</button>
+        <button class="b" id="clearup">Clear</button></div></div>` : ""}`
     : `<p class="muted">Two ways to start: open a data set you already have with this provider, or make a new one from files you drop here.
         Making one costs a small reserve in Filecoin Pay, which you get back if you ever close it.</p>
       ${mySets === null ? '<p class="muted">Looking for data sets you already have here…</p>'
@@ -113,9 +122,17 @@ function render() {
         : '<p class="muted">You have no data set with this provider yet.</p>'}
       <div class="row" style="margin-top:12px">
         <input type="text" id="label" value="${esc(typed.label ?? "")}" placeholder="name it, e.g. Q3 contracts" style="width:220px">
-        <label class="b primary">Choose files and create it<input type="file" hidden multiple id="newpicker"></label>
+        <label class="b primary">Choose files<input type="file" hidden multiple id="newpicker"></label>
         <span class="muted">or drop them below</span></div>
-      <div class="drop" id="drop" style="margin-top:8px">Drop files here to create a data set with them</div>`}`;
+      <div class="drop" id="drop" style="margin-top:8px">Drop files here to create a data set with them</div>
+      ${waiting.length ? `<div class="card" style="margin-top:12px;background:var(--surface-2)">
+      <b>${waiting.length} file${waiting.length > 1 ? "s" : ""} ready to upload</b>
+      <div class="tw"><table><tbody>${waiting.map((f, i) => `<tr><td>${esc(f.name)}</td>
+        <td class="muted">${(f.size / 1024).toFixed(1)} kB</td>
+        <td><a data-drop="${i}">remove</a></td></tr>`).join("")}</tbody></table></div>
+      <div class="row" style="margin-top:10px">
+        <button class="b primary" id="confirmup" ${busy ? "disabled" : ""}>${set ? `Upload to data set #${set.dataSetId}` : "Create the data set with these"}</button>
+        <button class="b" id="clearup">Clear</button></div></div>` : ""}`}`;
   if ($("prov")) $("prov").onchange = (e) => { pick = e.target.value; store.set("provider", pick); set = null; mySets = null; render(); lookUpSets(); };
   if (!set && mySets === null && !busy) lookUpSets();
   if ($("openmine")) $("openmine").onclick = () => {
@@ -124,9 +141,12 @@ function render() {
     run(`Reading data set #${id} from the chain`, async () => { set = { ...(await PW.readSet(pick, id, jobs)), label }; store.set("set-" + pick, id); });
   };
   if ($("forget")) $("forget").onclick = () => { set = null; store.set("set-" + pick, null); render(); };
-  if ($("picker")) $("picker").onchange = (e) => addFiles([...e.target.files]);
+  if ($("picker")) $("picker").onchange = (e) => { stage([...e.target.files]); e.target.value = ""; };
   if ($("label")) $("label").oninput = (e) => { typed.label = e.target.value; };
-  if ($("newpicker")) $("newpicker").onchange = (e) => addFiles([...e.target.files]);
+  if ($("newpicker")) $("newpicker").onchange = (e) => { stage([...e.target.files]); e.target.value = ""; };
+  if ($("confirmup")) $("confirmup").onclick = () => { const list = waiting; waiting = []; addFiles(list); };
+  if ($("clearup")) $("clearup").onclick = () => { waiting = []; render(); };
+  document.querySelectorAll("a[data-drop]").forEach((a) => (a.onclick = () => { waiting.splice(Number(a.dataset.drop), 1); render(); }));
   if ($("rm")) $("rm").onclick = () => {
     if (!confirm(`Remove ${picked.size} file(s)? PDP drops them at the provider's next proving period. This cannot be undone.`)) return;
     run("Removing files", async () => { await PW.removeFiles(pick, set.dataSetId, [...picked]); picked = new Set(); set = await PW.readSet(pick, set.dataSetId, jobs); });
@@ -138,7 +158,7 @@ function render() {
   if (drop) {
     drop.ondragover = (e) => { e.preventDefault(); drop.classList.add("over"); };
     drop.ondragleave = () => drop.classList.remove("over");
-    drop.ondrop = (e) => { e.preventDefault(); drop.classList.remove("over"); addFiles([...e.dataTransfer.files]); };
+    drop.ondrop = (e) => { e.preventDefault(); drop.classList.remove("over"); stage([...e.dataTransfer.files]); };
   }
 
   // ordering
@@ -232,6 +252,11 @@ function render() {
     jobs[b.dataset.refund].status = "refunded";
     await refreshMoney();
   })));
+}
+
+function stage(list) {
+  for (const f of list) if (!waiting.some((x) => x.name === f.name && x.size === f.size)) waiting.push(f);
+  render();
 }
 
 function addFiles(list) {

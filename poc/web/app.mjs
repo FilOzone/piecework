@@ -138,9 +138,22 @@ export async function createSet(providerId, files, label = "") {
     pieces: pieces.map(({ pieceCid, metadata }) => ({ pieceCid, metadata })), cdn: false,
     metadata: label ? { label } : undefined });
   const done = await SP.waitForCreateDataSetAddPieces({ statusUrl: created.statusUrl, timeout: 10 * 60_000 });
-  step(`Letting providers add job results to data set #${done.dataSetId}, only while a job is open`);
-  await send(C.fwss, FWSS_ABI, "setDataSetAuthorizer", [done.dataSetId, C.cs]);
-  return Number(done.dataSetId);
+  // The provider tells us which data set it made, but another client creating one at the same moment can make
+  // that answer wrong, and setting the authorizer on someone else's data set is refused. Check with the chain.
+  let id = Number(done.dataSetId);
+  const owner = await pub.readContract({ address: C.view, abi: ABI.FilecoinWarmStorageServiceStateView,
+    functionName: "getDataSet", args: [BigInt(id)] }).then((d) => d.payer, () => null);
+  if (!owner || getAddress(owner) !== me) {
+    step("The provider reported a data set that is not yours; asking Warm Storage which one is");
+    const mine = await pub.readContract({ address: C.view, abi: ABI.FilecoinWarmStorageServiceStateView,
+      functionName: "clientDataSets", args: [me] });
+    const fresh = mine.map(Number).filter((x) => !before.includes(x));
+    if (!fresh.length) throw new Error("the data set was created but could not be identified; reload and it will be in your list");
+    id = Math.max(...fresh);
+  }
+  step(`Letting providers add job results to data set #${id}, only while a job is open`);
+  await send(C.fwss, FWSS_ABI, "setDataSetAuthorizer", [BigInt(id), C.cs]);
+  return id;
 }
 
 export async function addFiles(providerId, dataSetId, files) {
