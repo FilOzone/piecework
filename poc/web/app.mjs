@@ -91,9 +91,9 @@ export async function deposit(amount) {
   const value = parseUnits(String(amount), 18);
   const held = await pub.readContract({ address: C.usdfc, abi: ERC20_ABI, functionName: "balanceOf", args: [me] });
   if (held < value) throw new Error(`your wallet holds ${formatUnits(held, 18)} ${CFG.token}, less than the ${amount} you asked for`);
-  step(`Letting Filecoin Pay take ${amount} ${CFG.token} from your wallet`);
+  step(`Letting Filecoin Pay take ${amount} ${CFG.token} from your wallet (1 of 2)`);
   await send(C.usdfc, ERC20_ABI, "approve", [C.payments, value]);
-  step("Depositing it into Filecoin Pay");
+  step(`Depositing ${amount} ${CFG.token} into Filecoin Pay (2 of 2)`);
   await send(C.payments, ABI.FilecoinPayV1, "deposit", [C.usdfc, me, value]);
 }
 
