@@ -167,7 +167,8 @@ async function runJob(ev) {
     const c = await read(cfg.contracts.pdp, ABI.PDPVerifier, "getPieceCid", [dataSetId, id]);
     const pieceCid = CID.decode(hexToBytes(c.data)).toString();
     const given = names[String(id)];
-    const safe = given && /^[\w .()-]{1,80}$/.test(given) ? given : `piece-${id}${spec.inputExtension ?? ""}`;
+    const ext = spec.inputExtensions?.[0] ?? spec.inputExtension ?? "";
+    const safe = given && /^[\w .()-]{1,80}$/.test(given) ? given : `piece-${id}${ext}`;
     fs.writeFileSync(path.join(dir, "in", fs.existsSync(path.join(dir, "in", safe)) ? `${id}-${safe}` : safe), await fetchPiece(pieceCid));
   }
   J.inputBytes = fs.readdirSync(path.join(dir, "in")).reduce((n, f) => n + fs.statSync(path.join(dir, "in", f)).size, 0);

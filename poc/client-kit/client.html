@@ -248,10 +248,11 @@ function render() {
 
   // 3. order
   jobType = jobType ?? S.jobTypes[0]?.type;
-  const ext = S.jobTypes.find((j) => j.type === jobType)?.inputExtension ?? "";
-  const eligible = files.filter(([, f]) => f.kind === "input" && !f.removing && !f.gone && f.name.endsWith(ext));
+  const exts = S.jobTypes.find((j) => j.type === jobType)?.inputExtensions ?? [""];
+  const ext = exts.join(", ");
+  const eligible = files.filter(([, f]) => f.kind === "input" && !f.removing && !f.gone && exts.some((e) => f.name.endsWith(e)));
   const ticked = [...checked].filter((id) => set?.files[id] && !set.files[id].removing && !set.files[id].gone);
-  const wrongKind = ticked.filter((id) => !set.files[id].name.endsWith(ext));
+  const wrongKind = ticked.filter((id) => !exts.some((e) => set.files[id].name.endsWith(e)));
   $("ordercard").innerHTML = `<h2>3. Order a job from ${esc(P.name)}</h2>
     <p class="muted">Over data set ${set ? `#${set.dataSetId}` : "— none yet"}. The price is put on hold in Filecoin Pay. The provider runs the program next to your
     files, adds the results to your data set, and is paid only if it does so before the deadline (about 20 minutes).</p>

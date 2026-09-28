@@ -2,29 +2,39 @@
   "pii-redact:v1": {
     "name": "Find and remove personal data in my documents",
     "dockerImage": "piecework/pii-redact:v1",
-    "inputExtension": ".txt",
     "outputs": [
       "pii-report.txt",
       "redacted-documents.txt"
+    ],
+    "inputExtensions": [
+      ".txt"
     ]
   },
   "indexer:v1": {
     "name": "Build a search index of my files",
     "dockerImage": "alpine:3.20",
-    "inputExtension": ".txt",
     "outputs": [
       "search-index.txt"
     ],
-    "script": "for f in /in/*; do tr 'A-Z' 'a-z' < \"$f\" | tr -cs 'a-z0-9' '\\n' | grep -E '^.{5,}$' | sort -u | sed \"s|$| $(basename \"$f\")|\"; done | awk '{a[$1]=a[$1]\" \"$2} END{for (w in a) print w \":\" a[w]}' | sort > /out/search-index.txt"
+    "script": "for f in /in/*; do tr 'A-Z' 'a-z' < \"$f\" | tr -cs 'a-z0-9' '\\n' | grep -E '^.{5,}$' | sort -u | sed \"s|$| $(basename \"$f\")|\"; done | awk '{a[$1]=a[$1]\" \"$2} END{for (w in a) print w \":\" a[w]}' | sort > /out/search-index.txt",
+    "inputExtensions": [
+      ".txt",
+      ".md",
+      ".csv"
+    ]
   },
   "embed:v1": {
     "name": "Make my documents searchable by meaning (embeddings)",
     "dockerImage": "piecework/embed:v1",
-    "inputExtension": ".txt",
     "outputs": [
       "embeddings.jsonl",
       "embeddings-report.txt"
     ],
-    "price": "0.3"
+    "price": "0.3",
+    "inputExtensions": [
+      ".txt",
+      ".md",
+      ".csv"
+    ]
   }
 }

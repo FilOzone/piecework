@@ -373,20 +373,21 @@ export function createPilot({ HERE, RUN, NET, C, ABI, pub, signer, say, demoData
   function order(dataSetId, type, policy = "keep", pieceIds = null) {
     const set = getSet(dataSetId), p = provider(set.provider), spec = JOBS[type];
     if (!spec) throw new Error("unknown job type");
-    const usable = ([pid, f]) => f.kind === "input" && !f.removing && !f.gone && f.name.endsWith(spec.inputExtension ?? "");
+    const exts = spec.inputExtensions ?? [spec.inputExtension ?? ""];
+    const usable = ([pid, f]) => f.kind === "input" && !f.removing && !f.gone && exts.some((e) => f.name.endsWith(e));
     let inputs;
     if (pieceIds?.length) {
       for (const pid of pieceIds) {
         const f = set.files[String(pid)];
         if (!f) throw new Error(`piece #${pid} is not in this data set`);
         if (f.gone || f.removing) throw new Error(`${f.name} is on its way out of the data set and cannot be used`);
-        if (!f.name.endsWith(spec.inputExtension ?? "")) throw new Error(`${f.name} is not a ${spec.inputExtension} file, which is what this job reads`);
+        if (!exts.some((e) => f.name.endsWith(e))) throw new Error(`${f.name} is not a ${exts.join(" or ")} file, which is what this job reads`);
       }
       inputs = pieceIds.map((x) => BigInt(x));
     } else {
       inputs = Object.entries(set.files).filter(usable).map(([pid]) => BigInt(pid));
     }
-    if (!inputs.length) throw new Error(`no ${spec.inputExtension} files in this data set for this job`);
+    if (!inputs.length) throw new Error(`no ${exts.join(" or ")} files in this data set for this job`);
     const price = parseUnits(spec.price ?? "0.5", 18);
     const removals = removalsFor(policy, set, inputs);
     const client = me();
@@ -592,7 +593,8 @@ export function createPilot({ HERE, RUN, NET, C, ABI, pub, signer, say, demoData
   async function state() {
     const connected = !!signer.address;
     const base = { signer: signer.mode, client: signer.address ?? null, token: NET.token, explorer: NET.explorer,
-      chainId: NET.chain.id, task, jobTypes: Object.entries(JOBS).map(([type, j]) => ({ type, name: j.name, price: j.price ?? "0.5", inputExtension: j.inputExtension })),
+      chainId: NET.chain.id, task, jobTypes: Object.entries(JOBS).map(([type, j]) => ({ type, name: j.name, price: j.price ?? "0.5",
+        inputExtensions: j.inputExtensions ?? [j.inputExtension ?? ""] })),
       services: Object.entries(SERVICES).map(([type, x]) => ({ type, name: x.name, rate: x.rate ?? "0.01", note: x.note ?? "" })),
       policies: [{ id: "keep", label: "Keep everything (default)" },
         { id: "replace-previous", label: "Keep only the newest result: the provider may remove earlier results" },

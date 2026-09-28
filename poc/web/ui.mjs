@@ -144,7 +144,8 @@ function render() {
   $("ordercard").hidden = !set;
   if (set) {
     const spec = CFG.jobs[jobType];
-    const eligible = files.filter(([, f]) => f.name.endsWith(spec.inputExtension ?? ""));
+    const exts = spec.inputExtensions ?? [spec.inputExtension ?? ""];
+  const eligible = files.filter(([, f]) => exts.some((e) => f.name.endsWith(e)));
     const use = picked.size ? [...picked] : eligible.map(([pid]) => pid);
     $("ordercard").innerHTML = `<h2>Order a job</h2>
       <p class="muted">The price is held in Filecoin Pay. The provider runs the program next to your files, adds the results to your data set,
@@ -154,7 +155,7 @@ function render() {
         <select id="pol">${CFG.policies.map((x) => `<option value="${esc(x.id)}" ${x.id === policy ? "selected" : ""}>${esc(x.label)}</option>`).join("")}</select>
         <button class="b primary" id="orderbtn" ${busy || !use.length ? "disabled" : ""}>Order</button>
       </div>
-      <p class="muted" style="margin:8px 0 0">It will read <b>${use.length} file${use.length === 1 ? "" : "s"}</b>${picked.size ? " (the ones you ticked)" : ` — every ${esc(spec.inputExtension)} file in the data set`}.
+      <p class="muted" style="margin:8px 0 0">It will read <b>${use.length} file${use.length === 1 ? "" : "s"}</b>${picked.size ? " (the ones you ticked)" : ` — every ${esc(exts.join(", "))} file in the data set`}.
       ${policy === "replace-inputs" ? "After delivery the provider may remove exactly those files. This cannot be undone." : "Nothing is removed."}</p>`;
     $("jt").onchange = (e) => { jobType = e.target.value; render(); };
     $("pol").onchange = (e) => { policy = e.target.value; render(); };

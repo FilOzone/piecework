@@ -91,7 +91,7 @@ def process(doc):
 
 
 def main():
-    files = sorted(f for f in os.listdir(IN) if f.endswith(".txt"))
+    files = sorted(f for f in os.listdir(IN) if f.endswith((".txt", ".md", ".csv")))
     docs = []  # (file, index, text)
     for f in files:
         with open(os.path.join(IN, f), encoding="utf-8", errors="replace") as fh:
