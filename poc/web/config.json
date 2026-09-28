@@ -23,7 +23,7 @@
       "name": "@TippyFlits (ezpdpz-calib)",
       "address": "0xa3971A7234a3379A1813d9867B531e7EeB20ae07",
       "curioUrl": "https://calib.ezpdpz.net",
-      "note": "Curio with PDP in the UK; registry id 9 on Calibration. Runs the PieceWork provider kit."
+      "note": "A Filecoin storage provider running Curio, proving it still holds your data with PDP. Registry id 9 on Calibration; it runs the PieceWork provider kit to sell compute as well as storage."
     }
   ],
   "jobs": {
