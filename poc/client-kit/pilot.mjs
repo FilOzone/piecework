@@ -537,13 +537,14 @@ export function createPilot({ HERE, RUN, NET, C, ABI, pub, signer, say, demoData
         if (set) set.files[String(pid)] = { name: `${names[i] ?? "result"} (job #${jobId})`, cid, kind: "output" };
       }
       j.outputs = outputs; j.status = "paid"; j.paidTx = paid[0]?.transactionHash;
-      if (set && j.policy && j.policy !== "keep") { // the provider may now remove those pieces; mark them
-        for (const [pid, f] of Object.entries(set.files))
-          if ((j.policy === "replace-inputs" && f.kind === "input") || (j.policy === "replace-previous" && f.kind === "output" && !outputs.some((o) => o.pieceId === pid))) {
-            f.removable = true;
-            f.removableJob = String(jobId);
-            f.removableContract = C.cs;
-          }
+      if (set && j.policy && j.policy !== "keep") {
+        // the contract says which pieces it granted, and only those: RemovalAllowed carries the list
+        const granted = await pub.getContractEvents({ address: C.cs, abi: ABI.ComputeService, eventName: "RemovalAllowed",
+          fromBlock: BigInt(j.fromBlock), args: { jobId: BigInt(jobId) } }).catch(() => []);
+        for (const pid of granted[0]?.args?.pieceIds ?? []) {
+          const f = set.files[String(pid)];
+          if (f) { f.removable = true; f.removableJob = String(jobId); f.removableContract = C.cs; }
+        }
       }
       save();
     } else if (s === 3) { j.status = "expired"; save(); }
@@ -641,11 +642,29 @@ export function createPilot({ HERE, RUN, NET, C, ABI, pub, signer, say, demoData
       const still = await pub.readContract({ address: C.cs, abi: ABI.ComputeService, functionName: "mayRemove",
         args: [BigInt(set.dataSetId), getAddress(p.address), BigInt(pid)] });
       if (still) continue;
-      delete f.removable;
+      delete f.removable; delete f.removableJob; delete f.removableContract;
       const live = await pub.readContract({ address: C.pdp, abi: ABI.PDPVerifier, functionName: "pieceLive", args: [BigInt(set.dataSetId), BigInt(pid)] });
-      if (live) f.removing = true; else f.gone = true;
+      if (!live) f.gone = true;
+      else if ((await scheduledForRemoval(set.dataSetId)).has(String(pid))) f.removing = true; // the provider used it
       save();
     }
+  }
+
+  // Which pieces the provider has actually handed to PDP for removal. PDPVerifier says so; a permission that
+  // is simply missing says nothing (it may have been revoked, or belong to a contract we no longer use).
+  const removalScans = {};
+  async function scheduledForRemoval(dataSetId) {
+    const key = String(dataSetId);
+    if (removalScans[key] && Date.now() - removalScans[key].at < 60_000) return removalScans[key].ids;
+    const ids = new Set();
+    const head = Number(await pub.getBlockNumber());
+    for (let to = head, n = 0; n < 8; to -= 300, n++) { // a couple of hours of Calibration blocks
+      const logs = await pub.getContractEvents({ address: C.pdp, abi: ABI.PDPVerifier, eventName: "PiecesScheduledForRemoval",
+        fromBlock: BigInt(Math.max(0, to - 299)), toBlock: BigInt(to) }).catch(() => []);
+      for (const l of logs) if (String(l.args.setId) === key) for (const id of l.args.pieceIds) ids.add(String(id));
+    }
+    removalScans[key] = { at: Date.now(), ids };
+    return ids;
   }
 
   async function file(dataSetId, pieceId) {
