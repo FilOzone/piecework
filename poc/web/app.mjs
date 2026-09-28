@@ -17,6 +17,15 @@ const chain = CFG.chainId === 314 ? Chains.mainnet : Chains.calibration;
 const pub = createPublicClient({ chain, transport: http(CFG.rpc) });
 export { C, chain, pub };
 
+// The names of files this browser has uploaded, by piece CID. Warm Storage records the name in a PieceAdded
+// event, but a public node can take a while to index one, and until then the page would rather use what it
+// already knows than call the file "piece-6".
+const KNOWN = "pw-names";
+const knownNames = () => { try { return JSON.parse(localStorage.getItem(KNOWN)) ?? {}; } catch { return {}; } };
+function rememberName(cid, name) {
+  try { const all = knownNames(); all[String(cid)] = name; localStorage.setItem(KNOWN, JSON.stringify(all)); } catch { /* private window */ }
+}
+
 const FWSS_ABI = [{ type: "function", name: "setDataSetAuthorizer", stateMutability: "nonpayable",
   inputs: [{ name: "dataSetId", type: "uint256" }, { name: "authorizer", type: "address" }], outputs: [] }];
 const ERC20_ABI = [
@@ -119,6 +128,7 @@ export async function createSet(providerId, files, label) {
     const bytes = new Uint8Array(await f.arrayBuffer());
     const pieceCid = await Piece.calculate(bytes);
     await SP.uploadPiece({ serviceURL: p.curioUrl, data: bytes, pieceCid });
+    rememberName(pieceCid, f.name);
     pieces.push({ pieceCid, metadata: { name: f.name }, name: f.name });
   }
   step("Creating your data set with the provider (you sign, it submits)");
@@ -139,6 +149,7 @@ export async function addFiles(providerId, dataSetId, files) {
     const bytes = new Uint8Array(await f.arrayBuffer());
     const pieceCid = await Piece.calculate(bytes);
     await SP.uploadPiece({ serviceURL: p.curioUrl, data: bytes, pieceCid });
+    rememberName(pieceCid, f.name);
     pieces.push({ pieceCid, metadata: { name: f.name } });
   }
   step("Adding them to your data set (you sign, the provider submits)");
@@ -161,18 +172,30 @@ async function clientDataSetId(dataSetId) {
 }
 
 // What is in a data set, read from the chain and from the provider. Piece names are the ones the client gave.
-export async function readSet(providerId, dataSetId) {
+export async function readSet(providerId, dataSetId, jobs = {}) {
   const p = provider(providerId);
   const d = await pub.readContract({ address: C.view, abi: ABI.FilecoinWarmStorageServiceStateView, functionName: "getDataSet", args: [BigInt(dataSetId)] });
   if (!d?.payer || getAddress(d.payer) !== me) throw new Error(`data set #${dataSetId} is not paid for by your wallet`);
   if (getAddress(d.serviceProvider) !== getAddress(p.address)) throw new Error(`data set #${dataSetId} is not held by ${p.name}`);
   const next = Number(await pub.readContract({ address: C.pdp, abi: ABI.PDPVerifier, functionName: "getNextPieceId", args: [BigInt(dataSetId)] }));
   const names = await pieceNames(dataSetId);
+  const mine = knownNames();
   const files = {};
   for (let i = 0; i < next; i++) {
     if (!(await pub.readContract({ address: C.pdp, abi: ABI.PDPVerifier, functionName: "pieceLive", args: [BigInt(dataSetId), BigInt(i)] }))) continue;
     const raw = await pub.readContract({ address: C.pdp, abi: ABI.PDPVerifier, functionName: "getPieceCid", args: [BigInt(dataSetId), BigInt(i)] });
-    files[i] = { name: names[String(i)] ?? `piece-${i}`, cid: CID.decode(hexToBytes(raw.data)).toString() };
+    const cid = CID.decode(hexToBytes(raw.data)).toString();
+    files[i] = { name: names[String(i)] ?? mine[cid] ?? `piece-${i}`, cid };
+  }
+  // what each piece is: a result of a job, a file of yours, on its way out, or one the provider may clear away
+  for (const j of Object.values(jobs)) {
+    if (Number(j.dataSetId) !== Number(dataSetId)) continue;
+    for (const o of j.outputs ?? []) if (files[o.pieceId]) Object.assign(files[o.pieceId], { kind: "output", name: `${o.name} (job #${j.jobId})` });
+  }
+  const m = await marks(dataSetId, p.address).catch(() => null);
+  if (m) for (const [pid, f] of Object.entries(files)) {
+    if (m.scheduled.has(pid)) f.removing = true;
+    else if (m.granted.has(pid) && m.still[pid]) f.removable = true;
   }
   return { dataSetId: Number(dataSetId), provider: p.id, files, authorizer: d.payer };
 }
@@ -193,6 +216,57 @@ async function pieceNames(dataSetId) {
 }
 
 export const fileUrl = (providerId, cid) => `${provider(providerId).curioUrl.replace(/\/$/, "")}/piece/${cid}`;
+
+// Everything this page knows, it can read back from the chain. That matters more here than in a normal web
+// app: each published version has its own address, so its own origin, so its own empty browser storage. The
+// jobs and the marks on the files survive because they are on chain, not because the browser kept them.
+const CHUNK = 300, WINDOW = 16; // public nodes refuse a wide eth_getLogs range; this is a few hours of blocks
+
+async function inWindow(fn) {
+  const head = Number(await pub.getBlockNumber());
+  const out = [];
+  for (let to = head, n = 0; n < WINDOW; to -= CHUNK, n++) {
+    out.push(...await fn(BigInt(Math.max(0, to - CHUNK + 1)), BigInt(to)));
+  }
+  return out;
+}
+
+export async function findJobs() {
+  const logs = await inWindow((fromBlock, toBlock) => pub.getContractEvents({ address: C.cs, abi: ABI.ComputeService,
+    eventName: "JobPosted", args: { client: me }, fromBlock, toBlock }).catch(() => []));
+  const byDigest = Object.fromEntries(Object.keys(CFG.jobs).map((t) => [keccak256(toHex(t)), t]));
+  const jobs = {};
+  for (const l of logs) {
+    const type = byDigest[l.args.imageDigest];
+    const p = CFG.providers.find((x) => getAddress(x.address) === getAddress(l.args.provider));
+    jobs[String(l.args.jobId)] = {
+      jobId: String(l.args.jobId), type: type ?? l.args.imageDigest.slice(0, 10), provider: p?.id ?? l.args.provider,
+      dataSetId: Number(l.args.dataSetId), inputs: l.args.inputPieceIds.length, price: formatUnits(l.args.price, 18),
+      deadline: Number(l.args.deadline), fromBlock: Number(l.blockNumber), tx: l.transactionHash,
+    };
+  }
+  for (const [id, j] of Object.entries(jobs)) Object.assign(j, await jobStatus(id, j.fromBlock, j.type).catch(() => ({})));
+  return jobs;
+}
+
+// Which pieces the provider has been allowed to clear away, and which it has already handed to PDP.
+async function marks(dataSetId, providerAddress) {
+  const granted = new Set(), scheduled = new Set();
+  for (const l of await inWindow((fromBlock, toBlock) => pub.getContractEvents({ address: C.cs, abi: ABI.ComputeService,
+    eventName: "RemovalAllowed", fromBlock, toBlock }).catch(() => []))) {
+    if (Number(l.args.dataSetId) === Number(dataSetId)) for (const p of l.args.pieceIds) granted.add(String(p));
+  }
+  for (const l of await inWindow((fromBlock, toBlock) => pub.getContractEvents({ address: C.pdp, abi: ABI.PDPVerifier,
+    eventName: "PiecesScheduledForRemoval", fromBlock, toBlock }).catch(() => []))) {
+    if (Number(l.args.setId) === Number(dataSetId)) for (const p of l.args.pieceIds) scheduled.add(String(p));
+  }
+  const still = {};
+  for (const pid of granted) {
+    still[pid] = await pub.readContract({ address: C.cs, abi: ABI.ComputeService, functionName: "mayRemove",
+      args: [BigInt(dataSetId), getAddress(providerAddress), BigInt(pid)] }).catch(() => false);
+  }
+  return { granted, scheduled, still };
+}
 
 // ---------------------------------------------------------------- jobs
 
@@ -237,6 +311,59 @@ export async function jobStatus(jobId, fromBlock, type) {
     out.outputs.push({ pieceId: String(pid), name: names[i] ?? `result-${i + 1}`, cid: CID.decode(hexToBytes(raw.data)).toString() });
   }
   out.paidTx = paid[0]?.transactionHash;
+  return out;
+}
+
+// ---------------------------------------------------------------- pay for time
+
+export async function openSession(providerId, dataSetId, type) {
+  await onTheRightChain();
+  const p = provider(providerId), spec = CFG.services[type];
+  const rate = parseUnits(spec.rate, 18);
+  const epochs = BigInt(spec.lockupEpochs ?? 60);
+  const needed = rate * epochs;
+  const [, , available] = await pub.readContract({ address: C.payments, abi: ABI.FilecoinPayV1, functionName: "getAccountInfoIfSettled", args: [C.usdfc, me] });
+  if (available < needed)
+    throw new Error(`the provider holds ${formatUnits(needed, 18)} ${CFG.token} as a safety margin while this runs, and only ${Number(formatUnits(available, 18)).toFixed(3)} is in Filecoin Pay.`);
+  const [, rateAllowance, lockupAllowance, rateUsage, lockupUsage, maxLockupPeriod] = await pub.readContract({ address: C.payments,
+    abi: ABI.FilecoinPayV1, functionName: "operatorApprovals", args: [C.usdfc, me, C.cs] });
+  if (rateAllowance - rateUsage < rate || lockupAllowance - lockupUsage < needed || maxLockupPeriod < epochs) {
+    step("Renewing the budget you give the compute service");
+    await send(C.payments, ABI.FilecoinPayV1, "setOperatorApproval",
+      [C.usdfc, C.cs, true, rateUsage + rate * 4n, lockupUsage + needed * 4n, epochs * 4n > maxLockupPeriod ? epochs * 4n : maxLockupPeriod]);
+  }
+  step(`Opening the session at ${spec.rate} ${CFG.token} per epoch — nothing is charged until the provider says it is running`);
+  const r = await send(C.cs, ABI.ComputeService, "openSession",
+    [getAddress(p.address), keccak256(toHex(type)), rate, epochs, BigInt(dataSetId)]);
+  for (const log of r.logs) {
+    try {
+      const ev = decodeEventLog({ abi: ABI.ComputeService, data: log.data, topics: log.topics });
+      if (ev.eventName === "SessionOpened") return { sessionId: String(ev.args.sessionId), tx: r.transactionHash, fromBlock: Number(r.blockNumber) };
+    } catch { /* other contracts' events */ }
+  }
+  throw new Error("the session went on-chain but its number could not be read");
+}
+
+export async function closeSession(sessionId) {
+  step("Closing the session: the service stops and so does the charge, at this epoch");
+  await send(C.cs, ABI.ComputeService, "closeSession", [BigInt(sessionId)]);
+}
+
+const SESSION_STATUS = ["none", "waiting for the provider", "running", "closed"];
+
+export async function sessionStatus(sessionId, fromBlock, rate) {
+  const s = await pub.readContract({ address: C.cs, abi: ABI.ComputeService, functionName: "sessions", args: [BigInt(sessionId)] });
+  const out = { status: SESSION_STATUS[Number(s[7])] ?? "unknown", epochs: 0, spent: "0" };
+  const ready = await pub.getContractEvents({ address: C.cs, abi: ABI.ComputeService, eventName: "SessionReady",
+    fromBlock: BigInt(fromBlock), args: { sessionId: BigInt(sessionId) } }).catch(() => []);
+  if (!ready[0]) return out;
+  const startedAt = Number(ready[0].args.epoch);
+  const closed = await pub.getContractEvents({ address: C.cs, abi: ABI.ComputeService, eventName: "SessionClosed",
+    fromBlock: BigInt(fromBlock), args: { sessionId: BigInt(sessionId) } }).catch(() => []);
+  const until = closed[0] ? Number(closed[0].blockNumber) : Number(await pub.getBlockNumber());
+  out.epochs = Math.max(0, until - startedAt);
+  out.spent = (Number(rate) * out.epochs).toFixed(4);
+  out.startedAt = startedAt;
   return out;
 }
 

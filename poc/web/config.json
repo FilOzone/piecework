@@ -27,16 +27,56 @@
     }
   ],
   "jobs": {
-    "pii-redact:v1": { "name": "Find and remove personal data in my documents", "inputExtension": ".txt", "price": "0.5",
-      "outputs": ["pii-report.txt", "redacted-documents.txt"], "deadlineEpochs": 40 },
-    "embed:v1": { "name": "Make my documents searchable by meaning (embeddings)", "inputExtension": ".txt", "price": "0.3",
-      "outputs": ["embeddings.jsonl", "embeddings-report.txt"], "deadlineEpochs": 40 },
-    "indexer:v1": { "name": "Build a search index of my files", "inputExtension": ".txt", "price": "0.5",
-      "outputs": ["search-index.txt"], "deadlineEpochs": 40 }
+    "pii-redact:v1": {
+      "name": "Find and remove personal data in my documents",
+      "inputExtension": ".txt",
+      "price": "0.5",
+      "outputs": [
+        "pii-report.txt",
+        "redacted-documents.txt"
+      ],
+      "deadlineEpochs": 40
+    },
+    "embed:v1": {
+      "name": "Make my documents searchable by meaning (embeddings)",
+      "inputExtension": ".txt",
+      "price": "0.3",
+      "outputs": [
+        "embeddings.jsonl",
+        "embeddings-report.txt"
+      ],
+      "deadlineEpochs": 40
+    },
+    "indexer:v1": {
+      "name": "Build a search index of my files",
+      "inputExtension": ".txt",
+      "price": "0.5",
+      "outputs": [
+        "search-index.txt"
+      ],
+      "deadlineEpochs": 40
+    }
   },
   "policies": [
-    { "id": "keep", "label": "Keep everything (default)" },
-    { "id": "replace-previous", "label": "Keep only the newest result" },
-    { "id": "replace-inputs", "label": "Replace the originals" }
-  ]
+    {
+      "id": "keep",
+      "label": "Keep everything (default)"
+    },
+    {
+      "id": "replace-previous",
+      "label": "Keep only the newest result"
+    },
+    {
+      "id": "replace-inputs",
+      "label": "Replace the originals"
+    }
+  ],
+  "services": {
+    "workspace:v1": {
+      "name": "A private workspace next to my data",
+      "rate": "0.002",
+      "lockupEpochs": 60,
+      "note": "A machine with your files mounted read-only, for as long as you keep it. Nothing leaves the provider; you pay for every epoch it runs, and closing it stops the charge at that epoch."
+    }
+  }
 }
