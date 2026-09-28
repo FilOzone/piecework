@@ -14,6 +14,13 @@ const store = {
 let me = null, money = null, pick = store.get("provider", CFG.providers[0].id);
 let set = null, jobs = store.get("jobs", {}), picked = new Set(), busy = null, error = null, blockNow = 0;
 let jobType = Object.keys(CFG.jobs)[0], policy = "keep";
+let wrongChain = false;
+async function checkChain() {
+  if (!window.ethereum || !me) return;
+  const at = await window.ethereum.request({ method: "eth_chainId" }).catch(() => null);
+  const now = at !== "0x" + CFG.chainId.toString(16);
+  if (now !== wrongChain) { wrongChain = now; render(); }
+}
 
 PW.reportSteps((text) => { busy = text; render(); });
 
@@ -36,7 +43,9 @@ function render() {
     : error ? `<div class="task err"><b>Failed</b><div>${esc(error)}</div></div>` : "";
 
   if ($("giveup")) $("giveup").onclick = () => { busy = null; error = "You stopped waiting. If you confirmed in your wallet, the transaction may still go through — reload in a minute to see."; render(); };
-  $("who").innerHTML = me ? `You are <code>${esc(me)}</code>` : "Not connected.";
+  $("who").innerHTML = me
+    ? `You are <code>${esc(me)}</code>${wrongChain ? ` · <span class="pill bad">your wallet is on another network — switch it to Filecoin ${esc(CFG.network)}</span>` : ` · Filecoin ${esc(CFG.network)}`}`
+    : "Not connected.";
   $("wallet").hidden = !!me;
   if (!me) {
     $("wallet").innerHTML = `<h2>Connect your wallet</h2>
@@ -203,4 +212,5 @@ async function poll() {
   }
   render();
   setInterval(() => { if (me && !busy) poll(); }, 10_000);
+  setInterval(checkChain, 3000);
 })();

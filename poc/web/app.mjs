@@ -54,7 +54,20 @@ export function reportSteps(fn) { onStep = fn; }
 let lastStep = "";
 const step = (text) => { lastStep = text; onStep(text); };
 
+// The wallet can be moved to another network at any moment, and a transaction sent to the wrong chain either
+// wastes real money or fails confusingly. Check before every single one.
+async function onTheRightChain() {
+  const want = "0x" + CFG.chainId.toString(16);
+  let at = await window.ethereum.request({ method: "eth_chainId" });
+  if (at === want) return;
+  onStep(`Your wallet is on another network — switch it to Filecoin ${CFG.network} to continue`);
+  await window.ethereum.request({ method: "wallet_switchEthereumChain", params: [{ chainId: want }] });
+  at = await window.ethereum.request({ method: "eth_chainId" });
+  if (at !== want) throw new Error(`your wallet is on chain ${parseInt(at, 16)}, and this page only works on Filecoin ${CFG.network} (${CFG.chainId}). Switch networks in your wallet and try again.`);
+}
+
 async function send(address, abi, functionName, args) {
+  await onTheRightChain();
   const { request } = await pub.simulateContract({ account: me, address, abi, functionName, args });
   const gas = (await pub.estimateContractGas({ account: me, address, abi, functionName, args })) * 3n / 2n;
   // MetaMask does not always raise its window for a second transaction in the same flow, and a page that
@@ -90,6 +103,7 @@ const provider = (id) => CFG.providers.find((p) => p.id === id) ?? CFG.providers
 
 export async function createSet(providerId, files, label) {
   const p = provider(providerId);
+  await onTheRightChain();
   step("Checking your storage budget with Warm Storage");
   const [, rateAllowance, lockupAllowance, rateUsage, lockupUsage, maxLockupPeriod] = await pub.readContract({ address: C.payments,
     abi: ABI.FilecoinPayV1, functionName: "operatorApprovals", args: [C.usdfc, me, C.fwss] });
@@ -118,6 +132,7 @@ export async function createSet(providerId, files, label) {
 
 export async function addFiles(providerId, dataSetId, files) {
   const p = provider(providerId);
+  await onTheRightChain();
   const pieces = [];
   for (const f of files) {
     step(`Uploading ${f.name}`);
@@ -134,6 +149,7 @@ export async function addFiles(providerId, dataSetId, files) {
 
 export async function removeFiles(providerId, dataSetId, pieceIds) {
   const p = provider(providerId);
+  await onTheRightChain();
   step("Signing the removal; the provider submits it to PDP");
   await SP.schedulePieceDeletions(wallet, { serviceURL: p.curioUrl, dataSetId: BigInt(dataSetId),
     clientDataSetId: await clientDataSetId(dataSetId), pieceIds: pieceIds.map((x) => BigInt(x)) });
