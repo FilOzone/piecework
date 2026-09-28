@@ -79,7 +79,7 @@ const fmt = (x) => Number(formatUnits(x, 18)).toFixed(4);
 const NET = CAL
   ? {
     chain: filecoinCalibration, rpc: "https://api.calibration.node.glif.io/rpc/v1",
-    rpcBackup: "https://rpc.ankr.com/filecoin_testnet", epochSeconds: 30, token: "USDFC",
+    rpcBackup: "https://rpc.ankr.com/filecoin_testnet", epochSeconds: 30, token: "tUSDFC",
     explorer: "https://filecoin-testnet.blockscout.com/tx/", poll: 5000, settleEvery: 4,
     session: { rate: U("0.01"), lockupPeriod: 10n }, // 0.01 per 30 s; margin = 10 epochs (5 min)
     deadlines: { index: 20n, sales: 20n, late: 4n },

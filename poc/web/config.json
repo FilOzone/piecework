@@ -3,7 +3,7 @@
   "chainId": 314159,
   "rpc": "https://api.calibration.node.glif.io/rpc/v1",
   "explorer": "https://filecoin-testnet.blockscout.com/tx/",
-  "token": "USDFC",
+  "token": "tUSDFC",
   "computeService": "0x204D9872448B0404D39C657aAEBffb17767EDdb9",
   "contracts": {
     "usdfc": "0xb3042734b608a1B16e9e86B374A3f3e389B4cDf0",
@@ -14,8 +14,8 @@
   },
   "faucets": {
     "tFIL": "https://faucet.calibnet.chainsafe-fil.io/funds.html",
-    "USDFC": "https://forest-explorer.chainsafe.dev/faucet/calibnet_usdfc",
-    "USDFC (mint against tFIL)": "https://stg.usdfc.net"
+    "tUSDFC": "https://forest-explorer.chainsafe.dev/faucet/calibnet_usdfc",
+    "tUSDFC (mint against tFIL)": "https://stg.usdfc.net"
   },
   "providers": [
     {

@@ -5,7 +5,7 @@
     "https://rpc.ankr.com/filecoin_testnet"
   ],
   "explorer": "https://filecoin-testnet.blockscout.com/tx/",
-  "token": "USDFC",
+  "token": "tUSDFC",
   "computeService": "0x204D9872448B0404D39C657aAEBffb17767EDdb9",
   "contracts": {
     "usdfc": "0xb3042734b608a1B16e9e86B374A3f3e389B4cDf0",
