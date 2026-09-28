@@ -41,7 +41,7 @@ And `poc/start.mjs` is the demo program: it plays a Curio provider on a laptop, 
 
 Two providers run it:
 
-- **James Bluett** (`ezpdpz-calib`, registry id 9) — a real Curio node with PDP in Cheltenham, UK, running the provider kit.
+- **@TippyFlits** (`ezpdpz-calib`, registry id 9) — a real Curio node with PDP, running the provider kit.
 - **A stand-in on a laptop** — the demo program pretending to be Curio, so the demo works when nobody else is up.
 
 What has actually happened on chain, rather than in a diagram: jobs delivered and paid on both providers (PII redaction and embeddings), jobs deliberately left to expire and refunded, sessions billed to the epoch and stopped on request, a client deleting its own files, and a provider clearing away the files a job read after the client allowed it.
