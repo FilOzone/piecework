@@ -16,7 +16,7 @@ let me = null, money = null, pick = store.get("provider", CFG.providers[0].id);
 let set = null, jobs = {}, picked = new Set(), busy = null, error = null, blockNow = 0;
 let jobType = Object.keys(CFG.jobs)[0], policy = "keep";
 let wrongChain = false;
-let typed = { dep: "1" }; // what the visitor has typed, kept across re-renders
+let typed = { dep: "1", label: "" }; // what the visitor has typed, kept across re-renders
 let sessions = store.get("sessions", {}), service = Object.keys(CFG.services ?? {})[0];
 let mySets = null; // the data sets this wallet owns at the chosen provider, found on the chain
 async function checkChain() {
@@ -88,7 +88,7 @@ function render() {
     <p class="muted">${esc(p.note ?? "")}</p>
     ${CFG.providers.length > 1 ? `<div class="row"><select id="prov">${CFG.providers.map((x) =>
       `<option value="${esc(x.id)}" ${x.id === pick ? "selected" : ""}>${esc(x.name)}</option>`).join("")}</select></div>` : ""}
-    ${set ? `<p class="muted">Data set #${set.dataSetId}: ${files.length} pieces. Tick files to run a job over just those, or to remove them.
+    ${set ? `<p class="muted">${set.label ? `<b>${esc(set.label)}</b> (data set #${set.dataSetId})` : `Data set #${set.dataSetId}`}: ${files.length} pieces. Tick files to run a job over just those, or to remove them.
        You can hold as many data sets with a provider as you like — one per project, or a throwaway one for jobs that replace files.</p>
       <div class="tw"><table><thead><tr><th style="width:26px"></th><th>Piece</th><th>File</th><th>What</th></tr></thead><tbody>
       ${files.map(([pid, f]) => `<tr>
@@ -107,22 +107,25 @@ function render() {
     : `<p class="muted">Two ways to start: open a data set you already have with this provider, or make a new one from files you drop here.
         Making one costs a small reserve in Filecoin Pay, which you get back if you ever close it.</p>
       ${mySets === null ? '<p class="muted">Looking for data sets you already have here…</p>'
-        : mySets.length ? `<div class="row"><select id="mysets">${mySets.map((id) => `<option value="${id}">Data set #${id}</option>`).join("")}</select>
+        : mySets.length ? `<div class="row"><select id="mysets">${mySets.map((x) => `<option value="${x.id}">${esc(x.label || `Data set #${x.id}`)}${x.label ? ` — #${x.id}` : ""}</option>`).join("")}</select>
             <button class="b primary" id="openmine" ${busy ? "disabled" : ""}>Open it</button>
             <span class="muted">or make a new one below</span></div>`
         : '<p class="muted">You have no data set with this provider yet.</p>'}
       <div class="row" style="margin-top:12px">
-        <label class="b primary">Choose files and create a data set<input type="file" hidden multiple id="newpicker"></label>
+        <input type="text" id="label" value="${esc(typed.label ?? "")}" placeholder="name it, e.g. Q3 contracts" style="width:220px">
+        <label class="b primary">Choose files and create it<input type="file" hidden multiple id="newpicker"></label>
         <span class="muted">or drop them below</span></div>
       <div class="drop" id="drop" style="margin-top:8px">Drop files here to create a data set with them</div>`}`;
   if ($("prov")) $("prov").onchange = (e) => { pick = e.target.value; store.set("provider", pick); set = null; mySets = null; render(); lookUpSets(); };
   if (!set && mySets === null && !busy) lookUpSets();
   if ($("openmine")) $("openmine").onclick = () => {
     const id = $("mysets").value;
-    run(`Reading data set #${id} from the chain`, async () => { set = await PW.readSet(pick, id, jobs); store.set("set-" + pick, id); });
+    const label = (mySets.find((x) => String(x.id) === String(id)) ?? {}).label ?? "";
+    run(`Reading data set #${id} from the chain`, async () => { set = { ...(await PW.readSet(pick, id, jobs)), label }; store.set("set-" + pick, id); });
   };
   if ($("forget")) $("forget").onclick = () => { set = null; store.set("set-" + pick, null); render(); };
   if ($("picker")) $("picker").onchange = (e) => addFiles([...e.target.files]);
+  if ($("label")) $("label").oninput = (e) => { typed.label = e.target.value; };
   if ($("newpicker")) $("newpicker").onchange = (e) => addFiles([...e.target.files]);
   if ($("rm")) $("rm").onclick = () => {
     if (!confirm(`Remove ${picked.size} file(s)? PDP drops them at the provider's next proving period. This cannot be undone.`)) return;
@@ -237,8 +240,9 @@ function addFiles(list) {
   if (!list.length) return;
   const names = list.map((f) => f.name).join(", ");
   if (set) return run(`Adding ${names}`, async () => { await PW.addFiles(pick, set.dataSetId, list); set = await PW.readSet(pick, set.dataSetId, jobs); });
-  return run(`Creating a data set with ${names}`, async () => {
-    const id = await PW.createSet(pick, list);
+  return run(`Creating ${typed.label ? `"${typed.label}"` : "a data set"} with ${names}`, async () => {
+    const id = await PW.createSet(pick, list, typed.label);
+    typed.label = "";
     store.set("set-" + pick, String(id));
     set = await PW.readSet(pick, id, jobs);
   });

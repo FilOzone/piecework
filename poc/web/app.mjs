@@ -112,7 +112,7 @@ export async function deposit(amount) {
 
 const provider = (id) => CFG.providers.find((p) => p.id === id) ?? CFG.providers[0];
 
-export async function createSet(providerId, files, label) {
+export async function createSet(providerId, files, label = "") {
   const p = provider(providerId);
   await onTheRightChain();
   step("Checking your storage budget with Warm Storage");
@@ -135,7 +135,8 @@ export async function createSet(providerId, files, label) {
   }
   step("Creating your data set with the provider (you sign, it submits)");
   const created = await SP.createDataSetAndAddPieces(wallet, { serviceURL: p.curioUrl, payee: getAddress(p.address),
-    pieces: pieces.map(({ pieceCid, metadata }) => ({ pieceCid, metadata })), cdn: false });
+    pieces: pieces.map(({ pieceCid, metadata }) => ({ pieceCid, metadata })), cdn: false,
+    metadata: label ? { label } : undefined });
   const done = await SP.waitForCreateDataSetAddPieces({ statusUrl: created.statusUrl, timeout: 10 * 60_000 });
   step(`Letting providers add job results to data set #${done.dataSetId}, only while a job is open`);
   await send(C.fwss, FWSS_ABI, "setDataSetAuthorizer", [done.dataSetId, C.cs]);
@@ -237,17 +238,23 @@ async function inWindow(fn) {
 // created, but does not index it, so the filtering happens here.
 export async function findDataSets(providerId) {
   const p = provider(providerId);
-  if (!ABI.FilecoinWarmStorageService.some((x) => x.type === "event" && x.name === "DataSetCreated"))
-    throw new Error("this page cannot look up your data sets: its copy of the Warm Storage interface is missing DataSetCreated");
-  const logs = await inWindow((fromBlock, toBlock) => pub.getContractEvents({ address: C.fwss,
-    abi: ABI.FilecoinWarmStorageService, eventName: "DataSetCreated", fromBlock, toBlock }).catch(() => []));
-  const mine = [];
-  for (const l of logs) {
-    if (getAddress(l.args.payer) !== me) continue;
-    if (getAddress(l.args.serviceProvider) !== getAddress(p.address)) continue;
-    mine.push(Number(l.args.dataSetId));
+  // Warm Storage keeps the list, so there is no window and nothing to remember: every data set this wallet
+  // has ever paid for, whenever it was made.
+  const ids = await pub.readContract({ address: C.view, abi: ABI.FilecoinWarmStorageServiceStateView,
+    functionName: "clientDataSets", args: [me] });
+  const out = [];
+  for (const id of ids) {
+    const d = await pub.readContract({ address: C.view, abi: ABI.FilecoinWarmStorageServiceStateView,
+      functionName: "getDataSet", args: [id] }).catch(() => null);
+    if (!d || getAddress(d.serviceProvider) !== getAddress(p.address)) continue;
+    let label = "";
+    const [keys, values] = await pub.readContract({ address: C.view, abi: ABI.FilecoinWarmStorageServiceStateView,
+      functionName: "getAllDataSetMetadata", args: [id] }).catch(() => [[], []]);
+    const at = keys.indexOf("label");
+    if (at >= 0) label = values[at];
+    out.push({ id: Number(id), label });
   }
-  return [...new Set(mine)].sort((a, b) => a - b);
+  return out.sort((a, b) => a.id - b.id);
 }
 
 export async function findJobs() {
