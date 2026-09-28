@@ -99,8 +99,13 @@ async function fetchPiece(pieceCid) {
 /// The names the client gave the pieces of a data set, from Warm Storage's PieceAdded events (one scan per job,
 /// over recent blocks). Pieces stored without a name simply have none.
 const nameCache = {};
-async function pieceNames(dataSetId) {
+async function pieceNames(dataSetId, fresh = false) {
   const key = String(dataSetId);
+  // A job looks the names up once and finishes, so caching them is free. A live service runs for hours over a
+  // data set the client keeps adding to: a cached answer has no name for anything that arrives after it was
+  // built, the extension filter then rejects every new file, and the service quietly does nothing for as long
+  // as it is being paid. Callers that run in a loop ask for a fresh lookup.
+  if (fresh) delete nameCache[key];
   if (nameCache[key]) return nameCache[key];
   const head = Number(await pub.getBlockNumber());
   // Public Calibration nodes refuse an eth_getLogs range of more than a few hundred blocks: ask in steps of 100.
@@ -319,7 +324,7 @@ async function liveRound(sessionId) {
   const dataSetId = BigInt(S.dataSetId);
   const next = Number(await read(cfg.contracts.pdp, ABI.PDPVerifier, "getNextPieceId", [dataSetId]));
   if (next <= (S.scanned ?? 0)) return; // nothing new since the last look
-  const names = await pieceNames(dataSetId).catch(() => ({}));
+  const names = await pieceNames(dataSetId, true).catch(() => ({}));
   const exts = spec.inputExtensions ?? [];
   const match = spec.inputMatch ? new RegExp(spec.inputMatch, "i") : null;
   const mine = new Set(S.mine ?? []);
@@ -484,6 +489,17 @@ async function main() {
   save();
   dashboard();
   setInterval(() => checkHealth(false).catch(() => {}), 60_000);
+  // A live service is started by a SessionOpened event, and after a restart that event is in the past: the
+  // session is still running and still being paid for, but nothing would be watching the data set. Pick the
+  // watchers back up from what was saved, and check with the contract that the session really is still open.
+  for (const [id, S] of Object.entries(state.sessions ?? {})) {
+    const spec = SERVICES[S.type];
+    if (S.closed || spec?.mode !== "live") continue;
+    const onChain = await read(cfg.contracts.computeService, ABI.ComputeService, "sessions", [BigInt(id)]).catch(() => null);
+    if (!onChain || Number(onChain[7]) !== 2) { S.closed = new Date().toISOString(); S.stage = "closed"; save(); continue; }
+    say(`Session #${id}: "${spec.name}" is still running for ${S.client}; watching data set #${S.dataSetId} again.`);
+    watchLive(Number(id), spec);
+  }
   if (!state.lastBlock) state.lastBlock = Number(await pub.getBlockNumber()) - 100;
   {
     const behind = Number(await pub.getBlockNumber()) - state.lastBlock;
