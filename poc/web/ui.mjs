@@ -102,7 +102,7 @@ function render() {
       <div class="row" style="margin-top:12px">
         <label class="b">Add files<input type="file" hidden multiple id="picker"></label>
         <button class="b" id="rm" ${picked.size && !busy ? "" : "disabled"}>Remove ${picked.size || ""} selected</button>
-        <button class="b" id="forget">Switch data set, or start another</button></div>
+        <button class="b" id="forget">Switch data set, or start a new one</button></div>
       <div class="drop" id="drop" style="margin-top:12px">Drop files here to add them to data set #${set.dataSetId}</div>`
     : `<p class="muted">Two ways to start: open a data set you already have with this provider, or make a new one from files you drop here.
         Making one costs a small reserve in Filecoin Pay, which you get back if you ever close it.</p>
@@ -111,7 +111,10 @@ function render() {
             <button class="b primary" id="openmine" ${busy ? "disabled" : ""}>Open it</button>
             <span class="muted">or make a new one below</span></div>`
         : '<p class="muted">You have no data set with this provider yet.</p>'}
-      <div class="drop" id="drop" style="margin-top:12px">Drop files here to create a data set with them</div>`}`;
+      <div class="row" style="margin-top:12px">
+        <label class="b primary">Choose files and create a data set<input type="file" hidden multiple id="newpicker"></label>
+        <span class="muted">or drop them below</span></div>
+      <div class="drop" id="drop" style="margin-top:8px">Drop files here to create a data set with them</div>`}`;
   if ($("prov")) $("prov").onchange = (e) => { pick = e.target.value; store.set("provider", pick); set = null; mySets = null; render(); lookUpSets(); };
   if (!set && mySets === null && !busy) lookUpSets();
   if ($("openmine")) $("openmine").onclick = () => {
@@ -120,6 +123,7 @@ function render() {
   };
   if ($("forget")) $("forget").onclick = () => { set = null; store.set("set-" + pick, null); render(); };
   if ($("picker")) $("picker").onchange = (e) => addFiles([...e.target.files]);
+  if ($("newpicker")) $("newpicker").onchange = (e) => addFiles([...e.target.files]);
   if ($("rm")) $("rm").onclick = () => {
     if (!confirm(`Remove ${picked.size} file(s)? PDP drops them at the provider's next proving period. This cannot be undone.`)) return;
     run("Removing files", async () => { await PW.removeFiles(pick, set.dataSetId, [...picked]); picked = new Set(); set = await PW.readSet(pick, set.dataSetId, jobs); });
