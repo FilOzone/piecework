@@ -159,6 +159,31 @@ async function runJob(ev) {
   const job = await read(cfg.contracts.computeService, ABI.ComputeService, "jobs", [jobId]);
   if (Number(job[8]) !== 1) { state.jobs[key] = { done: true }; save(); return; } // already paid or expired
   const now = () => new Date().toISOString();
+
+  // A retry must resume, not start again. Delivery and payment are two transactions, and the second one can
+  // fail on its own — a dropped RPC request is enough. The results are already in the client's data set by
+  // then; running the program a second time re-does the work at the provider's expense, adds a second copy
+  // the client pays to store, and leaves the first copy orphaned. If we already know the output pieces and
+  // they are still live, the only thing left to do is claim the money.
+  const prior = state.jobs[key];
+  if (prior?.outputs?.length) {
+    const ids = prior.outputs.map((o) => BigInt(o.pieceId));
+    const live = await Promise.all(ids.map((id) =>
+      read(cfg.contracts.pdp, ABI.PDPVerifier, "pieceLive", [BigInt(dataSetId), id]).catch(() => false)));
+    if (live.every(Boolean)) {
+      say(`Job #${jobId}: the results are already in the data set as pieces #${ids.join(", #")}; claiming payment `
+        + `without running the program again.`);
+      prior.stage = "committing"; save();
+      const r = await send(cfg.contracts.computeService, ABI.ComputeService, "commitOutputs", [jobId, ids]);
+      prior.stage = "paid"; prior.t = { ...prior.t, paid: now() }; prior.done = true; prior.commitTx = r.transactionHash; save();
+      say(`Job #${jobId}: committed and paid (tx ${r.transactionHash}).`);
+      const { clientDataSetId } = await read(cfg.contracts.view, ABI.View, "getDataSet", [BigInt(dataSetId)]);
+      await afterCommit(jobId, dataSetId, clientDataSetId, r);
+      return;
+    }
+    say(`Job #${jobId}: the earlier results are no longer in the data set; running it again.`);
+  }
+
   const J = (state.jobs[key] = { id: key, name: spec.name, client, dataSetId: String(dataSetId), stage: "fetching",
     price: formatUnits(job[3], 18), deadline: String(deadline), inputs: inputPieceIds.length, t: { received: now() } });
   save();
@@ -198,7 +223,11 @@ async function runJob(ev) {
   J.stage = "paid"; J.t.paid = now(); J.done = true; J.commitTx = r.transactionHash; save();
   say(`Job #${jobId}: committed and paid (tx ${r.transactionHash}).`);
 
-  // If the client asked for old files to be replaced, the contract allowed exactly those pieces on delivery.
+  await afterCommit(jobId, dataSetId, clientDataSetId, r);
+}
+
+/// If the client asked for old files to be replaced, the contract allowed exactly those pieces on delivery.
+async function afterCommit(jobId, dataSetId, clientDataSetId, r) {
   const allowed = [];
   for (const log of r.logs) {
     try {
