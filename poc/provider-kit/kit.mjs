@@ -358,7 +358,11 @@ async function liveRound(sessionId) {
   try {
     for (const f of fresh) {
       const c = await read(cfg.contracts.pdp, ABI.PDPVerifier, "getPieceCid", [dataSetId, BigInt(f.id)]);
-      fs.writeFileSync(path.join(dir, "in", f.name), await fetchPiece(CID.decode(hexToBytes(c.data)).toString()));
+      // Two pieces in a data set can carry the same name. Writing both under that name would leave one of
+      // them unread while the client pays for the round, so the second keeps its piece id.
+      const at = path.join(dir, "in", f.name);
+      fs.writeFileSync(fs.existsSync(at) ? path.join(dir, "in", `${f.id}-${f.name}`) : at,
+        await fetchPiece(CID.decode(hexToBytes(c.data)).toString()));
     }
     // Some services answer from what is already in the data set — the vectors an earlier service wrote, for
     // instance. Those go in read-only at /context, so the program can tell them apart from what just arrived.
