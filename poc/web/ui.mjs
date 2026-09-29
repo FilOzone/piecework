@@ -119,7 +119,7 @@ function render() {
       ${waiting.length ? `<div class="card" style="margin-top:12px;background:var(--surface-2)">
       <b>${waiting.length} file${waiting.length > 1 ? "s" : ""} ready to upload</b>
       <div class="tw"><table><tbody>${waiting.map((f, i) => `<tr><td>${esc(f.name)}</td>
-        <td class="muted">${(f.size / 1024).toFixed(1)} kB</td>
+        <td class="muted">${f.size < 127 ? `<span class="pill bad">${f.size} bytes — the smallest piece a provider stores is 127</span>` : `${(f.size / 1024).toFixed(1)} kB`}</td>
         <td><a data-drop="${i}">remove</a></td></tr>`).join("")}</tbody></table></div>
       <div class="row" style="margin-top:10px">
         <button class="b primary" id="confirmup" ${busy ? "disabled" : ""}>${set ? `Upload to data set #${set.dataSetId}` : "Create the data set with these"}</button>
@@ -139,7 +139,7 @@ function render() {
       ${waiting.length ? `<div class="card" style="margin-top:12px;background:var(--surface-2)">
       <b>${waiting.length} file${waiting.length > 1 ? "s" : ""} ready to upload</b>
       <div class="tw"><table><tbody>${waiting.map((f, i) => `<tr><td>${esc(f.name)}</td>
-        <td class="muted">${(f.size / 1024).toFixed(1)} kB</td>
+        <td class="muted">${f.size < 127 ? `<span class="pill bad">${f.size} bytes — the smallest piece a provider stores is 127</span>` : `${(f.size / 1024).toFixed(1)} kB`}</td>
         <td><a data-drop="${i}">remove</a></td></tr>`).join("")}</tbody></table></div>
       <div class="row" style="margin-top:10px">
         <button class="b primary" id="confirmup" ${busy ? "disabled" : ""}>${set ? `Upload to data set #${set.dataSetId}` : "Create the data set with these"}</button>

@@ -37,7 +37,8 @@
     "dockerImage": "piecework/search:v1",
     "inputMatch": "^ask[ ._-].*\\.txt$",
     "context": {
-      "match": "^embeddings.*\\.jsonl$"
+      "match": "^embeddings.*\\.jsonl$",
+      "latestOnly": true
     },
     "outputs": [
       "answer.txt"

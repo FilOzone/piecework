@@ -247,6 +247,14 @@ function release() {
   waiting.shift()?.();
 }
 
+// "pii-report.txt" also matches pii-report-1.txt and pii-report-s3r1.txt: the same output, whichever round
+// or session wrote it.
+function namePattern(n) {
+  const dot = n.lastIndexOf(".");
+  const stem = n.slice(0, dot).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`^${stem}(-[\\w-]+)?\\${n.slice(dot)}$`, "i");
+}
+
 const container = (id) => `piecework-session-${id}`;
 const toSettle = new Set(Object.values(state.sessions ?? {}).filter((s) => !s.closed).map((s) => s.railId));
 
@@ -331,14 +339,25 @@ async function liveRound(sessionId) {
   // Knowing only the pieces this session wrote is not enough: a second session over the same data set finds the
   // first one's results, treats them as new input, and redacts the redaction. A service has to recognise its own
   // output by name, whoever produced it, or the data set grows a layer with every session.
-  const ours = (spec.outputs ?? []).map((n) =>
-    new RegExp(`^${n.replace(/(\.[^.]+)$/, "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(-[\\w-]+)?\\${n.slice(n.lastIndexOf("."))}$`, "i"));
+  // Everything any service or job writes is derived: results, reports, vectors, answers. Feeding those back in
+  // is how a keyword index came to outrank a real document, and how a question came to be its own best match.
+  // A service reads the client's own documents, and the one kind of derived file it is built to read.
+  const derived = [...Object.values(SERVICES), ...Object.values(JOBS)]
+    .flatMap((x) => x.outputs ?? [])
+    .map((n) => namePattern(n));
+  const questions = Object.values(SERVICES).map((x) => x.inputMatch).filter(Boolean).map((r) => new RegExp(r, "i"));
+  const mineToRead = spec.inputMatch ? new RegExp(spec.inputMatch, "i") : null;
+  const ours = (spec.outputs ?? []).map(namePattern);
   const fresh = [];
   for (let id = S.scanned ?? 0; id < next; id++) {
     if (mine.has(String(id))) continue; // our own output, not new input
     if (!(await read(cfg.contracts.pdp, ABI.PDPVerifier, "pieceLive", [dataSetId, BigInt(id)]))) continue;
     const given = names[String(id)] ?? "";
     if (ours.some((r) => r.test(given))) continue; // something this service wrote, in this session or an earlier one
+    if (!mineToRead?.test(given)) {
+      if (derived.some((r) => r.test(given))) continue;      // produced by some service or job, not a document
+      if (questions.some((r) => r.test(given))) continue;    // somebody's question, not something to work over
+    }
     if (match ? !match.test(given) : exts.length && !exts.some((e) => given.toLowerCase().endsWith(e))) continue;
     fresh.push({ id, name: /^[\w .()-]{1,80}$/.test(given) ? given : `piece-${id}` });
   }
@@ -368,12 +387,19 @@ async function liveRound(sessionId) {
     // instance. Those go in read-only at /context, so the program can tell them apart from what just arrived.
     if (spec.context?.match) {
       const ctx = new RegExp(spec.context.match, "i");
+      let ids = [];
       for (let id = 0; id < next; id++) {
         const given = names[String(id)] ?? "";
         if (!ctx.test(given)) continue;
         if (!(await read(cfg.contracts.pdp, ABI.PDPVerifier, "pieceLive", [dataSetId, BigInt(id)]))) continue;
+        ids.push(id);
+      }
+      // Each run of a service writes a fresh file covering everything it saw, so the older ones are the same
+      // chunks again. Loading them all counted every passage twice and made the corpus look bigger than it is.
+      if (spec.context.latestOnly && ids.length) ids = [Math.max(...ids)];
+      for (const id of ids) {
         const c = await read(cfg.contracts.pdp, ABI.PDPVerifier, "getPieceCid", [dataSetId, BigInt(id)]);
-        fs.writeFileSync(path.join(dir, "context", `${id}-${given}`), await fetchPiece(CID.decode(hexToBytes(c.data)).toString()));
+        fs.writeFileSync(path.join(dir, "context", `${id}-${names[String(id)]}`), await fetchPiece(CID.decode(hexToBytes(c.data)).toString()));
       }
     }
     const run = ["run", "--rm", "--network", "none", "-v", `${dir}/in:/in:ro`, "-v", `${dir}/context:/context:ro`,

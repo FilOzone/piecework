@@ -24,6 +24,13 @@ STOP = set("""a an and are as at be by do does for from how i if in is it its me
 their them then there these this to us was we what when where which who why will with you your""".split())
 
 
+# A question and an answer are not documents. Once they live in the data set the embedding service picks them
+# up like anything else, and then a question's closest match is itself, or the answer that quoted it. Whatever
+# produced them, they are excluded from what can be returned.
+DERIVED = re.compile(r"^(ask|answer|pii-report|redacted-documents|embeddings|embeddings-report|search-index)"
+                     r"([ ._-][\w-]*)?\.[a-z0-9]+$", re.I)
+
+
 def load_vectors():
     rows = []
     for path in sorted(glob.glob(os.path.join(CONTEXT, "*.jsonl"))):
@@ -36,7 +43,7 @@ def load_vectors():
                     r = json.loads(line)
                 except json.JSONDecodeError:
                     continue
-                if isinstance(r.get("vector"), list):
+                if isinstance(r.get("vector"), list) and not DERIVED.match(str(r.get("file", ""))):
                     rows.append(r)
     return rows
 

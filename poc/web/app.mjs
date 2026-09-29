@@ -141,8 +141,22 @@ async function confirmed(watch, landed, { timeout = 10 * 60_000, grace = 120_000
 
 const provider = (id) => CFG.providers.find((p) => p.id === id) ?? CFG.providers[0];
 
+// A provider refuses a piece smaller than this, and the refusal it sends back ("Invalid upload size") does not
+// say what the limit is or which file broke it. Check here, where the file and the number are both to hand.
+// It bites hardest on questions for the search service, which are naturally a sentence long.
+const MIN_PIECE_BYTES = 127;
+function checkSizes(files) {
+  const small = [...files].filter((f) => f.size < MIN_PIECE_BYTES);
+  if (!small.length) return;
+  const one = small.length === 1;
+  throw new Error(`${small.map((f) => `"${f.name}" is ${f.size} bytes`).join(", ")} — a stored piece has to be at least `
+    + `${MIN_PIECE_BYTES} bytes, so ${one ? "that file is" : "those files are"} too small to put in a data set. `
+    + `Add a couple of lines and try again.`);
+}
+
 export async function createSet(providerId, files, label = "") {
   const p = provider(providerId);
+  checkSizes(files);
   await onTheRightChain();
   step("Checking your storage budget with Warm Storage");
   const [, rateAllowance, lockupAllowance, rateUsage, lockupUsage, maxLockupPeriod] = await pub.readContract({ address: C.payments,
@@ -198,6 +212,7 @@ export async function createSet(providerId, files, label = "") {
 
 export async function addFiles(providerId, dataSetId, files) {
   const p = provider(providerId);
+  checkSizes(files);
   await onTheRightChain();
   const pieces = [];
   for (const f of files) {
