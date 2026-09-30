@@ -451,6 +451,74 @@ export async function order(providerId, dataSetId, type, policy, pieceIds) {
   throw new Error("the job went on-chain but its number could not be read");
 }
 
+// ---------------------------------------------------------------- bringing your own program
+//
+// The contract stores imageDigest and never reads it, so a job has never had to come from anyone's catalogue.
+// A digest says what to run, though, not where to find it, and there is no room on chain for a repository
+// name. So the reference goes into the data set as a piece and is listed among the job's inputs: it arrives
+// with the files, it is pinned by the job, and the provider checks the image it pulls against the digest the
+// chain recorded. A spec naming a hostile repository cannot substitute code, because the chain pinned the code.
+
+const IMAGE_REF = /^([\w.\-]+(?::\d+)?(?:\/[\w.\-]+)+)@sha256:([0-9a-f]{64})$/;
+
+export function readImageRef(ref) {
+  const m = IMAGE_REF.exec((ref ?? "").trim());
+  if (!m) {
+    throw new Error(`"${ref}" is not an image pinned by digest. It has to look like `
+      + `ghcr.io/you/thing@sha256:… — a tag will not do, because a tag can be pointed at different code tomorrow `
+      + `and the whole point is that the chain records exactly what ran.`);
+  }
+  return { repo: m[1], digest: `0x${m[2]}` };
+}
+
+export async function orderOwnJob(providerId, dataSetId, pieceIds, ref, priceText, deadlineEpochs = 60) {
+  const p = provider(providerId);
+  const { repo, digest } = readImageRef(ref);
+  const price = parseUnits(String(priceText), 18);
+  await onTheRightChain();
+
+  const [, , available] = await pub.readContract({ address: C.payments, abi: ABI.FilecoinPayV1,
+    functionName: "getAccountInfoIfSettled", args: [C.usdfc, me] });
+  if (available < price) {
+    throw new Error(`you offered ${priceText} ${CFG.token} and only ${Number(formatUnits(available, 18)).toFixed(3)} `
+      + `is in Filecoin Pay. Move some across first.`);
+  }
+  const [, rateAllowance, lockupAllowance, , lockupUsage, maxLockupPeriod] = await pub.readContract({ address: C.payments,
+    abi: ABI.FilecoinPayV1, functionName: "operatorApprovals", args: [C.usdfc, me, C.cs] });
+  if (lockupAllowance - lockupUsage < price) {
+    step("Renewing the budget you give the compute service");
+    await send(C.payments, ABI.FilecoinPayV1, "setOperatorApproval",
+      [C.usdfc, C.cs, true, rateAllowance, lockupUsage + price * 3n, maxLockupPeriod || 600n]);
+  }
+
+  // The spec piece first, so it exists before the job that lists it.
+  const before = Number(await pub.readContract({ address: C.pdp, abi: ABI.PDPVerifier,
+    functionName: "getNextPieceId", args: [BigInt(dataSetId)] }));
+  const body = JSON.stringify({ image: repo, digest: `sha256:${digest.slice(2)}`, orderedBy: me,
+    note: "Where to find the program this job names. The chain pins which code runs." }, null, 2);
+  step("Telling the provider where your program lives (one file into your data set)");
+  await addFiles(providerId, dataSetId, [new File([body + "\n"], "job-spec.json", { type: "application/json" })]);
+  const after = Number(await pub.readContract({ address: C.pdp, abi: ABI.PDPVerifier,
+    functionName: "getNextPieceId", args: [BigInt(dataSetId)] }));
+  if (after <= before) throw new Error("the job spec did not reach your data set; nothing was ordered");
+  const specPiece = BigInt(after - 1);
+
+  const inputs = [...pieceIds.map((x) => BigInt(x)), specPiece];
+  const deadline = (await pub.getBlockNumber()) + BigInt(deadlineEpochs);
+  step(`Ordering your own program over ${pieceIds.length} file${pieceIds.length === 1 ? "" : "s"}: the price goes on hold`);
+  const r = await send(C.cs, ABI.ComputeService, "postJob",
+    [getAddress(p.address), digest, BigInt(dataSetId), inputs, [], price, deadline]);
+  for (const log of r.logs) {
+    try {
+      const ev = decodeEventLog({ abi: ABI.ComputeService, data: log.data, topics: log.topics });
+      if (ev.eventName === "JobPosted") {
+        return { jobId: String(ev.args.jobId), deadline: Number(deadline), tx: r.transactionHash, image: `${repo}@sha256:${digest.slice(2)}` };
+      }
+    } catch { /* other contracts' events */ }
+  }
+  throw new Error("the job went on-chain but its number could not be read");
+}
+
 const JOB_STATUS = ["none", "waiting", "paid", "refunded"];
 
 export async function jobStatus(jobId, fromBlock, type) {

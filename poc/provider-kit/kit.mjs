@@ -154,11 +154,27 @@ async function runJob(ev) {
   const key = String(jobId);
   if (state.jobs[key]?.done) return;
   if (state.jobs[key]?.stage === "storing" || state.jobs[key]?.stage === "committing") return; // do not run twice
-  const spec = JOBS[BY_DIGEST[imageDigest]];
-  if (!spec) return say(`Job #${jobId}: unknown program ${imageDigest}; not mine to run.`);
   const job = await read(cfg.contracts.computeService, ABI.ComputeService, "jobs", [jobId]);
   if (Number(job[8]) !== 1) { state.jobs[key] = { done: true }; save(); return; } // already paid or expired
   const now = () => new Date().toISOString();
+
+  // A digest this kit does not recognise is a client bringing its own program. That is what the contract has
+  // always allowed — it stores the digest and never reads it — and what this kit refused for want of a policy.
+  // The policy is here: no network, the client's files read-only, a ceiling on what the program may consume,
+  // and a price the provider is willing to accept for that ceiling. What the program is remains unknown and
+  // does not need to be known: it cannot reach the network, and it can only write into a folder we collect.
+  let spec = JOBS[BY_DIGEST[imageDigest]];
+  const byo = cfg.bringYourOwnJob;
+  if (!spec) {
+    if (!byo?.enabled) return say(`Job #${jobId}: unknown program ${imageDigest.slice(0, 12)}…, and I only run my own catalogue.`);
+    const price = Number(formatUnits(job[3], 18));
+    const floor = Number(byo.minPrice ?? 0);
+    if (price < floor) {
+      return say(`Job #${jobId}: a program I do not know, offered at ${price} — I run those at ${floor} or more.`);
+    }
+    spec = { name: "a program the client brought", byo: true, seconds: byo.maxSeconds ?? 600,
+      cpus: String(byo.cpus ?? 2), memory: String(byo.memory ?? "4g") };
+  }
 
   // A retry must resume, not start again. Delivery and payment are two transactions, and the second one can
   // fail on its own — a dropped RPC request is enough. The results are already in the client's data set by
@@ -204,17 +220,48 @@ async function runJob(ev) {
   J.inputBytes = fs.readdirSync(path.join(dir, "in")).reduce((n, f) => n + fs.statSync(path.join(dir, "in", f)).size, 0);
   J.stage = "running"; J.t.running = now(); save();
   const t0 = Date.now();
-  const run = ["run", "--rm", "--network", "none", "-v", `${dir}/in:/in:ro`, "-v", `${dir}/out:/out`, spec.dockerImage];
+  if (spec.byo) {
+    // A digest says what to run, not where to find it, and the contract has no room for a repository name.
+    // The client puts one in a piece and lists that piece among the job's inputs, so it arrives with the rest
+    // of the files. Docker then checks the pulled image against the digest the chain recorded: a spec naming
+    // a hostile repository cannot substitute different code, because the chain pinned the code.
+    const specFile = fs.readdirSync(path.join(dir, "in")).find((f) => /^job-spec.*\.json$/i.test(f));
+    if (!specFile) throw new Error("a program I do not know, and no job-spec.json among the inputs saying where to find it");
+    const wanted = JSON.parse(fs.readFileSync(path.join(dir, "in", specFile), "utf8"));
+    if (typeof wanted.image !== "string" || !/^[\w.\-]+(:\d+)?(\/[\w.\-]+)+$/.test(wanted.image)) {
+      throw new Error(`job-spec.json does not name a repository I can pull from`);
+    }
+    spec.dockerImage = `${wanted.image}@sha256:${imageDigest.slice(2)}`;
+    J.image = spec.dockerImage; save();
+    say(`Job #${jobId}: the client brought its own program, ${spec.dockerImage}. Pulling it.`);
+    await execFile("docker", ["pull", "--quiet", spec.dockerImage], { maxBuffer: 1 << 26 });
+    say(`Job #${jobId}: pulled, and the digest matches what the client put on chain. Running it with no network, `
+      + `${spec.cpus} cores, ${spec.memory} of memory and ${spec.seconds} s.`);
+  }
+  // Docker has no run timeout of its own: killing the client would leave the container running. Name it, and
+  // remove it by force when the time is up.
+  const mounts = ["--network", "none", "-v", `${dir}/in:/in:ro`, "-v", `${dir}/out:/out`];
   await slot(`Job #${jobId}`);
   try {
-    await execFile("docker", spec.script ? [...run, "sh", "-c", spec.script] : run, { maxBuffer: 1 << 26 });
+    if (spec.byo) {
+      await runBounded(`piecework-job-${jobId}`,
+        [...mounts, "--cpus", spec.cpus, "--memory", spec.memory, "--pids-limit", "512", spec.dockerImage],
+        spec.seconds);
+    } else {
+      const run = ["run", "--rm", ...mounts, spec.dockerImage];
+      await execFile("docker", spec.script ? [...run, "sh", "-c", spec.script] : run, { maxBuffer: 1 << 26 });
+    }
   } finally { release(); }
   J.runSeconds = (Date.now() - t0) / 1000;
   say(`Job #${jobId}: program finished in ${J.runSeconds.toFixed(1)} s.`);
   if ((await pub.getBlockNumber()) > deadline) { J.stage = "late"; save(); return say(`Job #${jobId}: past the deadline; not delivering.`); }
 
   const { clientDataSetId } = await read(cfg.contracts.view, ABI.View, "getDataSet", [dataSetId]);
-  const files = spec.outputs.map((name) => ({ name, bytes: new Uint8Array(fs.readFileSync(path.join(dir, "out", name))) }));
+  const produced = spec.byo
+    ? fs.readdirSync(path.join(dir, "out")).filter((n) => fs.statSync(path.join(dir, "out", n)).isFile())
+    : spec.outputs;
+  if (spec.byo && !produced.length) throw new Error("the program wrote nothing to /out, so there is nothing to deliver");
+  const files = produced.map((name) => ({ name, bytes: new Uint8Array(fs.readFileSync(path.join(dir, "out", name))) }));
   J.stage = "storing"; J.t.storing = now(); save();
   const stored = await storeResults(dataSetId, clientDataSetId, files);
   say(`Job #${jobId}: results added to the client's data set as pieces #${stored.pieceIds.join(", #")} (tx ${stored.tx}).`);
@@ -282,6 +329,31 @@ function namePattern(n) {
   const dot = n.lastIndexOf(".");
   const stem = n.slice(0, dot).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   return new RegExp(`^${stem}(-[\\w-]+)?\\${n.slice(dot)}$`, "i");
+}
+
+// Bounding a container's run by killing the docker client does not work: the signal does not reach the
+// container, and `docker run` returns only when the program finishes anyway — a twenty-second run survived a
+// three-second timeout and exited cleanly. Start it detached, watch the clock ourselves, and remove it by
+// force when the time is up. The only thing that can stop a program someone else wrote is the daemon.
+async function runBounded(name, runArgs, seconds) {
+  await execFile("docker", ["rm", "-f", name]).catch(() => {}); // a container left by an earlier attempt
+  await execFile("docker", ["run", "-d", "--name", name, ...runArgs], { maxBuffer: 1 << 26 });
+  const until = Date.now() + seconds * 1000;
+  try {
+    for (;;) {
+      const { stdout } = await execFile("docker", ["inspect", "-f", "{{.State.Running}} {{.State.ExitCode}}", name])
+        .catch(() => ({ stdout: "false 125" }));
+      const [running, code] = stdout.trim().split(/\s+/);
+      if (running === "false") {
+        if (Number(code) !== 0) throw new Error(`the program exited with code ${code}`);
+        return;
+      }
+      if (Date.now() > until) throw new Error(`the program was still running after ${seconds} s and was stopped`);
+      await new Promise((r) => setTimeout(r, 1000));
+    }
+  } finally {
+    await execFile("docker", ["rm", "-f", name]).catch(() => {});
+  }
 }
 
 const container = (id) => `piecework-session-${id}`;

@@ -61,3 +61,41 @@ It needs a client key with USDFC deposited in Filecoin Pay, and approvals for Wa
 - Jobs only. Pay-for-time sessions still run from the demo program.
 - Input files are named `piece-<id>.txt`; the original file names are not passed yet.
 - Storage proofs are Curio's job and work as usual. The kit only adds results.
+
+## Running a program the client brought
+
+The contract has never decided what a job is: it records the image digest and never reads it, and it pays on
+delivery — new, live pieces in the client's data set before the deadline. What has always decided is this kit,
+which ran only the images in `jobs.json` and refused everything else. That refusal was for want of a policy,
+not for want of a mechanism.
+
+The policy lives in your config, and it is off unless you turn it on:
+
+```json
+"bringYourOwnJob": {
+  "enabled": true,
+  "minPrice": "0.5",
+  "maxSeconds": 600,
+  "cpus": "2",
+  "memory": "4g"
+}
+```
+
+With it on, a job naming a digest you do not recognise is accepted if the client is offering at least
+`minPrice`. The client's own reference — where the image can be pulled from — arrives as a `job-spec.json`
+piece listed among the job's inputs, so it comes with the files and is pinned by the job. The kit pulls
+`<repository>@sha256:<the digest the client put on chain>`, which means a spec naming a hostile repository
+cannot substitute different code: the daemon refuses any image whose content does not match the digest.
+
+What the program gets: the client's chosen files read-only at `/in`, an empty `/out`, and nothing else. **No
+network**, so it cannot reach the internet, your machine, or anything but those two folders — a program you
+have never seen cannot take the client's data anywhere. It runs under `--cpus`, `--memory` and a process
+limit, and it is removed by force when `maxSeconds` is up.
+
+Everything the program leaves in `/out` is added to the client's data set and is what the client pays for. A
+program that writes nothing delivers nothing, so the client's money returns at the deadline and you are paid
+nothing for the time.
+
+**What this does not do.** It does not stop a program from using its whole allowance, and it does not protect
+you from a container escape — that is the daemon's job and the kernel's, and if you are uncomfortable running
+unknown code at all, leave `enabled` false. It is a real decision, not a checkbox.

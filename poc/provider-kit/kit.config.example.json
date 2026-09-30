@@ -17,5 +17,12 @@
   },
   "pollMs": 10000,
   "blockChunk": 300,
-  "_blockChunk": "how many blocks to ask for in one eth_getLogs call. Public nodes cap this at 360; raise it if the first rpc in the list is your own Lotus."
+  "_blockChunk": "how many blocks to ask for in one eth_getLogs call. Public nodes cap this at 360; raise it if the first rpc in the list is your own Lotus.",
+  "bringYourOwnJob": {
+    "enabled": false,
+    "minPrice": "0.5",
+    "maxSeconds": 600,
+    "cpus": "2",
+    "memory": "4g"
+  }
 }

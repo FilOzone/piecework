@@ -192,8 +192,43 @@ function render() {
         <button class="b primary" id="orderbtn" ${busy || !use.length || !set.canReceiveResults ? "disabled" : ""}>Order</button>
       </div>
       <p class="muted" style="margin:8px 0 0">It will read <b>${use.length} file${use.length === 1 ? "" : "s"}</b>${picked.size ? " (the ones you ticked)" : ` — every ${esc(exts.join(", "))} file in the data set`}.
-      ${policy === "replace-inputs" ? "After delivery the provider may remove exactly those files. This cannot be undone." : "Nothing is removed."}</p>`;
+      ${policy === "replace-inputs" ? "After delivery the provider may remove exactly those files. This cannot be undone." : "Nothing is removed."}</p>
+
+      <details id="byo" ${typed.byoOpen ? "open" : ""} style="margin-top:14px;border-top:1px solid var(--line);padding-top:12px">
+        <summary style="cursor:pointer"><b>Or run a program of your own</b></summary>
+        <p class="muted" style="margin:10px 0 0">The three above are what this provider offers. The contract has never
+        cared which program runs — it records the image and checks only that results arrive before the deadline — so you
+        can name your own, and the provider will run it if its policy allows.</p>
+        <p class="muted" style="margin:10px 0 0"><b>What your program has to do.</b> It runs as a container on the
+        provider's machine. The files you tick are mounted read-only at <code>/in</code>. Write whatever you produce to
+        <code>/out</code> — every file you leave there is added to your data set, and that is what you are paying for.
+        Write nothing and nothing is delivered, so you get your money back at the deadline. There is <b>no network</b>:
+        the program cannot reach the internet, your machine, or anything but those two folders. That is what makes it
+        safe for a provider to run code it has never seen, and it is why the program must be self-contained — bake the
+        model and the dependencies into the image.</p>
+        <div class="row" style="margin-top:10px">
+          <input id="byoref" style="flex:2;min-width:280px" placeholder="ghcr.io/you/thing@sha256:…" value="${esc(typed.byoRef ?? "")}">
+          <input id="byoprice" style="width:110px" placeholder="price" value="${esc(typed.byoPrice ?? "0.5")}">
+          <button class="b" id="byobtn" ${busy || !use.length || !set.canReceiveResults ? "disabled" : ""}>Order mine</button>
+        </div>
+        <p class="muted" style="margin:8px 0 0">Pin it by digest, not by a tag: a tag can be pointed at different code
+        tomorrow, and the digest is what goes on chain so anyone can check afterwards exactly what ran over your data.
+        Ordering also puts a small <code>job-spec.json</code> in your data set telling the provider where to pull it from.</p>
+      </details>`;
     $("jt").onchange = (e) => { jobType = e.target.value; render(); };
+    $("byo").ontoggle = (e) => { typed.byoOpen = e.target.open; };
+    $("byoref").oninput = (e) => { typed.byoRef = e.target.value; };
+    $("byoprice").oninput = (e) => { typed.byoPrice = e.target.value; };
+    $("byobtn").onclick = () => run("Ordering your own program", async () => {
+      const r = await PW.orderOwnJob(pick, set.dataSetId, use, typed.byoRef, typed.byoPrice);
+      jobs[r.jobId] = { ...r, jobId: r.jobId, type: r.image, provider: pick, dataSetId: set.dataSetId,
+        inputs: use.length, price: typed.byoPrice, status: "waiting", fromBlock: Number(r.fromBlock ?? blockNow) };
+      typed.byoRef = "";
+      picked = new Set();
+      set = await PW.readSet(pick, set.dataSetId, jobs).catch(() => set);
+      await refreshMoney();
+      poll();
+    });
     $("pol").onchange = (e) => { policy = e.target.value; render(); };
     $("orderbtn").onclick = () => {
       if (policy === "replace-inputs" && !confirm("The provider will be allowed to remove the files this job reads, once it has delivered. Continue?")) return;
