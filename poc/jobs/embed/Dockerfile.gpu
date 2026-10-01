@@ -1,0 +1,17 @@
+# PieceWork job: the same embeddings as embed:v1, on the GPU a sealing rig already owns.
+# Contract unchanged: inputs in /in (read-only), results in /out, run with --network none.
+#   docker build -t piecework/embed-gpu:v1 .
+# Needs the nvidia container toolkit on the provider, and a card with 4 GB or more free — it is a small
+# model, so a V100, a 3090, a 4090 or an A4000 are all far more than enough. No H100 required, which is
+# the point: this runs on hardware storage providers bought for sealing.
+FROM nvidia/cuda:12.4.1-runtime-ubuntu22.04
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-pip \
+ && rm -rf /var/lib/apt/lists/*
+RUN pip3 install --no-cache-dir "fastembed-gpu==0.8.1" \
+ && python3 -c "from fastembed import TextEmbedding; TextEmbedding(model_name='BAAI/bge-small-en-v1.5')"
+COPY embed.py /app/embed.py
+ENV PROVIDER=CUDAExecutionProvider
+LABEL org.piecework.job="embed-gpu" org.piecework.inputs="/in/*.txt" \
+      org.piecework.outputs="/out/embeddings.jsonl /out/embeddings-report.txt"
+ENTRYPOINT ["python3", "/app/embed.py"]

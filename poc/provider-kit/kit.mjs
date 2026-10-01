@@ -240,7 +240,12 @@ async function runJob(ev) {
   }
   // Docker has no run timeout of its own: killing the client would leave the container running. Name it, and
   // remove it by force when the time is up.
-  const mounts = ["--network", "none", "-v", `${dir}/in:/in:ro`, "-v", `${dir}/out:/out`];
+  // A job that asks for a GPU gets every GPU the machine has. Sealing rigs already own cards that sit idle
+  // between proofs, and the jobs that fit them are exactly the ones where moving the data costs more than
+  // doing the work. Needs the nvidia container toolkit on the provider; without it docker refuses and the
+  // job fails honestly rather than running a hundred times slower on the CPU without saying so.
+  const gpu = spec.gpu ? ["--gpus", String(cfg.gpus ?? "all")] : [];
+  const mounts = ["--network", "none", ...gpu, "-v", `${dir}/in:/in:ro`, "-v", `${dir}/out:/out`];
   await slot(`Job #${jobId}`);
   try {
     if (spec.byo) {
@@ -257,10 +262,13 @@ async function runJob(ev) {
   if ((await pub.getBlockNumber()) > deadline) { J.stage = "late"; save(); return say(`Job #${jobId}: past the deadline; not delivering.`); }
 
   const { clientDataSetId } = await read(cfg.contracts.view, ABI.View, "getDataSet", [dataSetId]);
-  const produced = spec.byo
+  // Some programs know their outputs by name; some cannot. Transcoding names its results after the client's
+  // own files, so what it writes depends on what it was given. Those declare "*" and we deliver the lot.
+  const everything = spec.byo || spec.outputs === "*";
+  const produced = everything
     ? fs.readdirSync(path.join(dir, "out")).filter((n) => fs.statSync(path.join(dir, "out", n)).isFile())
     : spec.outputs;
-  if (spec.byo && !produced.length) throw new Error("the program wrote nothing to /out, so there is nothing to deliver");
+  if (everything && !produced.length) throw new Error("the program wrote nothing to /out, so there is nothing to deliver");
   const files = produced.map((name) => ({ name, bytes: new Uint8Array(fs.readFileSync(path.join(dir, "out", name))) }));
   J.stage = "storing"; J.t.storing = now(); save();
   const stored = await storeResults(dataSetId, clientDataSetId, files);
@@ -503,7 +511,8 @@ async function liveRound(sessionId) {
         fs.writeFileSync(path.join(dir, "context", `${id}-${names[String(id)]}`), await fetchPiece(CID.decode(hexToBytes(c.data)).toString()));
       }
     }
-    const run = ["run", "--rm", "--network", "none", "-v", `${dir}/in:/in:ro`, "-v", `${dir}/context:/context:ro`,
+    const run = ["run", "--rm", "--network", "none", ...(spec.gpu ? ["--gpus", String(cfg.gpus ?? "all")] : []),
+      "-v", `${dir}/in:/in:ro`, "-v", `${dir}/context:/context:ro`,
       "-v", `${dir}/out:/out`, spec.dockerImage];
     await slot(`Session #${sessionId} round ${round}`);
     try {

@@ -36,5 +36,50 @@
       ".md",
       ".csv"
     ]
+  },
+  "embed-gpu:v1": {
+    "name": "Make my documents searchable by meaning, on the GPU",
+    "dockerImage": "piecework/embed-gpu:v1",
+    "gpu": true,
+    "outputs": [
+      "embeddings.jsonl",
+      "embeddings-report.txt"
+    ],
+    "price": "0.3",
+    "inputExtensions": [
+      ".txt",
+      ".md",
+      ".csv"
+    ]
+  },
+  "query:v1": {
+    "name": "Run my SQL over my tables",
+    "dockerImage": "piecework/query:v1",
+    "outputs": [
+      "results.csv",
+      "query-report.txt"
+    ],
+    "price": "0.3",
+    "inputExtensions": [
+      ".sql",
+      ".csv",
+      ".parquet",
+      ".json",
+      ".jsonl"
+    ]
+  },
+  "transcode:v1": {
+    "name": "Re-encode my video, smaller",
+    "dockerImage": "piecework/transcode:v1",
+    "outputs": "*",
+    "price": "0.5",
+    "inputExtensions": [
+      ".mp4",
+      ".mov",
+      ".mkv",
+      ".avi",
+      ".webm",
+      ".m4v"
+    ]
   }
 }

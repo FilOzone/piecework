@@ -16,6 +16,7 @@ import time
 
 IN, OUT = "/in", "/out"
 MODEL = os.environ.get("MODEL", "BAAI/bge-small-en-v1.5")
+PROVIDER = os.environ.get("PROVIDER", "CPUExecutionProvider")
 CHUNK = int(os.environ.get("CHUNK_CHARS", "400"))  # characters per chunk, split on blank lines where possible
 PREVIEW = int(os.environ.get("PREVIEW_CHARS", "300"))  # how much of the chunk is kept alongside the vector
 SEPARATOR = re.compile(r"\n={20,}\n")
@@ -50,7 +51,9 @@ def main():
     nbytes = sum(len(c.encode()) for _, _, c in items)
 
     t0 = time.time()
-    model = TextEmbedding(model_name=MODEL, providers=["CPUExecutionProvider"])
+    # The same model and the same chunks either way: only the execution provider differs, so a CPU run and a
+    # GPU run are comparable and the report says which one produced it.
+    model = TextEmbedding(model_name=MODEL, providers=[PROVIDER])
     t1 = time.time()
     # What a passage is about includes which document it is in: a file called payment-instruction-0442.txt is
     # about payment instructions even where the sentences do not say so. The name is embedded with the text,
@@ -71,8 +74,9 @@ def main():
         rep.write("Embeddings: your documents turned into vectors, so they can be searched by meaning\n\n")
         rep.write(f"Files: {len(files)}\nChunks embedded: {len(items)}\nModel: {MODEL} ({len(vectors[0]) if vectors else 0} numbers per chunk)\n")
         rep.write(f"Read: {nbytes:,} bytes\nProduced: {produced:,} bytes (embeddings.jsonl)\n")
-        rep.write(f"\nHow the job ran: CPU only, model loading {t1 - t0:.1f} s, embedding {scan:.1f} s, "
-                  f"{nbytes / scan / 1e6:.2f} MB/s ({len(items) / scan:.1f} chunks/s). No GPU, no network.\n")
+        where = "GPU" if "CUDA" in PROVIDER or "Tensorrt" in PROVIDER else "CPU only"
+        rep.write(f"\nHow the job ran: {where}, model loading {t1 - t0:.1f} s, embedding {scan:.1f} s, "
+                  f"{nbytes / scan / 1e6:.2f} MB/s ({len(items) / scan:.1f} chunks/s). No network.\n")
         rep.write("\nThe vectors stay with your data at the provider: only the result file moves if you want it elsewhere.\n")
     print(f"{len(items)} chunks, {nbytes / 1e6:.2f} MB in, {produced / 1e6:.2f} MB out, load {t1 - t0:.1f}s, "
           f"embed {scan:.1f}s, {nbytes / scan / 1e6:.3f} MB/s", file=sys.stderr)
