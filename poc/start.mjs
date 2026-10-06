@@ -549,14 +549,29 @@ function pieceBytes(cid) {
 }
 
 async function curioApi(req, res, url) {
-  const reply = (code, obj, headers = {}) => { res.writeHead(code, { "content-type": "application/json", ...headers }); res.end(obj ? JSON.stringify(obj) : ""); };
+  // A real Curio answers clients from anywhere, so it sends these; this stand-in never had to, because the
+  // only page talking to it was served from this same process. A client on another port is a different
+  // origin, and without these the browser refuses the request before it is ever sent — which looks to the
+  // client like "Network request failed" and to the provider like no request at all.
+  const cors = {
+    "access-control-allow-origin": "*",
+    "access-control-allow-methods": "GET, POST, PUT, DELETE, OPTIONS",
+    "access-control-allow-headers": "content-type, authorization",
+    "access-control-max-age": "86400",
+    // Without this a browser hands the page a response whose headers it is not allowed to read. The upload
+    // flow needs Location — Curio answers 201 and puts the upload session's URL there — so leaving it out
+    // fails as "Location header format is invalid: <none>", which sounds like the provider sent nothing.
+    "access-control-expose-headers": "location, etag, content-length, content-type, x-pdp-status",
+  };
+  if (req.method === "OPTIONS") { res.writeHead(204, cors); return res.end(); }
+  const reply = (code, obj, headers = {}) => { res.writeHead(code, { "content-type": "application/json", ...cors, ...headers }); res.end(obj ? JSON.stringify(obj) : ""); };
   const body = async () => { const chunks = []; for await (const ch of req) chunks.push(ch); return Buffer.concat(chunks); };
   let m;
   if (req.method === "GET" && url.pathname === "/pdp/ping") return reply(200);
   if (req.method === "GET" && (m = url.pathname.match(/^\/piece\/([a-z0-9]+)$/))) {
     const b = pieceBytes(m[1]);
     if (!b) return reply(404, { error: "piece not found" });
-    res.writeHead(200, { "content-type": "application/octet-stream" }); return res.end(b);
+    res.writeHead(200, { "content-type": "application/octet-stream", ...cors }); return res.end(b);
   }
   if (req.method === "POST" && url.pathname === "/pdp/piece") {
     const { pieceCid } = JSON.parse(await body());

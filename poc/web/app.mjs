@@ -205,8 +205,23 @@ export async function createSet(providerId, files, label = "") {
     if (!fresh.length) throw new Error("the data set was created but could not be identified; reload and it will be in your list");
     id = Math.max(...fresh);
   }
+  // The provider created this data set a moment ago, and public RPC is load-balanced: the node that answers
+  // the next request may not have applied that block yet, and will say the data set has no payer. We have
+  // already checked with the chain that it is yours, so a refusal here means "not yet", not "not allowed".
+  // Wait for the node to catch up rather than handing the client an error about a data set they do own.
   step(`Letting providers add job results to data set #${id}, only while a job is open`);
-  await send(C.fwss, FWSS_ABI, "setDataSetAuthorizer", [BigInt(id), C.cs]);
+  const NOT_THE_PAYER = "0xdea95388"; // Errors.OnlyDataSetPayer
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await send(C.fwss, FWSS_ABI, "setDataSetAuthorizer", [BigInt(id), C.cs]);
+      break;
+    } catch (e) {
+      const notYet = JSON.stringify(e?.cause ?? e?.message ?? "").includes(NOT_THE_PAYER);
+      if (!notYet || attempt >= 6) throw e;
+      step(`Data set #${id} has not reached every node yet; trying again (${attempt} of 5)`);
+      await new Promise((r) => setTimeout(r, 10_000));
+    }
+  }
   return id;
 }
 
@@ -423,6 +438,17 @@ export async function allowResults(dataSetId) {
   await onTheRightChain();
   step(`Letting providers add job results to data set #${dataSetId}, only while a job is open`);
   await send(C.fwss, FWSS_ABI, "setDataSetAuthorizer", [BigInt(dataSetId), C.cs]);
+  // The transaction is in a block, but the next read may go to a node that has not applied it, and the page
+  // would then still show "this data set cannot receive job results" over a data set that now can. Wait until
+  // a node confirms it before telling the client it is done.
+  for (let i = 0; i < 12; i++) {
+    const a = await pub.readContract({ address: C.view, abi: ABI.FilecoinWarmStorageServiceStateView,
+      functionName: "getDataSetAuthorizer", args: [BigInt(dataSetId)] }).catch(() => null);
+    if (a && getAddress(a) === getAddress(C.cs)) return;
+    step(`Waiting for the change to reach every node (${i + 1} of 12)`);
+    await new Promise((r) => setTimeout(r, 5000));
+  }
+  throw new Error("the permission was granted but is not visible yet; reload in a moment and it will be there");
 }
 
 export async function order(providerId, dataSetId, type, policy, pieceIds) {
@@ -460,15 +486,19 @@ export async function order(providerId, dataSetId, type, policy, pieceIds) {
 // chain recorded. A spec naming a hostile repository cannot substitute code, because the chain pinned the code.
 
 const IMAGE_REF = /^([\w.\-]+(?::\d+)?(?:\/[\w.\-]+)+)@sha256:([0-9a-f]{64})$/;
+const BARE_DIGEST = /^(?:sha256:)?([0-9a-f]{64})$/;
 
 export function readImageRef(ref) {
-  const m = IMAGE_REF.exec((ref ?? "").trim());
-  if (!m) {
-    throw new Error(`"${ref}" is not an image pinned by digest. It has to look like `
-      + `ghcr.io/you/thing@sha256:… — a tag will not do, because a tag can be pointed at different code tomorrow `
-      + `and the whole point is that the chain records exactly what ran.`);
-  }
-  return { repo: m[1], digest: `0x${m[2]}` };
+  const text = (ref ?? "").trim();
+  const m = IMAGE_REF.exec(text);
+  if (m) return { repo: m[1], digest: `0x${m[2]}` };
+  // No repository: the program is not in a registry anywhere, it is a file in the client's own data set.
+  // `docker save` writes it, it is uploaded like any other piece, and the provider loads it from there.
+  const bare = BARE_DIGEST.exec(text);
+  if (bare) return { repo: null, digest: `0x${bare[1]}` };
+  throw new Error(`"${ref}" is neither an image pinned by digest (ghcr.io/you/thing@sha256:…) nor a bare `
+    + `sha256 of one. A tag will not do: a tag can be pointed at different code tomorrow, and the whole point `
+    + `is that the chain records exactly what ran over your data.`);
 }
 
 export async function orderOwnJob(providerId, dataSetId, pieceIds, ref, priceText, deadlineEpochs = 60) {
@@ -491,19 +521,31 @@ export async function orderOwnJob(providerId, dataSetId, pieceIds, ref, priceTex
       [C.usdfc, C.cs, true, rateAllowance, lockupUsage + price * 3n, maxLockupPeriod || 600n]);
   }
 
-  // The spec piece first, so it exists before the job that lists it.
-  const before = Number(await pub.readContract({ address: C.pdp, abi: ABI.PDPVerifier,
-    functionName: "getNextPieceId", args: [BigInt(dataSetId)] }));
-  const body = JSON.stringify({ image: repo, digest: `sha256:${digest.slice(2)}`, orderedBy: me,
-    note: "Where to find the program this job names. The chain pins which code runs." }, null, 2);
-  step("Telling the provider where your program lives (one file into your data set)");
-  await addFiles(providerId, dataSetId, [new File([body + "\n"], "job-spec.json", { type: "application/json" })]);
-  const after = Number(await pub.readContract({ address: C.pdp, abi: ABI.PDPVerifier,
-    functionName: "getNextPieceId", args: [BigInt(dataSetId)] }));
-  if (after <= before) throw new Error("the job spec did not reach your data set; nothing was ordered");
-  const specPiece = BigInt(after - 1);
-
-  const inputs = [...pieceIds.map((x) => BigInt(x)), specPiece];
+  const inputs = pieceIds.map((x) => BigInt(x));
+  if (repo) {
+    // A registry image: the digest says what, not where, so the repository goes in as a piece of its own.
+    const before = Number(await pub.readContract({ address: C.pdp, abi: ABI.PDPVerifier,
+      functionName: "getNextPieceId", args: [BigInt(dataSetId)] }));
+    const body = JSON.stringify({ image: repo, digest: `sha256:${digest.slice(2)}`, orderedBy: me,
+      note: "Where to find the program this job names. The chain pins which code runs." }, null, 2);
+    step("Telling the provider where your program lives (one file into your data set)");
+    await addFiles(providerId, dataSetId, [new File([body + "\n"], "job-spec.json", { type: "application/json" })]);
+    const after = Number(await pub.readContract({ address: C.pdp, abi: ABI.PDPVerifier,
+      functionName: "getNextPieceId", args: [BigInt(dataSetId)] }));
+    if (after <= before) throw new Error("the job spec did not reach your data set; nothing was ordered");
+    inputs.push(BigInt(after - 1));
+  } else {
+    // No registry: the program itself is a piece. Find it and send it in with the files, or say plainly that
+    // it is missing — the provider has no other way to get hold of it.
+    const here = await readSet(providerId, dataSetId);
+    const tar = Object.entries(here.files).find(([, f]) => /\.tar$/i.test(f.name));
+    if (!tar) {
+      throw new Error("you named a program by digest but there is no .tar of it in this data set. Run "
+        + "`docker save <your image> -o program.tar` and drop that file in first — it is how the provider gets the program.");
+    }
+    if (!inputs.some((x) => Number(x) === Number(tar[0]))) inputs.push(BigInt(tar[0]));
+    step(`Sending your program along with the files (${tar[1].name})`);
+  }
   const deadline = (await pub.getBlockNumber()) + BigInt(deadlineEpochs);
   step(`Ordering your own program over ${pieceIds.length} file${pieceIds.length === 1 ? "" : "s"}: the price goes on hold`);
   const r = await send(C.cs, ABI.ComputeService, "postJob",
@@ -512,7 +554,8 @@ export async function orderOwnJob(providerId, dataSetId, pieceIds, ref, priceTex
     try {
       const ev = decodeEventLog({ abi: ABI.ComputeService, data: log.data, topics: log.topics });
       if (ev.eventName === "JobPosted") {
-        return { jobId: String(ev.args.jobId), deadline: Number(deadline), tx: r.transactionHash, image: `${repo}@sha256:${digest.slice(2)}` };
+        return { jobId: String(ev.args.jobId), deadline: Number(deadline), tx: r.transactionHash,
+          image: repo ? `${repo}@sha256:${digest.slice(2)}` : `sha256:${digest.slice(2)}` };
       }
     } catch { /* other contracts' events */ }
   }

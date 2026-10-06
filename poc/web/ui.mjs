@@ -206,23 +206,33 @@ function render() {
         the program cannot reach the internet, your machine, or anything but those two folders. That is what makes it
         safe for a provider to run code it has never seen, and it is why the program must be self-contained — bake the
         model and the dependencies into the image.</p>
-        <div class="row" style="margin-top:10px">
-          <input id="byoref" style="flex:2;min-width:280px" placeholder="ghcr.io/you/thing@sha256:…" value="${esc(typed.byoRef ?? "")}">
-          <input id="byoprice" style="width:110px" placeholder="price" value="${esc(typed.byoPrice ?? "0.5")}">
-          <button class="b" id="byobtn" ${busy || !use.length || !set.canReceiveResults ? "disabled" : ""}>Order mine</button>
+        <div class="row" style="margin-top:10px;flex-wrap:wrap">
+          <input id="byoref" style="flex:1 1 320px;min-width:0" placeholder="ghcr.io/you/thing@sha256:… or just sha256:…" value="${esc(typed.byoRef ?? "")}">
+          <input id="byoprice" style="flex:0 0 90px;width:90px" placeholder="price" value="${esc(typed.byoPrice ?? "0.5")}">
+          <button class="b primary" id="byobtn" style="flex:0 0 auto" ${busy || !use.length || !set.canReceiveResults ? "disabled" : ""}>Order mine</button>
         </div>
-        <p class="muted" style="margin:8px 0 0">Pin it by digest, not by a tag: a tag can be pointed at different code
-        tomorrow, and the digest is what goes on chain so anyone can check afterwards exactly what ran over your data.
-        Ordering also puts a small <code>job-spec.json</code> in your data set telling the provider where to pull it from.</p>
+        <p class="muted" style="margin:10px 0 0"><b>Two ways to hand it over.</b> If your program is in a registry,
+        paste <code>ghcr.io/you/thing@sha256:…</code> and the provider pulls it. If it is not in a registry — and it
+        need not be — run <code>docker save your-image -o program.tar</code>, drop that file into this data set like
+        any other, and paste just the <code>sha256:…</code> of the image. The program then travels with your data,
+        and no registry, account or public image is involved at all.</p>
+        <p class="muted" style="margin:8px 0 0">Either way, pin it by digest rather than a tag: a tag can be pointed at
+        different code tomorrow, and the digest is what goes on chain, so anyone can check afterwards exactly what ran
+        over your data. Get it with <code>docker inspect --format '{{.Id}}' your-image</code>.</p>
       </details>`;
     $("jt").onchange = (e) => { jobType = e.target.value; render(); };
     $("byo").ontoggle = (e) => { typed.byoOpen = e.target.open; };
     $("byoref").oninput = (e) => { typed.byoRef = e.target.value; };
     $("byoprice").oninput = (e) => { typed.byoPrice = e.target.value; };
     $("byobtn").onclick = () => run("Ordering your own program", async () => {
-      const r = await PW.orderOwnJob(pick, set.dataSetId, use, typed.byoRef, typed.byoPrice);
+      // Read the form, not what we remember of it: a field the client never edited has its default only in
+      // the DOM, so trusting the variable sent `undefined` as the price of the job.
+      const ref = ($("byoref")?.value ?? typed.byoRef ?? "").trim();
+      const price = ($("byoprice")?.value ?? typed.byoPrice ?? "").trim();
+      if (!price || Number.isNaN(Number(price))) throw new Error(`"${price}" is not a price. Put a number of ${CFG.token} in the box next to the image.`);
+      const r = await PW.orderOwnJob(pick, set.dataSetId, use, ref, price);
       jobs[r.jobId] = { ...r, jobId: r.jobId, type: r.image, provider: pick, dataSetId: set.dataSetId,
-        inputs: use.length, price: typed.byoPrice, status: "waiting", fromBlock: Number(r.fromBlock ?? blockNow) };
+        inputs: use.length, price, status: "waiting", fromBlock: Number(r.fromBlock ?? blockNow) };
       typed.byoRef = "";
       picked = new Set();
       set = await PW.readSet(pick, set.dataSetId, jobs).catch(() => set);
@@ -315,11 +325,17 @@ function addFiles(list) {
   const names = list.map((f) => f.name).join(", ");
   if (set) return run(`Adding ${names}`, async () => { try { await PW.addFiles(pick, set.dataSetId, list); } finally { await reread(); } });
   return run(`Creating ${typed.label ? `"${typed.label}"` : "a data set"} with ${names}`, async () => {
-    const id = await PW.createSet(pick, list, typed.label);
-    typed.label = "";
-    store.set("set-" + pick, String(id));
-    set = await PW.readSet(pick, id, jobs);
-    mySets = null;
+    try {
+      const id = await PW.createSet(pick, list, typed.label);
+      typed.label = "";
+      store.set("set-" + pick, String(id));
+      set = await PW.readSet(pick, id, jobs);
+    } finally {
+      // Creating a data set is three transactions and the last one can fail on its own — the data set is then
+      // on chain and the page is still holding the empty list it looked up before. Forget the list either way,
+      // so the next render goes and asks again.
+      mySets = null;
+    }
   });
 }
 

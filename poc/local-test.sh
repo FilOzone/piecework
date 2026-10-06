@@ -12,14 +12,18 @@ OUT="$HOME/piecework-runtime/local-client"   # outside ~/Documents: iCloud evict
                                             # first read becomes a download — 92 s to import viem once.
 rm -rf "$OUT"; mkdir -p "$OUT"
 cp "$HERE"/web/*.html "$HERE"/web/*.mjs "$HERE"/web/*.json "$HERE"/web/*.svg "$OUT"/ 2>/dev/null || true
+# Its own stamp, every time. The page passes this to the modules and to config.json, so a browser holding an
+# older local build would otherwise keep serving it the provider list it had before.
+sed -i '' "s/const V = \"[0-9-]*\"/const V = \"local-$(date +%Y%m%d-%H%M%S)\"/" "$OUT/index.html"
 
 python3 - "$OUT" "$HERE" <<'PY'
 import json, sys, pathlib
 out, here = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
 cfg = json.loads((out / "config.json").read_text())
 
-# the provider is this machine: the demo program plays Curio on 8080, the kit answers jobs and sessions
-cfg["providers"] = [{
+# This machine is added as a second provider, not as a replacement: the real one stays so the same client can
+# switch between them, and so anything tried here can be tried against James immediately afterwards.
+cfg["providers"] = cfg.get("providers", []) + [{
     "id": "local",
     "name": "This machine (stand-in provider)",
     "address": "0xA0C38545600fe067D79Cac5215049eEb4BF387d0",
@@ -37,7 +41,10 @@ for name, job in {
 }.items():
     cfg["jobs"][name] = job
 (out / "config.json").write_text(json.dumps(cfg, indent=2))
-print(f"local client ready: {len(cfg['jobs'])} jobs, {len(cfg.get('services', {}))} services, provider = this machine")
+names = ", ".join(p["name"] for p in cfg["providers"])
+print(f"local client ready: {len(cfg['jobs'])} jobs, {len(cfg.get('services', {}))} services")
+print(f"providers: {names}")
+print("note: SQL and video exist only on this machine — James's node would decline them.")
 PY
 
 echo

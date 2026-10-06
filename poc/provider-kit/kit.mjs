@@ -221,12 +221,31 @@ async function runJob(ev) {
   J.stage = "running"; J.t.running = now(); save();
   const t0 = Date.now();
   if (spec.byo) {
-    // A digest says what to run, not where to find it, and the contract has no room for a repository name.
-    // The client puts one in a piece and lists that piece among the job's inputs, so it arrives with the rest
-    // of the files. Docker then checks the pulled image against the digest the chain recorded: a spec naming
-    // a hostile repository cannot substitute different code, because the chain pinned the code.
+    const want = `sha256:${imageDigest.slice(2)}`;
+    // The simplest way to hand a provider a program is the way the client already hands it everything else:
+    // as a piece in its own data set. `docker save` writes the image to a tar, the tar goes in with the files,
+    // and nothing needs a registry — no account anywhere, nothing public, nothing to keep alive. Loading it
+    // proves itself: if the tar does not contain the image the chain pinned, the id is not there afterwards.
+    const tarFile = fs.readdirSync(path.join(dir, "in")).find((f) => /\.tar$/i.test(f));
+    if (tarFile) {
+      const at = path.join(dir, "in", tarFile);
+      say(`Job #${jobId}: the client brought its own program as a file, ${tarFile} (${(fs.statSync(at).size / 1e6).toFixed(1)} MB). Loading it.`);
+      await execFile("docker", ["load", "-i", at], { maxBuffer: 1 << 28 });
+      await execFile("docker", ["inspect", "--format", "{{.Id}}", want]).catch(() => {
+        throw new Error(`${tarFile} does not contain ${want.slice(0, 19)}…, which is the program the client named on chain`);
+      });
+      fs.rmSync(at); // the program is not one of its own inputs
+      spec.dockerImage = want;
+      J.image = want; save();
+      say(`Job #${jobId}: loaded, and it is the program the chain pinned. Running it with no network, `
+        + `${spec.cpus} cores, ${spec.memory} of memory and ${spec.seconds} s.`);
+    } else {
+    // Otherwise the client named a registry. A digest says what to run, not where to find it, and the contract
+    // has no room for a repository name, so the client puts one in a piece listed among the job's inputs.
+    // Docker then checks the pulled image against the digest the chain recorded: a spec naming a hostile
+    // repository cannot substitute different code, because the chain pinned the code.
     const specFile = fs.readdirSync(path.join(dir, "in")).find((f) => /^job-spec.*\.json$/i.test(f));
-    if (!specFile) throw new Error("a program I do not know, and no job-spec.json among the inputs saying where to find it");
+    if (!specFile) throw new Error("a program I do not know, and neither a .tar of it nor a job-spec.json saying where to find it");
     const wanted = JSON.parse(fs.readFileSync(path.join(dir, "in", specFile), "utf8"));
     if (typeof wanted.image !== "string" || !/^[\w.\-]+(:\d+)?(\/[\w.\-]+)+$/.test(wanted.image)) {
       throw new Error(`job-spec.json does not name a repository I can pull from`);
@@ -237,6 +256,7 @@ async function runJob(ev) {
     await execFile("docker", ["pull", "--quiet", spec.dockerImage], { maxBuffer: 1 << 26 });
     say(`Job #${jobId}: pulled, and the digest matches what the client put on chain. Running it with no network, `
       + `${spec.cpus} cores, ${spec.memory} of memory and ${spec.seconds} s.`);
+    }
   }
   // Docker has no run timeout of its own: killing the client would leave the container running. Name it, and
   // remove it by force when the time is up.
@@ -653,7 +673,8 @@ async function main() {
   }
   const busy = new Set();
   const pending = new Map(); // jobs seen in this run, so a failed one can be retried
-  setInterval(async () => { // retry jobs that failed before delivering, while the deadline allows it
+  setInterval(() => retryFailed().catch((e) => say(`Could not check for jobs to retry: ${e.shortMessage ?? e.message}`)), 30_000);
+  async function retryFailed() { // retry jobs that failed before delivering, while the deadline allows it
     const head = await pub.getBlockNumber();
     for (const [id, ev] of pending) {
       const J = state.jobs[id];
@@ -662,7 +683,7 @@ async function main() {
       busy.add(ev.jobId);
       runJob(ev).catch((e) => say(`Job #${id} failed again: ${e.shortMessage ?? e.message}`)).finally(() => busy.delete(ev.jobId));
     }
-  }, 30_000);
+  }
   for (;;) {
     try {
       const head = Number(await pub.getBlockNumber());
@@ -707,4 +728,11 @@ process.on("SIGINT", async () => { // leave nothing running that the client is s
   for (const [id, S] of Object.entries(state.sessions ?? {})) if (!S.closed) await stopSessionContainer(id);
   process.exit(0);
 });
+// A provider runs for weeks. Public RPC endpoints time out, rate-limit and go away, and node treats an
+// unhandled rejection as fatal — so one slow request would end a provider's day without warning. Nothing
+// here is worth exiting for: say so and keep going. A genuine failure still shows up in the job's own log,
+// and the chain is the record of what happened either way.
+process.on("unhandledRejection", (e) => say(`Ignoring an error nothing was waiting for: ${e?.shortMessage ?? e?.message ?? e}`));
+process.on("uncaughtException", (e) => say(`Ignoring an unexpected error: ${e?.shortMessage ?? e?.message ?? e}`));
+
 main().catch((e) => { console.error("Could not start:", e.shortMessage ?? e.message); process.exit(1); });
