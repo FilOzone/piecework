@@ -65,6 +65,59 @@
         ".md",
         ".csv"
       ]
+    },
+    "query:v1": {
+      "name": "Run my SQL over my tables",
+      "price": "0.3",
+      "deadlineEpochs": 40,
+      "outputs": [
+        "results.csv",
+        "query-report.txt"
+      ],
+      "inputExtensions": [
+        ".sql",
+        ".csv",
+        ".parquet",
+        ".json",
+        ".jsonl"
+      ]
+    },
+    "transcode:v1": {
+      "name": "Re-encode my video, smaller",
+      "price": "0.5",
+      "deadlineEpochs": 80,
+      "outputs": [
+        "(named after your files)"
+      ],
+      "inputExtensions": [
+        ".mp4",
+        ".mov",
+        ".mkv",
+        ".avi",
+        ".webm",
+        ".m4v"
+      ]
+    },
+    "transcribe:v1": {
+      "name": "Transcribe my recordings, searchable by the moment",
+      "price": "0.5",
+      "deadlineEpochs": 240,
+      "outputs": [
+        "(a transcript, subtitles and segments per recording)"
+      ],
+      "inputExtensions": [
+        ".mp3",
+        ".m4a",
+        ".wav",
+        ".flac",
+        ".ogg",
+        ".opus",
+        ".mp4",
+        ".mov",
+        ".mkv",
+        ".webm",
+        ".m4v"
+      ]
     }
   },
   "policies": [

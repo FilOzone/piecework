@@ -1,115 +1,161 @@
-# foc-compute
+# PieceWork — compute on Filecoin Onchain Cloud
 
-Personal research prototype: **compute on Filecoin Onchain Cloud (FOC)**, paid through Filecoin Pay.
+The storage provider that already holds your data, and proves it with PDP, also sells you compute over it.
+You pay through Filecoin Pay, and the provider is paid only when it delivers.
 
-A storage provider that already stores (and proves with PDP) a client's data set also sells compute over it:
+Nothing you store has to move. The program goes to the data.
 
-- **Sessions — pay for time.** Like renting a machine from a GPU cloud: a rate per epoch (30 s) from when the service is ready until the client stops; payment stops exactly then. A safety margin (`rate × lockupPeriod`) is set aside and only used to pay the provider if the client's funds run out.
-- **Batch jobs — pay per job.** The price is escrowed when the job is posted and paid once when the outputs are committed as new PDP pieces; if the deadline passes with no outputs, the client is refunded.
+**Try it:** [lucaniz.github.io/foc-compute-poc/client](https://lucaniz.github.io/foc-compute-poc/client/) — a page
+with no server behind it. Your wallet signs; your browser talks to the provider and to the chain. You need
+MetaMask on Filecoin Calibration and some test tokens; the faucet links appear once you connect.
 
-Correctness of results is the client's responsibility, as with commercial GPU clouds.
+A research prototype, on a test network, unaudited. It is used: a colleague's image-remix app runs on this
+contract, paid per generation, on a storage provider's spare GPU.
 
-## Guarantees
+## Two ways to buy
 
-The labels used in tests and tables below (S = sessions, J = jobs):
+**Per job.** You name a price and a deadline. The provider runs the program next to your files and writes the
+results back into your data set as new pieces. It is paid only if they arrive before the deadline; otherwise
+you take the money back. Delivery is the payment condition, and the chain can check it: new, live pieces in
+your data set, before the deadline.
 
-| | Guarantee |
+**Per epoch.** You pay for a service to keep running — a rate per 30-second epoch, from the moment the
+provider says it is ready until you close it. Closing it stops the charge at that epoch, not at the end of
+some notice period.
+
+The second one is the interesting half, because it changes what you are buying. You stop ordering work and
+start buying a property of your data set that stays true:
+
+| Service | What it keeps true |
 |---|---|
-| **S1** | If the client's money runs out during a session, the provider is still paid: for the time served, plus at most the safety margin (`rate × lockupPeriod`). |
-| **S2** | The client never pays more than the safety margin beyond the service it received. |
-| **S3** | Nobody can charge the client without its approval: only the operator it approved (ComputeService), within the limits it set. |
-| **S4** | Stop means stop: when the client stops, it pays exactly the epochs used, and the margin is released. |
-| **J1** | If the provider delivers the outputs (new pieces in the client's data set) before the deadline, it is paid the price. |
-| **J2** | If nothing is delivered by the deadline, the client gets the full price back. |
-| **J3** | The provider is paid at most once, and never more than the price held for the job. |
+| **Keep it searchable** | every document you add is turned into vectors, so search by meaning never goes stale |
+| **Keep it clean** | nothing is stored without a redacted copy beside it |
+| **Keep it answering** | drop in a file whose name starts with `ask`, and the answer comes back as a file |
 
-## What runs, and where
+You add a document and the results appear. There is no second transaction and nothing to remember.
 
-Three ways in, for three kinds of person.
+## Bring your own program
 
-| | For | Where |
-|---|---|---|
-| **A web page** | anyone with a wallet — nothing installed | `poc/web/` — static files; your browser talks to the provider and the chain, and whoever hosts the page sees nothing |
-| **The client kit** | a client who wants it on their own machine, scriptable | `poc/client-kit/` — a local console, plus `piecework` on the command line |
-| **The provider kit** | a storage provider selling compute | `poc/provider-kit/` — one command next to an existing Curio |
+Nothing about the jobs is fixed by the protocol. The contract takes the program's identity as an opaque
+`bytes32`, never inspects it, and conditions payment purely on delivery. What has been fixed is each
+provider's own catalogue — which is now a policy a provider opts into rather than a limit of the design.
 
-And `poc/start.mjs` is the demo program: it plays a Curio provider on a laptop, so the whole thing can be shown without a second machine, and serves the guided walk-through page.
+A client names its program by content address and the provider runs exactly that code, with **no network**,
+the client's files read-only, and a ceiling on time, cores and memory. Two ways to hand it over:
 
-## On Filecoin Calibration (public test network)
+- **From a registry** — `ghcr.io/you/thing@sha256:…`, which the provider pulls.
+- **As a piece** — `docker save` writes the program to a file, the file goes into your own data set like any
+  other, and travels with the job. **No registry, no account, nothing public.** The provider loads it and
+  checks it is the image the chain pinned before running it.
 
-`ComputeService` is deployed at [`0x204D9872448B0404D39C657aAEBffb17767EDdb9`](https://filecoin-testnet.blockscout.com/address/0x204D9872448B0404D39C657aAEBffb17767EDdb9) (see `poc/calibnet.json` for earlier deployments), next to FilOz's own Calibration deployment of Filecoin Pay, PDPVerifier and FWSS.
+The second removes the last thing that had to live outside Filecoin.
 
-Two providers run it:
+## What a provider offers
 
-- **@TippyFlits** (`ezpdpz-calib`, registry id 9) — a real Curio node with PDP, running the provider kit.
-- **A stand-in on a laptop** — the demo program pretending to be Curio, so the demo works when nobody else is up.
-
-What has actually happened on chain, rather than in a diagram: jobs delivered and paid on both providers (PII redaction and embeddings), jobs deliberately left to expire and refunded, sessions billed to the epoch and stopped on request, a client deleting its own files, and a provider clearing away the files a job read after the client allowed it.
-
-## The jobs
-
-Each runs in a container with the client's files read-only at `/in`, results at `/out`, and **no network**.
+Each job runs in a container with your files read-only at `/in`, results at `/out`, and no network.
 
 | Job | What it does |
 |---|---|
 | `pii-redact:v1` | finds personal and financial data (Presidio + spaCy) and writes a redacted copy plus a report |
-| `embed:v1` | turns documents into vectors so they can be searched by meaning (BAAI/bge-small, CPU) |
+| `embed:v1` | turns documents into vectors, so they can be searched by meaning |
+| `query:v1` | runs your SQL over the csv/parquet/json already in your data set — gigabytes in, rows out |
+| `transcode:v1` | re-encodes your video where it is stored, and returns something much smaller |
 | `indexer:v1` | a plain keyword index — the simple one, for checking the plumbing |
 
-And one service sold by the epoch rather than by the job: `workspace:v1`, a container with the data set mounted read-only, for as long as the client keeps it open.
+A provider adds a job by putting an image in its catalogue. Nobody's permission is required, and nothing on
+chain changes.
 
 ## What the client controls
 
 - **Which files a job reads** — the whole data set, or the ones it picks.
-- **What happens to them afterwards**: keep everything (the default), keep only the newest result, or replace the originals — in which case the contract lets the provider remove *exactly* the pieces the client listed, only once each, and only after it has delivered. The client can take that permission back with `revokeRemoval` while it is unused, or mark files never to be removed.
-- **Its own files**: a client can delete anything in a data set it pays for, with no provider involved, because Warm Storage accepts the payer's own signature.
+- **What happens to them afterwards**: keep everything (the default), keep only the newest result, or replace
+  the originals — in which case the contract lets the provider remove *exactly* the pieces the client listed,
+  once each, and only after delivering. The client can take that permission back with `revokeRemoval` while it
+  is unused.
+- **Its own files**: a client can delete anything in a data set it pays for, with no provider involved,
+  because Warm Storage accepts the payer's own signature.
+
+## What the contract guarantees
+
+S for sessions, J for jobs; each line is a test.
+
+| | |
+|---|---|
+| **S1** | If the client's money runs out mid-session, the provider is still paid for the time served, plus at most the safety margin (`rate × lockupPeriod`). |
+| **S2** | The client never pays more than that margin beyond the service it received. |
+| **S3** | Only the operator the client approved (ComputeService) can charge it, within the limits it set. |
+| **S4** | Stop means stop: the client pays exactly the epochs used, and the margin is released. |
+| **J1** | Deliver before the deadline and the provider is paid the price. |
+| **J2** | Deliver nothing and the client gets the full price back. |
+| **J3** | The provider is paid at most once, and never more than the price held. |
+
+**What it does not guarantee: correctness.** The chain shows that something new arrived in your data set
+before the deadline. It does not show that the program ran, or ran honestly. For a redaction you can read the
+output; for a SQL query you can re-run it; for an embedding you cannot. Proving the computation itself is a
+different problem, and a real one.
+
+## On Filecoin Calibration
+
+`ComputeService` is deployed at
+[`0x40c22bFDb4B95f0fB8EE827bB5a156215Da567d5`](https://filecoin-testnet.blockscout.com/address/0x40c22bFDb4B95f0fB8EE827bB5a156215Da567d5),
+beside FilOz's own Calibration deployment of Filecoin Pay, PDPVerifier and Warm Storage. Earlier deployments
+are listed in `poc/calibnet.json`.
+
+Providers running it:
+
+- **@TippyFlits** — `ezpdpz-calib` (registry id 9) and `ezpdpz-calib2` (registry id 2), real Curio nodes with
+  PDP, in the UK. The second one runs image generation on an RTX A4000 for someone else's application.
+- **A stand-in on a laptop**, so the whole thing can be shown and new jobs can be tried without conscripting
+  anyone's hardware.
+
+What has actually happened on chain, rather than in a diagram: jobs delivered and paid on both providers;
+jobs left to expire and refunded; sessions billed to the epoch and stopped on request; a client deleting its
+own files; a provider clearing away the files a job read, after the client allowed it; and a client's own
+program, which no provider offers, run and paid for.
 
 ## Running it yourself
 
-**The page:** serve `poc/web/` with any static web server (`python3 -m http.server 8099`) and open it with MetaMask on Calibration. No build step; `viem` and `synapse-core` come from a CDN.
+**The page.** Serve `poc/web/` with any static server (`python3 -m http.server 8099`) and open it with
+MetaMask on Calibration. No build step; `viem` and `synapse-core` come from a CDN.
 
-**The client kit:** `cd poc/client-kit && ./setup.sh`, then `node console.mjs --config client.config.json`, and open http://localhost:8070. Signs with your browser wallet, or with a key file if you prefer. `piecework` drives the same API from a script.
+**The provider kit.** `cd poc/provider-kit && ./setup.sh`, point it at your Curio and the key it already uses
+for PDP, then `node kit.mjs --config kit.config.json`. It watches the chain, runs the jobs, stores results
+through your own Curio and claims the payment. Bring-your-own is off until you turn it on.
 
-**The provider kit:** `cd poc/provider-kit && ./setup.sh`, point it at your Curio and the key it uses for PDP, then `node kit.mjs --config kit.config.json`. It watches the chain, runs the jobs, stores the results through your Curio and claims the payment.
+**The client kit.** `cd poc/client-kit && ./setup.sh`, then `node console.mjs --config client.config.json`.
+A local console, and `piecework` on the command line driving the same API the page uses.
 
-**The demo program** (a provider stand-in, for showing it on one machine): `cd poc && node start.mjs --calibnet`, then http://localhost:8080. Needs [Node.js](https://nodejs.org) 20+ and [Docker Desktop](https://www.docker.com/products/docker-desktop/); the local-chain mode also needs [Foundry](https://getfoundry.sh) and the git submodule (`git clone --recurse-submodules`).
+**Everything on one machine, with no chain fees.** `cd poc && node start.mjs` runs a local chain with the real
+FOC contracts at the versions deployed on Calibration and mainnet, plus ComputeService and a provider. Every
+button is a real transaction. See [DEMO.md](DEMO.md). Needs Node 20+, Docker, and for the local-chain mode
+[Foundry](https://getfoundry.sh) and the submodule (`git clone --recurse-submodules`).
 
-## Everything on one machine, with no chain fees
-
-`node start.mjs` (without `--calibnet`) runs a local blockchain with **the real FOC contracts at the versions deployed on Calibration and mainnet** — Filecoin Pay v1.0.0, PDPVerifier, FWSS v1.4.0, the provider registry and session keys — plus `ComputeService` and a provider. The client's files are a real FWSS data set, created with the client's signature, with real piece CIDs. Every button is a real transaction. See [DEMO.md](DEMO.md).
-
-Real there: the FOC contracts unmodified, our contract, the client's EIP-712 signatures, the piece CIDs, the containers, the settlement. Stand-ins: the USDFC token, the FVM precompiles (a stub, so fees are kept rather than burned), one-second blocks instead of thirty, and **no proofs of possession** — the demo provider runs no prover. James's node does prove; the stand-in does not.
-
-## Contents
-
-| Path | What |
-|---|---|
-| `poc/web/` | The client as a web page: no server, no build step. |
-| `poc/client-kit/` | The client's own console, the `piecework` command line, and the API both use. |
-| `poc/provider-kit/` | What a storage provider installs next to Curio to sell compute. |
-| `poc/jobs/` | The programs themselves (PII redaction, embeddings), as container images. |
-| `poc/start.mjs` | The demo program: plays a Curio provider, serves the guided page. |
-| `poc/app/index.html` | The guided walk-through page. |
-| `poc/data/dataset/` | The sample files in the client's data set. |
-| `contracts/src/ComputeService.sol` | The operator contract: sessions (pay for time) and jobs (pay per job). |
-| `poc/foc.mjs` | Deploys and drives the real FOC contracts (local), signatures, piece CIDs. |
-| `contracts/src/MockPDP.sol` | Earlier stand-in for PDPVerifier, kept for the unit tests. |
-| `contracts/test/ComputeService.t.sol` | Tests of ComputeService against the real Filecoin Pay (23 tests). |
-| `integration/test/FwssCompute.t.sol` | ComputeService with real PDPVerifier, FWSS, provider registry, session keys (12 tests). |
-| `contracts/test/ComputeGuarantees.t.sol` | Tests of the Filecoin Pay behaviour the protocol relies on (17 tests). |
-| `contracts/src/IComputeService.sol` | The interface as first proposed. |
-| `demo/index.html`, `demo/explore.html` | Simulations without a chain (explainer and detailed version). |
-| `contracts/lib/filecoin-pay` | FilOzone/filecoin-pay, pinned at `04ded6a`, used read-only as a dependency. |
-
-## Run the tests
+## The tests
 
 ```sh
-cd contracts && forge test      # 42 tests: Filecoin Pay mechanics + ComputeService
+cd contracts && forge test      # 44 tests: Filecoin Pay mechanics, and ComputeService against it
 cd integration && forge test    # 12 tests: ComputeService with the real FOC contracts
 ```
 
-`integration/` runs ComputeService together with the contracts **deployed on calibnet and mainnet**: FilOzone/filecoin-services @ `4cbbea4` (FWSS v1.4.0), its PDPVerifier and Filecoin Pay v1.0.0 (git submodule `contracts/lib/filecoin-services`). Only the USDFC token and the FVM precompiles (FilOz's `MockFVMTest`) are stand-ins; signatures are real EIP-712 signatures. It checks the **data set authorizer**: the client attaches ComputeService to its FWSS data set (`setDataSetAuthorizer`), and ComputeService then lets the provider add pieces (job outputs) only while a job of that client with that provider is open. The client's own signatures and session keys keep working.
+`integration/` runs ComputeService together with the contracts deployed on Calibration and mainnet —
+filecoin-services @ `4cbbea4` (Warm Storage v1.4.0), its PDPVerifier, and Filecoin Pay v1.0.0. Only the USDFC
+token and the FVM precompiles are stand-ins; the signatures are real EIP-712 signatures. It tests the thing
+the whole design rests on: a client attaches ComputeService to its data set, and ComputeService then lets a
+provider add pieces only while that client has an open job or a running session with it — and not a block
+longer.
 
-## Status
+## Where it is
 
-Running on Filecoin Calibration with FilOz's contracts and two providers, one of them an independent storage provider on his own hardware. Both payment models, the file lifecycle and refunds are exercised end to end. Open: transcoding as a third job, and whether the compute provider may be a different party from the storage provider — which needs read delegation, since today the contract pays only the provider that holds the data set.
+Both payment models, the file lifecycle, refunds, and a client's own program are exercised end to end on
+Calibration, with an independent storage provider on his own hardware.
+
+Open questions, in the order they matter:
+
+- **Correctness, not just delivery.** See above. The honest limit of the design.
+- **What a provider's spare GPU is worth.** Sealing cards sit idle once a provider stops sealing, but they are
+  not free — many are already earning on other networks. The price that would bring that capacity back is
+  unknown, and only a provider can answer it.
+- **Catalogue jobs are pinned by name, not by code.** A client ordering `pii-redact:v1` is trusting the
+  provider's label; bring-your-own already pins the real digest, and the catalogue should too.
+- **Compute provider ≠ storage provider.** Today the contract pays only the provider holding the data set.
+  Separating them needs read delegation.
