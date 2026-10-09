@@ -64,10 +64,20 @@ Each job runs in a container with your files read-only at `/in`, results at `/ou
 | `indexer:v1` | a plain keyword index — the simple one, for checking the plumbing |
 
 Two of these have a GPU twin — `embed-gpu:v1` and `transcribe-gpu:v1` — the same code against a card instead
-of a processor. Transcription is the one where it matters: a processor runs speech at roughly real time, so an
-hour of audio costs an hour, while a card bought for sealing runs a better model many times faster. How many
-times is measured by `poc/jobs/transcribe/bench.sh`, which times the same recording three ways so the hardware
-and the model can be told apart. Nobody has run it on a sealing card yet.
+of a processor. `poc/jobs/transcribe/bench.sh` times the same recording three ways so the hardware and the
+model can be told apart, and a storage provider has now run it on his own machines, over 94.7 minutes of audio:
+
+| | | |
+|---|---|---|
+| `small`, 2× EPYC 7282 (64 threads) | 10.7 min | 9× real time |
+| `small`, RTX A4000 | 4.4 min | 22× real time |
+| `large-v3-turbo`, RTX A4000 | 6.3 min | 15× real time |
+
+The card is worth about 2.4× on the same model; the better model gives about 1.4× of that back. That is a good
+deal less than the twenty-to-forty times this file used to claim, which compared a card against a laptop. What
+the card actually buys is throughput on hardware that is otherwise idle — around 360 hours of audio a day on
+turbo — and whether that beats what the same card earns elsewhere is a question about price, which no
+benchmark answers.
 
 A provider adds a job by putting an image in its catalogue. Nobody's permission is required, and nothing on
 chain changes.
@@ -104,7 +114,7 @@ different problem, and a real one.
 ## On Filecoin Calibration
 
 `ComputeService` is deployed at
-[`0x40c22bFDb4B95f0fB8EE827bB5a156215Da567d5`](https://filecoin-testnet.blockscout.com/address/0x40c22bFDb4B95f0fB8EE827bB5a156215Da567d5),
+[`0x432248a2e0338cf61cb52dfed314b28b4b15074d`](https://filecoin-testnet.blockscout.com/address/0x432248a2e0338cf61cb52dfed314b28b4b15074d),
 beside FilOz's own Calibration deployment of Filecoin Pay, PDPVerifier and Warm Storage. Earlier deployments
 are listed in `poc/calibnet.json`.
 

@@ -2,11 +2,20 @@
 # Contract unchanged: inputs in /in (read-only), results in /out, run with --network none.
 #   docker build -f Dockerfile.gpu -t piecework/transcribe-gpu:v1 .
 #
-# Why this is the workload that justifies the hardware, where embeddings were not: embedding a document is
-# small and bursty, and a CPU keeps up. Speech is a long serial grind over hours of audio, and the gap is not
-# subtle — a CPU runs Whisper small at roughly real time, while a card from a sealing rig runs the much better
-# large-v3-turbo at twenty to forty times real time. The same ten hours of recordings: a long afternoon on a
-# laptop, or four minutes on a 3090 that is otherwise idle.
+# Measured, on a storage provider's own hardware, over the same 94.7 minutes of audio:
+#
+#   small, 2x EPYC 7282 (64 threads)   10.7 min    9x real time
+#   small, RTX A4000                    4.4 min   22x real time
+#   large-v3-turbo, RTX A4000           6.3 min   15x real time
+#
+# So the card is worth about 2.4x on the same model, and the better model costs about 1.4x of that back. An
+# earlier version of this comment claimed twenty to forty times, which was a guess comparing a card against a
+# laptop and calling it a card against a processor. Against a real server CPU the gap is much smaller, and
+# anyone pricing this should use the numbers above rather than the enthusiasm.
+#
+# What the card does buy is throughput while it would otherwise be idle: kept busy on turbo, roughly 360 hours
+# of audio a day. Whether that beats what the same card earns elsewhere is still the only question that
+# matters, and it is a question about price, not speed.
 #
 # Needs the nvidia container toolkit on the provider and about 6 GB of free VRAM. A V100, 3090, 4090 or A4000
 # all clear that comfortably. No H100 required, which is the point: this runs on cards bought for sealing.
