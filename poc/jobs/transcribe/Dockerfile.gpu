@@ -26,5 +26,5 @@ ENV HF_HUB_OFFLINE=1 MODEL_DIR=/models/large-v3-turbo DEVICE=cuda COMPUTE_TYPE=f
 COPY transcribe.py /app/transcribe.py
 LABEL org.piecework.job="transcribe-gpu" \
       org.piecework.inputs="/in/*.mp3 /in/*.m4a /in/*.wav /in/*.mp4 /in/*.mov /in/*.mkv /in/*.webm" \
-      org.piecework.outputs="/out/*-transcript.txt /out/*-subtitles.srt /out/*-segments.jsonl /out/transcribe-report.txt"
+      org.piecework.outputs="/out/*-transcript.txt /out/*-subtitles.srt /out/transcribe-report.txt"
 ENTRYPOINT ["python3", "/app/transcribe.py"]

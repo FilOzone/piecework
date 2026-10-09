@@ -106,7 +106,7 @@ function render() {
       ${files.map(([pid, f]) => `<tr>
         <td><input type="checkbox" data-id="${pid}" ${picked.has(pid) ? "checked" : ""}></td>
         <td>#${pid}</td>
-        <td><a href="${esc(PW.fileUrl(p.id, f.cid))}" target="_blank" rel="noopener">${esc(f.name)}</a></td>
+        <td><a href="${esc(PW.fileUrl(p.id, f.cid))}" data-save="${esc(f.name)}" target="_blank" rel="noopener">${esc(f.name)}</a></td>
         <td>${f.kind === "output" ? '<span class="pill ok">job result</span>' : '<span class="muted">your file</span>'}${
           f.removing ? ' <span class="pill off">removal scheduled</span>'
           : f.removable ? ' <span class="pill warn">you allowed removal</span>' : ""}</td></tr>`).join("")}
@@ -191,6 +191,7 @@ function render() {
         <select id="pol">${CFG.policies.map((x) => `<option value="${esc(x.id)}" ${x.id === policy ? "selected" : ""}>${esc(x.label)}</option>`).join("")}</select>
         <button class="b primary" id="orderbtn" ${busy || !use.length || !set.canReceiveResults ? "disabled" : ""}>Order</button>
       </div>
+      ${spec.note ? `<p class="muted" style="margin:10px 0 0">${esc(spec.note)}</p>` : ""}
       <p class="muted" style="margin:8px 0 0">It will read <b>${use.length} file${use.length === 1 ? "" : "s"}</b>${picked.size ? " (the ones you ticked)" : ` — every ${esc(exts.join(", "))} file in the data set`}.
       ${policy === "replace-inputs" ? "After delivery the provider may remove exactly those files. This cannot be undone." : "Nothing is removed."}</p>
 
@@ -300,14 +301,15 @@ function render() {
     <thead><tr><th>Job</th><th>Status</th><th>Results</th><th></th></tr></thead><tbody>
     ${list.map(([id, j]) => `<tr>
       <td>#${esc(id)} ${esc(CFG.jobs[j.type]?.name ?? j.type)}<br><span class="muted">${j.inputs} files · ${esc(CFG.jobs[j.type]?.price ?? "")} ${esc(CFG.token)} · data set #${esc(j.dataSetId)}</span></td>
-      <td><span class="pill ${esc(j.status)}">${esc({ waiting: "waiting for the provider", paid: "delivered and paid", refunded: "refunded" }[j.status] ?? j.status)}</span>
-        ${j.status === "waiting" && blockNow && j.deadline > blockNow ? `<div class="muted">${j.deadline - blockNow} blocks left</div>`
+      <td><span class="pill ${esc(j.status)}">${esc(jobStatusText(j))}</span>
+        ${j.status === "waiting" && blockNow && j.deadline > blockNow ? `<div class="muted">${jobTiming(j)}</div>`
           : j.status === "waiting" && blockNow ? '<div class="muted">deadline passed</div>' : ""}</td>
-      <td>${(j.outputs ?? []).map((o) => `<a href="${esc(PW.fileUrl(j.provider, o.cid))}" target="_blank" rel="noopener">${esc(o.name)}</a>`).join("<br>")}</td>
+      <td>${(j.outputs ?? []).map((o) => `<a href="${esc(PW.fileUrl(j.provider, o.cid))}" data-save="${esc(o.name)}" target="_blank" rel="noopener">${esc(o.name)}</a>`).join("<br>")}</td>
       <td>${j.tx ? `<a href="${esc(CFG.explorer + j.tx)}" target="_blank" rel="noopener">ordered</a>` : ""}
         ${j.paidTx ? ` · <a href="${esc(CFG.explorer + j.paidTx)}" target="_blank" rel="noopener">paid</a>` : ""}
         ${j.status === "waiting" && blockNow && j.deadline < blockNow ? `<div><button class="b" data-refund="${esc(id)}">Get my money back</button></div>` : ""}</td>
     </tr>`).join("")}</tbody></table></div>`;
+  document.querySelectorAll("a[data-save]").forEach((a) => (a.onclick = saveWithItsName));
   document.querySelectorAll("button[data-refund]").forEach((b) => (b.onclick = () => run("Cancelling the job", async () => {
     await PW.refund(b.dataset.refund);
     jobs[b.dataset.refund].status = "refunded";
@@ -385,3 +387,47 @@ async function poll() {
   setInterval(() => { if (me && !busy) poll(); }, 10_000);
   setInterval(checkChain, 3000);
 })();
+
+// A block is about 30 seconds, and "47 blocks left" is not a unit anyone thinks in while watching a spinner.
+const mins = (blocks) => {
+  const m = Math.round(blocks * 30 / 60);
+  return m < 1 ? "under a minute" : m < 60 ? `${m} min` : `${Math.floor(m / 60)}h ${m % 60}m`;
+};
+
+// What the row can honestly say, which is more than "waiting" and less than the provider's log.
+function jobStatusText(j) {
+  if (j.status !== "waiting") return { paid: "delivered and paid", refunded: "refunded" }[j.status] ?? j.status;
+  // Results reach the data set before the provider claims payment, so pieces arriving means it is delivering.
+  if (j.arriving > 0) return `results arriving (${j.arriving} file${j.arriving === 1 ? "" : "s"})`;
+  return "running at the provider";
+}
+
+function jobTiming(j) {
+  const left = `deadline in ${mins(j.deadline - blockNow)}`;
+  if (!j.postedAt || blockNow <= j.postedAt) return left;
+  return `ordered ${mins(blockNow - j.postedAt)} ago · ${left}`;
+}
+
+// A piece is addressed by its CID, so that is what the provider serves it as, and the browser saves
+// "bafkzcibd4ibq…" with no extension. The name the client gave the file is held here, in the page, and is
+// what makes the difference between a transcript you can open and an unreadable blob in Downloads.
+//
+// The download attribute alone does not fix it: the file comes from the provider's origin, and browsers
+// ignore a download filename cross-origin. So fetch the bytes and save them under the right name, and if the
+// provider does not allow the page to read the response, fall back to simply opening it — a file with a bad
+// name beats no file.
+async function saveWithItsName(e) {
+  const a = e.currentTarget, name = a.dataset.save;
+  if (!name) return;
+  e.preventDefault();
+  try {
+    const res = await fetch(a.href);
+    if (!res.ok) throw new Error(`the provider answered ${res.status}`);
+    const url = URL.createObjectURL(await res.blob());
+    const tmp = Object.assign(document.createElement("a"), { href: url, download: name });
+    document.body.append(tmp); tmp.click(); tmp.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 30_000);
+  } catch {
+    window.open(a.href, "_blank", "noopener");
+  }
+}

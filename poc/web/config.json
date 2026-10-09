@@ -37,7 +37,8 @@
       "deadlineEpochs": 40,
       "inputExtensions": [
         ".txt"
-      ]
+      ],
+      "note": "Writes a redacted copy of each document plus a report of what it found and where."
     },
     "embed:v1": {
       "name": "Make my documents searchable by meaning (embeddings)",
@@ -51,7 +52,8 @@
         ".txt",
         ".md",
         ".csv"
-      ]
+      ],
+      "note": "Turns documents into vectors so they can be searched by meaning rather than by keyword. Transcripts count as documents \u2014 this is what makes a recording searchable."
     },
     "indexer:v1": {
       "name": "Build a search index of my files",
@@ -64,7 +66,8 @@
         ".txt",
         ".md",
         ".csv"
-      ]
+      ],
+      "note": "A plain keyword index. The simplest job here, useful for checking the plumbing works."
     },
     "query:v1": {
       "name": "Run my SQL over my tables",
@@ -80,7 +83,8 @@
         ".parquet",
         ".json",
         ".jsonl"
-      ]
+      ],
+      "note": "Put a .sql file in the data set alongside your tables; it runs over the csv, parquet and json already stored here and returns the rows, so gigabytes stay put and only the answer moves."
     },
     "transcode:v1": {
       "name": "Re-encode my video, smaller",
@@ -96,7 +100,8 @@
         ".avi",
         ".webm",
         ".m4v"
-      ]
+      ],
+      "note": "Re-encodes each video to 480p and writes a thumbnail beside it. The original is untouched unless you choose a policy that replaces it."
     },
     "transcribe:v1": {
       "name": "Transcribe my recordings, searchable by the moment",
@@ -117,7 +122,8 @@
         ".mkv",
         ".webm",
         ".m4v"
-      ]
+      ],
+      "note": "Writes three files back per recording: a transcript with the time at the start of every paragraph (read it, or order embeddings over it and search by meaning), subtitles any video player will load, and a short report saying how long the audio was and how fast it ran. On a processor this is roughly real time, so an hour of audio is an hour of compute."
     }
   },
   "policies": [

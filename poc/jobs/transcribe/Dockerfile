@@ -12,5 +12,5 @@ ENV HF_HUB_OFFLINE=1 MODEL_DIR=/models/small DEVICE=cpu COMPUTE_TYPE=int8 OMP_NU
 COPY transcribe.py /app/transcribe.py
 LABEL org.piecework.job="transcribe" \
       org.piecework.inputs="/in/*.mp3 /in/*.m4a /in/*.wav /in/*.mp4 /in/*.mov /in/*.mkv /in/*.webm" \
-      org.piecework.outputs="/out/*-transcript.txt /out/*-subtitles.srt /out/*-segments.jsonl /out/transcribe-report.txt"
+      org.piecework.outputs="/out/*-transcript.txt /out/*-subtitles.srt /out/transcribe-report.txt"
 ENTRYPOINT ["python", "/app/transcribe.py"]

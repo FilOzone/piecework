@@ -366,8 +366,42 @@ export async function findJobs() {
   }
   for (const [id, j] of Object.entries(jobs)) {
     if (j.status === "paid") Object.assign(j, await jobOutputs(id, j.dataSetId, j.type).catch(() => ({})));
+    else if (j.status === "waiting") Object.assign(j, await jobProgress(j).catch(() => ({})));
   }
   return jobs;
+}
+
+// Between ordering and being paid, a job changes nothing on chain: the provider is running a container the
+// page cannot see, and the row says "waiting" whether the program is halfway through, finished, or the
+// provider is dead. Three states that matter, rendered identically.
+//
+// There is one thing the chain does show, though, before the payment settles: the provider writes the results
+// into the data set as pieces, and that happens a block or two BEFORE it claims the money. So a data set that
+// has grown since the job was ordered is proof the provider is alive and delivering, available to the client
+// without asking the provider anything.
+//
+// When the job was ordered is not stored on chain either, but it is recoverable: the client set the deadline
+// to the block it ordered at plus the job's deadlineEpochs, so subtracting gives the block back.
+async function jobProgress(j) {
+  const epochs = CFG.jobs[j.type]?.deadlineEpochs;
+  if (!epochs) return {};
+  const postedAt = j.deadline - epochs;
+  const head = Number(await pub.getBlockNumber());
+  // PiecesAddedV2, not PiecesAdded: the verifier emits the V2 shape, carrying firstPieceId and the cids rather
+  // than a list of ids. Watching the older name finds nothing and reports it as "no progress yet", which is
+  // indistinguishable from a dead provider — the exact failure this function exists to end.
+  let arriving = 0, unread = false;
+  for (let to = head; to > postedAt; to -= CHUNK) {
+    const from = Math.max(postedAt, to - CHUNK + 1);
+    try {
+      for (const l of await pub.getContractEvents({ address: C.pdp, abi: ABI.PDPVerifier,
+        eventName: "PiecesAddedV2", args: { setId: BigInt(j.dataSetId) },
+        fromBlock: BigInt(from), toBlock: BigInt(to) })) {
+        arriving += (l.args?.pieceCids ?? []).length;
+      }
+    } catch { unread = true; }  // a read that could not be made is not the same as nothing having happened
+  }
+  return unread && !arriving ? { postedAt } : { postedAt, arriving };
 }
 
 // What a paid job delivered: JobPaid names the pieces.

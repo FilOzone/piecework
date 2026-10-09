@@ -4,8 +4,13 @@ Job contract (same for every PieceWork job): read the client's files from /in (r
 /out, no network. For each media file:
   <name>-transcript.txt   the words, in paragraphs, each one beginning with the time it was said
   <name>-subtitles.srt    the same thing as subtitles, which any player will load
-  <name>-segments.jsonl   one line per segment: start, end, text — for anything that wants the structure
   transcribe-report.txt   what was transcribed, how long it took, and how much faster than real time
+
+There is deliberately no third file of segments as json. Its contents — start, end, text — are already in the
+srt, which every language can parse, and each output is a separate piece: separately stored, separately proven,
+separately paid for. On one short recording that is invisible; on an archive it is a quarter more pieces held
+forever for nothing. The transcript earns its place by being different (paragraphs sized to embed cleanly, one
+timestamp each); a second encoding of the same segments does not.
 
 Model: Whisper through faster-whisper (CTranslate2), baked into the image so the job needs no network.
 
@@ -18,7 +23,6 @@ That only holds if a paragraph fits inside one of embed:v1's chunks. Let a parag
 and embed splits it in the middle, producing a chunk that starts mid-sentence with no time on it — so
 PARAGRAPH_CHARS is kept deliberately below it.
 """
-import json
 import os
 import sys
 import time
@@ -112,10 +116,6 @@ def main():
         with open(os.path.join(OUT, f"{stem}-subtitles.srt"), "w") as out:
             for i, s in enumerate(segments, 1):
                 out.write(f"{i}\n{clock(s['start'], True)} --> {clock(s['end'], True)}\n{s['text']}\n\n")
-
-        with open(os.path.join(OUT, f"{stem}-segments.jsonl"), "w") as out:
-            for s in segments:
-                out.write(json.dumps(s) + "\n")
 
         words = sum(len(s["text"].split()) for s in segments)
         report.write(f"{f}: {clock(length)} of {info.language}, {len(segments)} segments, {words:,} words, "
