@@ -1,0 +1,62 @@
+# A fictional call, written to be transcribed. Every person, company and number in it is invented.
+# Format: SPEAKER: text. One turn per line. make-sample.sh turns it into audio.
+#
+# It is written so that the interesting moments cannot be found by searching for the words in the question —
+# which is the whole point of embedding a transcript rather than grepping it.
+
+NADIA: Right, we're all here. This is the compute working group, and I want to get through four things today without running over. Pricing, hardware, the security question Aoife raised last week, and then whatever Fred has heard from customers.
+NADIA: Tom, you've been living in the spreadsheet. Start us off.
+TOM: Thanks. So the headline is that our flat rate is wrong, and it has been wrong for about two quarters. We quote one number per terabyte per month regardless of what the data does, and the data does wildly different things.
+TOM: Last month we served four hundred and twelve terabytes of egress. Just over half of that came from eight hundred files. We hold something like forty million.
+NADIA: Say that again, because that is the whole meeting.
+TOM: Half of everything we served came out of eight hundred files, out of forty million. The long tail is not a tail, it is the entire body, and it sits there costing us disk and earning the same as the hot stuff.
+AOIFE: And we are charging the archive customers the same as the ones hammering us.
+TOM: Exactly. So we are subsidising cold storage with money from hot storage, and the customers who would happily pay more for fast reads are getting them for free.
+NADIA: What do you want to do about it?
+TOM: Split the product. A warm tier priced roughly where we are now, and a cold tier at maybe forty per cent of that, where the trade is that first byte takes minutes rather than milliseconds.
+FRED: I will push back on that, gently. The moment you tell a customer their data has gone somewhere slower, they stop believing it is really theirs. I have watched it happen at two previous companies.
+TOM: They can move it back any time.
+FRED: They can, but they will not read the documentation, they will just feel that their archive is now second class and keep a copy somewhere else. And once there is a second copy, there is a reason to cancel.
+NADIA: That is a real objection and I do not think it is answered by arguing. Tom, can you price it so that nothing anyone is doing today gets more expensive?
+TOM: Probably. If cold is strictly cheaper and nothing moves without the customer asking, then there is no bill shock and no surprise.
+NADIA: Then do that version. Nobody wakes up to a worse deal. Fred, if it is opt in and strictly cheaper, are you still worried?
+FRED: Less. Let me see the actual numbers before I agree.
+TOM: I will have them by the twenty ninth.
+NADIA: Good. Second thing. The cards.
+TOM: We own sixteen accelerators. We bought them when sealing needed them, and sealing does not need them any more. Four of them are currently earning on another network, and before anyone gets excited, that is about nine dollars a day each.
+AOIFE: Nine dollars a day. So the whole fleet, if we could keep all sixteen busy on that, is call it a hundred and forty a day.
+TOM: Which is not nothing, but it is not a business either. The other twelve are drawing power and doing nothing at all.
+NADIA: So the question is what we could do with them that beats nine dollars a day per card.
+TOM: That is the only question. And I want to be careful here, because everyone keeps telling me there is enormous demand for compute, and then nobody can tell me what a card actually earns per day doing it.
+FRED: Training is out. We do not have the interconnect and we do not have the memory, and anyone training a serious model is not shopping at a storage provider.
+TOM: Agreed. Inference is more plausible but it is latency sensitive, and we are nowhere near anybody.
+AOIFE: What about work where the data is already here? That is the only advantage we actually have. We are not faster, we are not cheaper on silicon, but the bytes are already on our disks.
+NADIA: Go on.
+AOIFE: Anything where moving the input costs more than doing the work. If a customer has twenty terabytes of recordings sitting with us, transcribing them here is obviously sensible, and transcribing them anywhere else means shipping twenty terabytes first.
+TOM: That one I believe. We measured it. A processor does speech at roughly real time, so an hour of audio is an hour of compute. The same card that used to seal does the same hour in under two minutes, with a better model.
+NADIA: Which is a thirty times difference.
+TOM: Give or take. And it is the only workload we have looked at where the gap is that large and the data gravity argument holds at the same time.
+FRED: I have two customers who would buy that tomorrow. One has a decade of support calls they have never been able to search. The other is a broadcaster with an archive nobody has catalogued since two thousand and nine.
+NADIA: Then that is the candidate. Aoife, your turn, and I think this is the one that could kill it.
+AOIFE: It might. If we are going to run programs that customers give us, on hardware that also holds everyone else's data, I need to be able to say exactly what that program can reach.
+AOIFE: Today the answer is that it runs in a container, the customer's own files are mounted read only, there is no network at all, and we cap processor time and memory.
+NADIA: That sounds reasonably tight.
+AOIFE: It is tight against an honest customer who writes a slow program. It is not obviously tight against someone who is actively trying. Container escapes exist. If one works, it is not their data at risk, it is everybody's.
+TOM: The cap on memory handles the clumsy case at least. A program that tries to allocate everything gets killed rather than taking the node down with it.
+AOIFE: That part I am comfortable with. What I want before we sell this to strangers is the untrusted workloads on machines that hold nothing, physically separate from the storage.
+NADIA: That costs us the data gravity argument.
+AOIFE: Not entirely, if they are in the same building on the same network. It costs us some of it. It buys us not being the company that lost someone else's archive.
+NADIA: Noted, and I think you are right for anything open to the public. For a named customer running a program over their own data, with a contract, I am more relaxed.
+AOIFE: I can live with that distinction. One more thing while I have the floor. However this is paid for, we should be honest about what the payment proves.
+NADIA: Meaning?
+AOIFE: If the arrangement is that we get paid when the results appear, then what has been proven is that results appeared. Not that the program ran. Not that it ran correctly. A provider who wanted to cheat could return something plausible and be paid for it.
+TOM: For some jobs you can check. If you transcode a video you can watch it.
+AOIFE: For some. If you asked me to embed ten thousand documents and I returned ten thousand plausible rows of numbers, nobody is checking those by eye, and I do not think anyone has a cheap way to check them at all.
+NADIA: So delivery is the condition we can actually enforce, and correctness is an open problem.
+AOIFE: Yes. And I would rather we say that out loud than have a customer discover it.
+NADIA: Agreed, and it goes in the write up in those words. Fred, last slot, what are you hearing?
+FRED: Mostly latency. The archive customer I mentioned, the one re-reading the same eight hundred files, has been complaining that first byte is slow, and they are right, it is about four seconds.
+TOM: Four seconds because it is coming off the cold path every time, even though it is the hottest data we have.
+FRED: Which, if I understand the first half of this call, is exactly backwards.
+TOM: Completely backwards. They are the best argument for the tiering, not an objection to it.
+NADIA: Then put them in the write up as the example. Right, that is time. Tom has numbers by the twenty ninth, Aoife is writing up the isolation requirement, and I will take the correctness question to the wider group because it is bigger than us. Thanks everyone.

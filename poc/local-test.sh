@@ -38,6 +38,13 @@ for name, job in {
     "transcode:v1": {"name": "Re-encode my video, smaller", "price": "0.5",
                      "outputs": ["(named after your files)"], "deadlineEpochs": 80,
                      "inputExtensions": [".mp4", ".mov", ".mkv", ".avi", ".webm", ".m4v"]},
+    # Transcription needs a long deadline on a CPU: the model runs at roughly real time there, so an hour of
+    # audio is an hour of compute. The GPU build is where that stops being true.
+    "transcribe:v1": {"name": "Transcribe my recordings, searchable by the moment", "price": "0.5",
+                      "outputs": ["(a transcript, subtitles and segments per recording)"],
+                      "deadlineEpochs": 240,
+                      "inputExtensions": [".mp3", ".m4a", ".wav", ".flac", ".ogg", ".opus",
+                                          ".mp4", ".mov", ".mkv", ".webm", ".m4v"]},
 }.items():
     cfg["jobs"][name] = job
 (out / "config.json").write_text(json.dumps(cfg, indent=2))

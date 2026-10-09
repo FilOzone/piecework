@@ -81,5 +81,44 @@
       ".webm",
       ".m4v"
     ]
+  },
+  "transcribe:v1": {
+    "name": "Transcribe my recordings (and make them searchable by the moment)",
+    "dockerImage": "piecework/transcribe:v1",
+    "outputs": "*",
+    "price": "0.5",
+    "inputExtensions": [
+      ".mp3",
+      ".m4a",
+      ".wav",
+      ".flac",
+      ".ogg",
+      ".opus",
+      ".mp4",
+      ".mov",
+      ".mkv",
+      ".webm",
+      ".m4v"
+    ]
+  },
+  "transcribe-gpu:v1": {
+    "name": "Transcribe my recordings, on the GPU (bigger model, ~20x faster)",
+    "dockerImage": "piecework/transcribe-gpu:v1",
+    "gpu": true,
+    "outputs": "*",
+    "price": "0.5",
+    "inputExtensions": [
+      ".mp3",
+      ".m4a",
+      ".wav",
+      ".flac",
+      ".ogg",
+      ".opus",
+      ".mp4",
+      ".mov",
+      ".mkv",
+      ".webm",
+      ".m4v"
+    ]
   }
 }
