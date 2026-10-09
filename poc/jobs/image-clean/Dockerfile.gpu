@@ -1,0 +1,13 @@
+# The same job on the GPU a storage provider already owns. Same code, same models, CUDA execution.
+#   docker build -f Dockerfile.gpu -t piecework/image-clean-gpu:v1 .
+# Needs the nvidia container toolkit. Comfortable on 16 GB — an A4000 is more than enough.
+FROM nvidia/cuda:12.4.1-runtime-ubuntu22.04
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-pip libgl1 libglib2.0-0 \
+ && rm -rf /var/lib/apt/lists/*
+RUN pip3 install --no-cache-dir "rembg[gpu]==2.0.59" opencv-python-headless==4.10.0.84 pillow numpy
+RUN python3 -c "import rembg; rembg.new_session('u2net'); rembg.new_session('u2net_human_seg')"
+COPY clean.py /app/clean.py
+LABEL org.piecework.job="image-clean-gpu" org.piecework.inputs="/in/*.jpg /in/*.png /in/what.txt" \
+      org.piecework.outputs="/out/*-clean.png /out/*-mask.png /out/image-clean-report.txt"
+ENTRYPOINT ["python3", "/app/clean.py"]
