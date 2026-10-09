@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 pragma solidity ^0.8.27;
 
-import {IDataSetView} from "./ComputeService.sol";
+import {IDataSetView, IPieceLiveness} from "./ComputeService.sol";
 
 /// @title MockPDP (local POC only)
 /// @notice Stand-in for PDPVerifier on a local chain, where no real storage provider proves possession.
@@ -45,6 +45,13 @@ contract MockPDP {
 
     function getNextPieceId(uint256 setId) external view returns (uint256) {
         return pieces[setId].length;
+    }
+
+    /// Same shape as PDPVerifier's getPieceCid (L371). The real one returns the piece's commitment; this
+    /// returns the CID string the POC stored, which is enough for a commitment over inputs and outputs to be
+    /// well defined and to change when the pieces do.
+    function getPieceCid(uint256 setId, uint256 pieceId) external view returns (IPieceLiveness.Cid memory) {
+        return IPieceLiveness.Cid(bytes(pieces[setId][pieceId].pieceCid));
     }
 
     function getPiece(uint256 setId, uint256 pieceId) external view returns (string memory name, string memory pieceCid, bool live) {

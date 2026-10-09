@@ -11,6 +11,10 @@ import {PaymentsTestHelpers} from "filecoin-pay/test/helpers/PaymentsTestHelpers
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ComputeService, IPieceLiveness, ISessionKeyRegistry, IDataSetView} from "../src/ComputeService.sol";
 import {MockPDP} from "../src/MockPDP.sol";
+import {MockVerifier} from "../src/MockVerifier.sol";
+import {AgreementVerifier, IJobView} from "../src/AgreementVerifier.sol";
+import {SP1ComputeVerifier, ISP1Verifier} from "../src/SP1ComputeVerifier.sol";
+import {MockSP1Verifier} from "../src/MockSP1Verifier.sol";
 
 contract ComputeServiceTest is Test {
     PaymentsTestHelpers helper;
@@ -71,7 +75,7 @@ contract ComputeServiceTest is Test {
     }
 
     function railOfJob(uint256 id) internal view returns (uint256 railId) {
-        (,, railId,,,,,,) = cs.jobs(id);
+        (,, railId,,,,,,,,) = cs.jobs(id);
     }
 
     function settle(uint256 railId) internal returns (uint256 gross) {
@@ -545,5 +549,369 @@ contract ComputeServiceTest is Test {
             cs.isAuthorized(ds, client, cs.SCHEDULE_PIECE_REMOVALS_TYPEHASH(), digest, abi.encodePacked(r2, s2, v2), abi.encode(uint256(1), one(0))),
             "a stranger may not"
         );
+    }
+
+    // ---------- pay only when a proof verifies too (opt-in) ----------
+    //
+    // V1-V5 cover the condition the client adds by naming a verifier. The guarantees above are untouched by
+    // design: a job with no verifier takes exactly the path it always did, which is what V5 pins down.
+
+    function verifierOf(uint256 id) internal view returns (address v) {
+        (,,,,,,,,, v,) = cs.jobs(id);
+    }
+
+    function inputCommitmentOf(uint256 id) internal view returns (bytes32 c) {
+        (,,,,,,,,,, c) = cs.jobs(id);
+    }
+
+    function commitOf(string memory cid) internal pure returns (bytes32) {
+        return keccak256(abi.encodePacked(bytes(cid)));
+    }
+
+    function postVerifiedJob(MockVerifier v, uint256 deadlineIn) internal returns (uint256 id) {
+        vm.prank(CLIENT);
+        id = cs.postJob(PROVIDER, IMAGE, dataSetId, inputs(), noRemovals(), P_PRICE,
+                        vm.getBlockNumber() + deadlineIn, address(v));
+    }
+
+    // V1: with a verifier named and a proof that verifies, the job pays exactly as an ordinary one does.
+    function test_V1_verifiedJobPaysWhenTheProofVerifies() public {
+        uint256 D = 1 ether;
+        helper.makeDeposit(CLIENT, CLIENT, D);
+        approveCS();
+        MockVerifier v = new MockVerifier();
+        uint256 id = postVerifiedJob(v, 100);
+        assertEq(verifierOf(id), address(v), "the job records the verifier the client chose");
+
+        uint256[] memory outs = addOutput();
+        bytes memory proof = v.expected(IMAGE, inputCommitmentOf(id), commitOf("baga-output-1"));
+        uint256 providerBefore = funds(PROVIDER);
+        vm.prank(PROVIDER);
+        cs.commitOutputs(id, outs, proof);
+
+        assertEq(funds(PROVIDER) - providerBefore, P_PRICE - fee(P_PRICE), "provider paid p net of fee");
+        assertEq(lockupCurrent(CLIENT), 0, "nothing left on hold");
+    }
+
+    // V2: the verifier says no -> nothing is paid, and the money is still the client's to take back.
+    function test_V2_noPaymentWhenTheProofIsRejected() public {
+        uint256 D = 1 ether;
+        helper.makeDeposit(CLIENT, CLIENT, D);
+        approveCS();
+        MockVerifier v = new MockVerifier();
+        v.setRefuseEverything(true);
+        uint256 id = postVerifiedJob(v, 100);
+
+        uint256[] memory outs = addOutput();
+        bytes memory proof = v.expected(IMAGE, inputCommitmentOf(id), commitOf("baga-output-1"));
+        vm.prank(PROVIDER);
+        vm.expectRevert(abi.encodeWithSignature("ProofRejected(uint256)", id));
+        cs.commitOutputs(id, outs, proof);
+
+        assertEq(lockupCurrent(CLIENT), P_PRICE, "p still escrowed");
+        // and the ordinary refund path still works: delivery without a valid proof is not delivery.
+        helper.advanceBlocks(101);
+        cs.expire(id);
+        assertEq(funds(CLIENT), D, "client got everything back");
+    }
+
+    // V3: a proof must be about the pieces being handed over. One that verifies for different outputs is
+    //     no use here, or a provider could prove one cheap job and deliver the results of another.
+    function test_V3_proofMustMatchTheOutputsBeingDelivered() public {
+        helper.makeDeposit(CLIENT, CLIENT, 1 ether);
+        approveCS();
+        MockVerifier v = new MockVerifier();
+        uint256 id = postVerifiedJob(v, 100);
+
+        uint256[] memory outs = addOutput();
+        bytes memory wrongProof = v.expected(IMAGE, inputCommitmentOf(id), commitOf("baga-some-other-output"));
+        vm.prank(PROVIDER);
+        vm.expectRevert(abi.encodeWithSignature("ProofRejected(uint256)", id));
+        cs.commitOutputs(id, outs, wrongProof);
+    }
+
+    // V4: the inputs are fixed when the job is posted. Pieces added afterwards cannot be what was proved
+    //     over, so a proof taken over a later state of the data set does not pay.
+    function test_V4_inputsAreFixedWhenTheJobIsPosted() public {
+        helper.makeDeposit(CLIENT, CLIENT, 1 ether);
+        approveCS();
+        MockVerifier v = new MockVerifier();
+        uint256 id = postVerifiedJob(v, 100);
+        bytes32 atPostTime = inputCommitmentOf(id);
+        assertEq(atPostTime, keccak256(abi.encodePacked(bytes("baga-input-1"), bytes("baga-input-2"))),
+                 "commitment is over the input CIDs, in order");
+
+        vm.prank(PROVIDER);
+        pdp.addPiece(dataSetId, "smuggled.txt", "baga-input-3");
+        assertEq(inputCommitmentOf(id), atPostTime, "adding pieces later does not change what was committed");
+
+        uint256[] memory outs = addOutput();
+        bytes32 threeInputs =
+            keccak256(abi.encodePacked(bytes("baga-input-1"), bytes("baga-input-2"), bytes("baga-input-3")));
+        // Built before expectRevert is armed: evaluating an argument is itself a call, and it would be the
+        // one expectRevert watched.
+        bytes memory proofOverTheLaterDataSet = v.expected(IMAGE, threeInputs, commitOf("baga-output-1"));
+        vm.prank(PROVIDER);
+        vm.expectRevert(abi.encodeWithSignature("ProofRejected(uint256)", id));
+        cs.commitOutputs(id, outs, proofOverTheLaterDataSet);
+    }
+
+    // V5: naming no verifier is the old behaviour, proof or no proof. Verification is something a client
+    //     opts into, never something it has to opt out of.
+    function test_V5_withoutAVerifierDeliveryAloneStillPays() public {
+        helper.makeDeposit(CLIENT, CLIENT, 1 ether);
+        approveCS();
+        uint256 id = postJob(100);
+        assertEq(verifierOf(id), address(0), "no verifier");
+        assertEq(inputCommitmentOf(id), bytes32(0), "and nothing committed, so no gas spent reading CIDs");
+
+        uint256[] memory outs = addOutput();
+        uint256 providerBefore = funds(PROVIDER);
+        vm.prank(PROVIDER);
+        cs.commitOutputs(id, outs, hex"deadbeef"); // ignored entirely
+        assertEq(funds(PROVIDER) - providerBefore, P_PRICE - fee(P_PRICE), "paid on delivery alone");
+    }
+
+    // ---------- verification by agreement (the two-provider scheme) ----------
+    //
+    // W1-W4. The client buys the same work from two providers and is only charged for results they both
+    // reached independently. Every one of these runs the real AgreementVerifier against the real
+    // ComputeService; nothing about agreement is mocked.
+
+    address PROVIDER2 = address(0xD00D);
+
+    function setUpSecondProvider() internal returns (uint256 otherSetId) {
+        vm.startPrank(PROVIDER2);
+        otherSetId = pdp.createDataSet(CLIENT);
+        pdp.addPiece(otherSetId, "notes.txt", "baga-input-1");   // the same bytes, held by someone else
+        pdp.addPiece(otherSetId, "papers.pdf", "baga-input-2");
+        vm.stopPrank();
+    }
+
+    function postTo(address prov, uint256 setId, address verifier) internal returns (uint256 id) {
+        vm.prank(CLIENT);
+        id = cs.postJob(prov, IMAGE, setId, inputs(), noRemovals(), P_PRICE, vm.getBlockNumber() + 100, verifier);
+    }
+
+    function deliver(address prov, uint256 setId, string memory cid)
+        internal returns (uint256[] memory outs)
+    {
+        vm.prank(prov);
+        uint256 pieceId = pdp.addPiece(setId, "result.jsonl", cid);
+        outs = new uint256[](1);
+        outs[0] = pieceId;
+    }
+
+    // W1: two providers reach the same answer -> both are paid, each for its own job.
+    function test_W1_bothPaidWhenTheyAgree() public {
+        helper.makeDeposit(CLIENT, CLIENT, 4 ether);
+        approveCS();
+        uint256 setB = setUpSecondProvider();
+        AgreementVerifier av = new AgreementVerifier(IJobView(address(cs)));
+
+        uint256 jobA = postTo(PROVIDER, dataSetId, address(av));
+        uint256 jobB = postTo(PROVIDER2, setB, address(av));
+        uint256[] memory outsA = deliver(PROVIDER, dataSetId, "baga-result");
+        uint256[] memory outsB = deliver(PROVIDER2, setB, "baga-result");
+        bytes32 answer = commitOf("baga-result");
+
+        // One provider alone is not enough, however sure it is.
+        vm.prank(PROVIDER);
+        av.declare(jobA, answer);
+        vm.prank(PROVIDER);
+        vm.expectRevert(abi.encodeWithSignature("ProofRejected(uint256)", jobA));
+        cs.commitOutputs(jobA, outsA, abi.encode(jobA));
+
+        // The second provider arrives at the same bytes independently.
+        vm.prank(PROVIDER2);
+        av.declare(jobB, answer);
+
+        uint256 aBefore = funds(PROVIDER);
+        uint256 bBefore = funds(PROVIDER2);
+        vm.prank(PROVIDER);
+        cs.commitOutputs(jobA, outsA, abi.encode(jobA));
+        vm.prank(PROVIDER2);
+        cs.commitOutputs(jobB, outsB, abi.encode(jobB));
+
+        assertEq(funds(PROVIDER) - aBefore, P_PRICE - fee(P_PRICE), "first provider paid");
+        assertEq(funds(PROVIDER2) - bBefore, P_PRICE - fee(P_PRICE), "second provider paid");
+    }
+
+    // W2: they disagree -> neither is paid, and the client gets both prices back when the deadline passes.
+    function test_W2_nobodyPaidWhenTheyDisagree() public {
+        uint256 D = 4 ether;
+        helper.makeDeposit(CLIENT, CLIENT, D);
+        approveCS();
+        uint256 setB = setUpSecondProvider();
+        AgreementVerifier av = new AgreementVerifier(IJobView(address(cs)));
+
+        uint256 jobA = postTo(PROVIDER, dataSetId, address(av));
+        uint256 jobB = postTo(PROVIDER2, setB, address(av));
+        uint256[] memory outsA = deliver(PROVIDER, dataSetId, "baga-result");
+        deliver(PROVIDER2, setB, "baga-different-result");
+
+        vm.prank(PROVIDER);
+        av.declare(jobA, commitOf("baga-result"));
+        vm.prank(PROVIDER2);
+        av.declare(jobB, commitOf("baga-different-result"));
+
+        vm.prank(PROVIDER);
+        vm.expectRevert(abi.encodeWithSignature("ProofRejected(uint256)", jobA));
+        cs.commitOutputs(jobA, outsA, abi.encode(jobA));
+
+        helper.advanceBlocks(101);
+        cs.expire(jobA);
+        cs.expire(jobB);
+        assertEq(funds(CLIENT), D, "client paid for neither");
+    }
+
+    // W3: a provider cannot be its own second opinion. Declaring twice moves its support, it does not add to it.
+    function test_W3_oneProviderCannotAgreeWithItself() public {
+        helper.makeDeposit(CLIENT, CLIENT, 4 ether);
+        approveCS();
+        AgreementVerifier av = new AgreementVerifier(IJobView(address(cs)));
+        uint256 jobA = postTo(PROVIDER, dataSetId, address(av));
+        uint256[] memory outsA = deliver(PROVIDER, dataSetId, "baga-result");
+        bytes32 answer = commitOf("baga-result");
+
+        vm.prank(PROVIDER);
+        av.declare(jobA, answer);
+        vm.prank(PROVIDER);
+        av.declare(jobA, answer);   // again
+        vm.prank(PROVIDER);
+        av.declare(jobA, answer);   // and again
+
+        uint256 n = av.standingBehind(av.workKey(CLIENT, IMAGE, inputCommitmentOf(jobA)), answer);
+        assertEq(n, 1, "still one provider standing behind it");
+        vm.prank(PROVIDER);
+        vm.expectRevert(abi.encodeWithSignature("ProofRejected(uint256)", jobA));
+        cs.commitOutputs(jobA, outsA, abi.encode(jobA));
+    }
+
+    // W4: a stranger cannot declare on a provider's behalf, and a provider cannot declare for a job that
+    //     never asked for agreement.
+    function test_W4_onlyTheJobsProviderDeclares() public {
+        helper.makeDeposit(CLIENT, CLIENT, 4 ether);
+        approveCS();
+        AgreementVerifier av = new AgreementVerifier(IJobView(address(cs)));
+        uint256 jobA = postTo(PROVIDER, dataSetId, address(av));
+
+        vm.prank(STRANGER);
+        vm.expectRevert(AgreementVerifier.NotTheJobsProvider.selector);
+        av.declare(jobA, commitOf("baga-result"));
+
+        uint256 plainJob = postJob(100);   // no verifier named
+        vm.prank(PROVIDER);
+        vm.expectRevert(AgreementVerifier.NotForThisVerifier.selector);
+        av.declare(plainJob, commitOf("baga-result"));
+    }
+
+    // ---------- payment against a proof of execution (Z1-Z5) ----------
+    //
+    // The adapter's job is to refuse a proof that is valid but about different work. The SP1 verifier itself
+    // is mocked: soundness is what a real verifier adds, and these tests are about the binding around it.
+
+    function journal(bytes32 inputs_, bytes32 outputs_) internal pure returns (bytes memory) {
+        return abi.encode(inputs_, outputs_);
+    }
+
+    function wrap(bytes memory publicValues, bytes memory proofBytes) internal pure returns (bytes memory) {
+        return abi.encode(publicValues, proofBytes);
+    }
+
+    // Z1: a proof whose journal names this job's inputs and the pieces being delivered -> paid.
+    function test_Z1_paidAgainstAProofOfThisWork() public {
+        helper.makeDeposit(CLIENT, CLIENT, 1 ether);
+        approveCS();
+        MockSP1Verifier sp1 = new MockSP1Verifier();
+        SP1ComputeVerifier v = new SP1ComputeVerifier(ISP1Verifier(address(sp1)));
+        uint256 id = postTo(PROVIDER, dataSetId, address(v));
+        uint256[] memory outs = deliver(PROVIDER, dataSetId, "baga-result");
+
+        bytes memory pv = journal(inputCommitmentOf(id), commitOf("baga-result"));
+        bytes memory pb = hex"c0ffee";
+        sp1.accept(IMAGE, pv, pb);
+
+        uint256 before = funds(PROVIDER);
+        vm.prank(PROVIDER);
+        cs.commitOutputs(id, outs, wrap(pv, pb));
+        assertEq(funds(PROVIDER) - before, P_PRICE - fee(P_PRICE), "provider paid against the proof");
+    }
+
+    // Z2: the heart of it. A perfectly valid proof, of a computation over *different* inputs, is refused.
+    //     Without this a provider could prove yesterday's data and be paid for today's job.
+    function test_Z2_validProofOfDifferentInputsIsRefused() public {
+        helper.makeDeposit(CLIENT, CLIENT, 1 ether);
+        approveCS();
+        MockSP1Verifier sp1 = new MockSP1Verifier();
+        SP1ComputeVerifier v = new SP1ComputeVerifier(ISP1Verifier(address(sp1)));
+        uint256 id = postTo(PROVIDER, dataSetId, address(v));
+        uint256[] memory outs = deliver(PROVIDER, dataSetId, "baga-result");
+
+        bytes32 otherDaysData = keccak256("some other pieces entirely");
+        bytes memory pv = journal(otherDaysData, commitOf("baga-result"));
+        bytes memory pb = hex"c0ffee";
+        sp1.accept(IMAGE, pv, pb);   // the proof itself is impeccable
+
+        bytes memory wrapped = wrap(pv, pb);
+        vm.prank(PROVIDER);
+        vm.expectRevert(abi.encodeWithSignature("ProofRejected(uint256)", id));
+        cs.commitOutputs(id, outs, wrapped);
+    }
+
+    // Z3: likewise a proof about a different result than the pieces actually handed over.
+    function test_Z3_proofMustBeAboutTheDeliveredOutputs() public {
+        helper.makeDeposit(CLIENT, CLIENT, 1 ether);
+        approveCS();
+        MockSP1Verifier sp1 = new MockSP1Verifier();
+        SP1ComputeVerifier v = new SP1ComputeVerifier(ISP1Verifier(address(sp1)));
+        uint256 id = postTo(PROVIDER, dataSetId, address(v));
+        uint256[] memory outs = deliver(PROVIDER, dataSetId, "baga-result");
+
+        bytes memory pv = journal(inputCommitmentOf(id), commitOf("baga-a-nicer-looking-result"));
+        bytes memory pb = hex"c0ffee";
+        sp1.accept(IMAGE, pv, pb);
+
+        bytes memory wrapped = wrap(pv, pb);
+        vm.prank(PROVIDER);
+        vm.expectRevert(abi.encodeWithSignature("ProofRejected(uint256)", id));
+        cs.commitOutputs(id, outs, wrapped);
+    }
+
+    // Z4: the journal is right but the proof is not one SP1 believes -> refused, and the adapter turns the
+    //     verifier's revert into a clean refusal rather than letting it escape.
+    function test_Z4_journalRightButProofRejectedBySP1() public {
+        helper.makeDeposit(CLIENT, CLIENT, 1 ether);
+        approveCS();
+        MockSP1Verifier sp1 = new MockSP1Verifier();
+        SP1ComputeVerifier v = new SP1ComputeVerifier(ISP1Verifier(address(sp1)));
+        uint256 id = postTo(PROVIDER, dataSetId, address(v));
+        uint256[] memory outs = deliver(PROVIDER, dataSetId, "baga-result");
+
+        bytes memory wrapped =
+            wrap(journal(inputCommitmentOf(id), commitOf("baga-result")), hex"deadbeef"); // never accepted
+        vm.prank(PROVIDER);
+        vm.expectRevert(abi.encodeWithSignature("ProofRejected(uint256)", id));
+        cs.commitOutputs(id, outs, wrapped);
+    }
+
+    // Z5: rubbish in the proof field fails this job and nothing else.
+    function test_Z5_malformedProofIsJustARefusal() public {
+        helper.makeDeposit(CLIENT, CLIENT, 1 ether);
+        approveCS();
+        MockSP1Verifier sp1 = new MockSP1Verifier();
+        SP1ComputeVerifier v = new SP1ComputeVerifier(ISP1Verifier(address(sp1)));
+        uint256 id = postTo(PROVIDER, dataSetId, address(v));
+        uint256[] memory outs = deliver(PROVIDER, dataSetId, "baga-result");
+
+        vm.prank(PROVIDER);
+        vm.expectRevert(abi.encodeWithSignature("ProofRejected(uint256)", id));
+        cs.commitOutputs(id, outs, hex"00112233");
+
+        // the job is untouched and can still be delivered properly afterwards
+        bytes memory pv = journal(inputCommitmentOf(id), commitOf("baga-result"));
+        sp1.accept(IMAGE, pv, hex"c0ffee");
+        vm.prank(PROVIDER);
+        cs.commitOutputs(id, outs, wrap(pv, hex"c0ffee"));
     }
 }

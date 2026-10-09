@@ -9,8 +9,33 @@ import {FilecoinPayV1} from "filecoin-pay/src/FilecoinPayV1.sol";
 ///         `pieceLive` (L356) and `getNextPieceId` (L381). Piece ids in a live data set only grow,
 ///         so pieces with id >= getNextPieceId(setId) at time t were added after t.
 interface IPieceLiveness {
+    struct Cid { bytes data; }
     function pieceLive(uint256 setId, uint256 pieceId) external view returns (bool);
     function getNextPieceId(uint256 setId) external view returns (uint256);
+    /// @notice The piece's CID, which is a hash of its bytes (PDPVerifier L371). This is what lets a proof
+    ///         about *bytes* be tied to a job about *piece ids*, without the bytes ever being on chain.
+    function getPieceCid(uint256 setId, uint256 pieceId) external view returns (Cid memory);
+}
+
+/// @notice A proof that the work was actually done, checked before the provider is paid.
+///
+/// ComputeService deliberately knows nothing about any proving system. It hands the verifier three things it
+/// already holds — which program was ordered, what went in, and what came out — plus whatever bytes the
+/// provider supplied, and believes the answer. An SP1 or RISC Zero verifier, an attestation checker, or a
+/// scheme where two providers must agree, are all the same shape from here, and the client picks which one it
+/// trusts by naming its address when posting the job. A verification method cannot be forced on anyone: a
+/// client that names no verifier gets exactly the behaviour that existed before this interface did.
+interface IComputeProofVerifier {
+    /// @param vkey             identifies the program, as the job's imageDigest
+    /// @param inputCommitment  keccak256 over the CIDs of the pieces the job named as input
+    /// @param outputCommitment keccak256 over the CIDs of the pieces being delivered
+    /// @param proof            opaque to ComputeService
+    function verifyComputeProof(
+        bytes32 vkey,
+        bytes32 inputCommitment,
+        bytes32 outputCommitment,
+        bytes calldata proof
+    ) external view returns (bool);
 }
 
 /// @notice FWSS per-data-set authorizer interface (FilOzone/filecoin-services @ 4cbbea4,
@@ -97,6 +122,8 @@ contract ComputeService is IDataSetAuthorizer {
         bytes32 imageDigest;
         uint256 firstOutputPieceId; // outputs must be pieces added after the job was posted
         JobStatus status;
+        address verifier;         // address(0): delivery alone is the payment condition, as before
+        bytes32 inputCommitment;  // fixed when the job is posted, so the inputs cannot be swapped afterwards
     }
 
     // ---------------------------------------------------------------- state
@@ -143,6 +170,7 @@ contract ComputeService is IDataSetAuthorizer {
     event JobPosted(uint256 indexed jobId, address indexed client, address indexed provider, uint256 railId, bytes32 imageDigest, uint256 dataSetId, uint256[] inputPieceIds, uint256 price, uint256 deadline);
     event RemovalAllowed(uint256 indexed jobId, uint256 dataSetId, address indexed provider, uint256[] pieceIds);
     event RemovalRevoked(uint256 indexed dataSetId, address indexed provider, uint256[] pieceIds);
+    event JobNeedsProof(uint256 indexed jobId, address verifier, bytes32 inputCommitment);
     event JobPaid(uint256 indexed jobId, uint256[] outputPieceIds, uint256 epoch);
     event JobExpired(uint256 indexed jobId);
 
@@ -160,6 +188,7 @@ contract ComputeService is IDataSetAuthorizer {
     error OutputNotNew(uint256 pieceId);
     error NotDataSetOwner(uint256 dataSetId, address caller);
     error NotDataSetProvider(uint256 dataSetId, address provider);
+    error ProofRejected(uint256 jobId);
 
     constructor(
         FilecoinPayV1 payments_,
@@ -177,6 +206,19 @@ contract ComputeService is IDataSetAuthorizer {
 
     /// Only the owner (payer) of a data set can buy compute over it, and only from the service provider that
     /// holds it: compute happens where the data is, on data the caller controls.
+    /// @notice A commitment to the *bytes* of a list of pieces, built from the CIDs the verifier already
+    ///         stores. Piece ids mean nothing to a program running in a zkVM; the CID is a hash of the
+    ///         content, so committing to CIDs is what lets an off-chain proof about bytes be checked against
+    ///         an on-chain job about pieces. Order is part of the commitment: a program given its inputs in a
+    ///         different order may legitimately produce a different answer.
+    function _commitPieces(uint256 dataSetId, uint256[] memory pieceIds) internal view returns (bytes32) {
+        bytes memory acc;
+        for (uint256 i = 0; i < pieceIds.length; i++) {
+            acc = abi.encodePacked(acc, pdp.getPieceCid(dataSetId, pieceIds[i]).data);
+        }
+        return keccak256(acc);
+    }
+
     function _checkDataSet(uint256 dataSetId, address provider) internal view {
         IDataSetView.DataSetInfoView memory d = dataSets.getDataSet(dataSetId);
         if (d.payer != msg.sender) revert NotDataSetOwner(dataSetId, msg.sender);
@@ -233,6 +275,7 @@ contract ComputeService is IDataSetAuthorizer {
 
     /// @notice Client orders a job over live pieces of its data set. The price is locked in the rail's
     ///         fixed lockup (escrow) until the provider delivers or the deadline passes.
+    /// @notice Order a job on delivery alone — unchanged behaviour, and still the default.
     function postJob(
         address provider,
         bytes32 imageDigest,
@@ -242,6 +285,28 @@ contract ComputeService is IDataSetAuthorizer {
         uint256 price,
         uint256 deadline
     ) external returns (uint256 jobId) {
+        return postJob(provider, imageDigest, dataSetId, inputPieceIds, removeOnDelivery, price, deadline, address(0));
+    }
+
+    /// @notice Order a job that is paid only once a proof of the computation verifies as well.
+    ///
+    /// The client names the verifier, so it chooses what "proved" means to it and what that is worth; a
+    /// provider that cannot produce such a proof simply does not deliver, and the deadline refunds the client
+    /// as it always did. Nothing here makes the provider wait for its money: the proof is checked inside
+    /// commitOutputs, so payment stays atomic and there is no challenge window to grief.
+    ///
+    /// The inputs are committed to now rather than at delivery, because the point of the proof is that the
+    /// program ran over *these* bytes.
+    function postJob(
+        address provider,
+        bytes32 imageDigest,
+        uint256 dataSetId,
+        uint256[] calldata inputPieceIds,
+        uint256[] calldata removeOnDelivery,
+        uint256 price,
+        uint256 deadline,
+        address verifier
+    ) public returns (uint256 jobId) {
         if (deadline <= block.number) revert DeadlineInPast();
         _checkDataSet(dataSetId, provider);
         for (uint256 i = 0; i < inputPieceIds.length; i++) {
@@ -254,11 +319,14 @@ contract ComputeService is IDataSetAuthorizer {
         payments.modifyRailLockup(railId, 0, price);
         jobId = nextJobId++;
         jobs[jobId] = Job(
-            msg.sender, provider, railId, price, deadline, dataSetId, imageDigest, pdp.getNextPieceId(dataSetId), JobStatus.Posted
+            msg.sender, provider, railId, price, deadline, dataSetId, imageDigest, pdp.getNextPieceId(dataSetId),
+            JobStatus.Posted, verifier,
+            verifier == address(0) ? bytes32(0) : _commitPieces(dataSetId, inputPieceIds)
         );
         jobRemovals[jobId] = removeOnDelivery;
         openJobs[dataSetId][msg.sender][provider]++;
         emit JobPosted(jobId, msg.sender, provider, railId, imageDigest, dataSetId, inputPieceIds, price, deadline);
+        if (verifier != address(0)) emit JobNeedsProof(jobId, verifier, jobs[jobId].inputCommitment);
     }
 
     /// @notice Provider delivers: the output pieces must be live in the client's data set and added after the
@@ -266,6 +334,11 @@ contract ComputeService is IDataSetAuthorizer {
     ///         no later than the deadline epoch. Pays the price, then terminates the rail
     ///         (pay-then-terminate order required, test V3).
     function commitOutputs(uint256 jobId, uint256[] calldata outputPieceIds) external {
+        commitOutputs(jobId, outputPieceIds, "");
+    }
+
+    /// @notice Deliver, with a proof when the job asked for one.
+    function commitOutputs(uint256 jobId, uint256[] calldata outputPieceIds, bytes memory proof) public {
         Job storage j = jobs[jobId];
         if (msg.sender != j.provider) revert NotProvider();
         if (j.status != JobStatus.Posted) revert WrongStatus();
@@ -274,6 +347,15 @@ contract ComputeService is IDataSetAuthorizer {
         for (uint256 i = 0; i < outputPieceIds.length; i++) {
             if (outputPieceIds[i] < j.firstOutputPieceId) revert OutputNotNew(outputPieceIds[i]);
             if (!pdp.pieceLive(j.dataSetId, outputPieceIds[i])) revert PieceNotLive(j.dataSetId, outputPieceIds[i]);
+        }
+        // A proof of some other computation is worth nothing, so what is checked is not merely that a proof
+        // verifies, but that it verifies against this job's program, this job's inputs, and the pieces being
+        // delivered right now.
+        if (j.verifier != address(0)) {
+            if (!IComputeProofVerifier(j.verifier).verifyComputeProof(
+                    j.imageDigest, j.inputCommitment, _commitPieces(j.dataSetId, outputPieceIds), proof)) {
+                revert ProofRejected(jobId);
+            }
         }
         j.status = JobStatus.Paid;
         openJobs[j.dataSetId][j.client][j.provider]--;
