@@ -60,7 +60,14 @@ Each job runs in a container with your files read-only at `/in`, results at `/ou
 | `embed:v1` | turns documents into vectors, so they can be searched by meaning |
 | `query:v1` | runs your SQL over the csv/parquet/json already in your data set — gigabytes in, rows out |
 | `transcode:v1` | re-encodes your video where it is stored, and returns something much smaller |
+| `transcribe:v1` | turns speech in audio and video into text, with the time stamped on every paragraph — so embed and search answer with the moment it was said, not just the file |
 | `indexer:v1` | a plain keyword index — the simple one, for checking the plumbing |
+
+Two of these have a GPU twin — `embed-gpu:v1` and `transcribe-gpu:v1` — the same code against a card instead
+of a processor. Transcription is the one where it matters: a processor runs speech at roughly real time, so an
+hour of audio costs an hour, while a card bought for sealing runs a better model many times faster. How many
+times is measured by `poc/jobs/transcribe/bench.sh`, which times the same recording three ways so the hardware
+and the model can be told apart. Nobody has run it on a sealing card yet.
 
 A provider adds a job by putting an image in its catalogue. Nobody's permission is required, and nothing on
 chain changes.
