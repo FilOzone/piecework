@@ -35,5 +35,23 @@
       "deployedAt": "2026-09-21T08:17:04.293Z",
       "note": "before per-job removal permissions"
     }
-  ]
+  ],
+  "verification": {
+    "note": "Verified compute, deployed 2026-10-09. The ComputeService above predates it and has no verifier parameter: ordering a verified job needs ComputeService redeployed.",
+    "sp1Verifier": {
+      "address": "0x3097f8d998a782e9b46e80aeb352d2b02c4f2eff",
+      "version": "v4.0.0-rc.3",
+      "source": "succinctlabs/sp1-contracts contracts/src/v4.0.0-rc.3/SP1VerifierGroth16.sol, unmodified",
+      "tx": "0x012d2595c8284a8243a5d3e669bac2f229bd9a490ac96cf595eeea9957dd469b",
+      "checked": "SP1's own fixture proof from contracts/test/SP1VerifierGroth16.t.sol verifies here; the same proof with one byte changed is rejected."
+    },
+    "sp1ComputeVerifier": {
+      "address": "0xdb8ab46550003c4777c7d1e96a4524888bdf0131",
+      "note": "IComputeProofVerifier adapter: checks the journal commits to the piece CIDs ComputeService derived, before asking SP1 whether the proof is good."
+    },
+    "precompileProbe": {
+      "address": "0xbccbe90228b56eebb2f3afa2478a3ea709f85e6b",
+      "note": "Throwaway. Settles that FEVM implements modexp, ecAdd, ecMul and ecPairing, which a top-level eth_call cannot tell from a missing precompile \u2014 both return nothing."
+    }
+  }
 }
