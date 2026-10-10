@@ -29,11 +29,22 @@ interface IJobView {
 /// verification buys replication.
 ///
 /// What it does not do. Two providers that collude defeat it entirely; this buys independence, not
-/// soundness, and it is worth only as much as the independence of the two. It also requires the work to be
-/// reproducible: measured on this POC's jobs, pii-redact, query, embed and transcribe are all bit-identical
-/// across runs on a processor. On a GPU they very likely are not, and nothing here can fix that — a client
-/// wanting agreement over a GPU job is asking two cards to produce identical floating point, which they will
-/// not. That tension is real and unresolved.
+/// soundness, and it is worth only as much as the independence of the two.
+///
+/// The harder problem is reproducibility, and measurements on real hardware have made it worse rather than
+/// better. Running each job twice on one machine, pii-redact, query, embed and transcribe were all
+/// bit-identical — but that is the wrong test, and it took a storage provider's numbers to notice. What this
+/// contract needs is not that a machine repeats itself; it is that two *different* providers, on different
+/// hardware, reach the same bytes. On the same 94.7 minutes of audio:
+///
+///   - the same card, same model, two runs: 590 segments then 587. A GPU does not reproduce itself.
+///   - the same image and model on two different processors, one arm64 and one amd64: the same moment comes
+///     out as "Suns from afar" and "Soons from afar".
+///
+/// So agreement works between providers only where the computation is identical across architectures, which
+/// rules out everything with a floating point model in it, which is most of what anyone wants verified. It is
+/// kept here because the mechanism is sound and cheap where reproducibility does hold, and because the
+/// measurement that killed its general use is worth recording next to it.
 contract AgreementVerifier is IComputeProofVerifier {
     IJobView public immutable computeService;
 
