@@ -37,6 +37,25 @@ async function reread() {
   mySets = null;
 }
 
+// Handlers are bound during a render and can still fire after the state they were bound against has gone:
+// changing the provider sets `set` to null while a click is already in flight, and the handler then reads
+// dataSetId off nothing. The card is hidden by then, but hidden is not the same as unbound.
+// Files a job wrote, which a job should not then read. A keyword index is not a document; an embeddings
+// report is not prose. Embedding them does not merely waste the client's money — it puts noise into the
+// vectors, so a question later comes back pointing at a report about embedding rather than at the thing that
+// was said. The live services already refuse their own output; a one-shot job had no such sense.
+//
+// Transcripts and subtitles are deliberately NOT in here. They are produced by a job, but they are the
+// content: making them searchable is the entire point of producing them.
+const DERIVED = /(^|[-_])report\.txt$|^embeddings([-_].*)?\.(jsonl|txt)$|^search-index\.txt$|^pii-report\.txt$|^redacted-documents\.txt$|^answer[-_.]/i;
+const isDerived = (name) => DERIVED.test(String(name).replace(/ \(job #\d+\)$/, ""));
+
+function withSet(what, fn) {
+  if (!set) { error = "That data set is no longer selected — pick one and try again."; render(); return; }
+  const chosen = set;
+  return run(what, () => fn(chosen));
+}
+
 async function run(what, fn) {
   busy = what; error = null; render();
   try { return await fn(); }
@@ -151,9 +170,9 @@ function render() {
     const label = (mySets.find((x) => String(x.id) === String(id)) ?? {}).label ?? "";
     run(`Reading data set #${id} from the chain`, async () => { set = { ...(await PW.readSet(pick, id, jobs)), label }; store.set("set-" + pick, id); });
   };
-  if ($("allowres")) $("allowres").onclick = () => run("Allowing job results", async () => {
-    await PW.allowResults(set.dataSetId);
-    set = { ...(await PW.readSet(pick, set.dataSetId, jobs)), label: set.label };
+  if ($("allowres")) $("allowres").onclick = () => withSet("Allowing job results", async (chosen) => {
+    await PW.allowResults(chosen.dataSetId);
+    set = { ...(await PW.readSet(pick, chosen.dataSetId, jobs)), label: chosen.label };
   });
   if ($("forget")) $("forget").onclick = () => { set = null; store.set("set-" + pick, null); render(); };
   if ($("picker")) $("picker").onchange = (e) => { stage([...e.target.files]); e.target.value = ""; };
@@ -164,7 +183,7 @@ function render() {
   document.querySelectorAll("a[data-drop]").forEach((a) => (a.onclick = () => { waiting.splice(Number(a.dataset.drop), 1); render(); }));
   if ($("rm")) $("rm").onclick = () => {
     if (!confirm(`Remove ${picked.size} file(s)? PDP drops them at the provider's next proving period. This cannot be undone.`)) return;
-    run("Removing files", async () => { try { await PW.removeFiles(pick, set.dataSetId, [...picked]); picked = new Set(); } finally { await reread(); } });
+    withSet("Removing files", async (chosen) => { try { await PW.removeFiles(pick, chosen.dataSetId, [...picked]); picked = new Set(); } finally { await reread(); } });
   };
   document.querySelectorAll("input[type=checkbox][data-id]").forEach((b) => (b.onchange = () => {
     b.checked ? picked.add(b.dataset.id) : picked.delete(b.dataset.id); render();
@@ -181,7 +200,7 @@ function render() {
   if (set) {
     const spec = CFG.jobs[jobType];
     const exts = spec.inputExtensions ?? [spec.inputExtension ?? ""];
-  const eligible = files.filter(([, f]) => exts.some((e) => f.name.endsWith(e)));
+  const eligible = files.filter(([, f]) => exts.some((e) => f.name.endsWith(e)) && !isDerived(f.name));
     const use = picked.size ? [...picked] : eligible.map(([pid]) => pid);
     $("ordercard").innerHTML = `<h2>Order a job</h2>
       <p class="muted">The price is held in Filecoin Pay. The provider runs the program next to your files, adds the results to your data set,
@@ -225,27 +244,27 @@ function render() {
     $("byo").ontoggle = (e) => { typed.byoOpen = e.target.open; };
     $("byoref").oninput = (e) => { typed.byoRef = e.target.value; };
     $("byoprice").oninput = (e) => { typed.byoPrice = e.target.value; };
-    $("byobtn").onclick = () => run("Ordering your own program", async () => {
+    $("byobtn").onclick = () => withSet("Ordering your own program", async (chosen) => {
       // Read the form, not what we remember of it: a field the client never edited has its default only in
       // the DOM, so trusting the variable sent `undefined` as the price of the job.
       const ref = ($("byoref")?.value ?? typed.byoRef ?? "").trim();
       const price = ($("byoprice")?.value ?? typed.byoPrice ?? "").trim();
       if (!price || Number.isNaN(Number(price))) throw new Error(`"${price}" is not a price. Put a number of ${CFG.token} in the box next to the image.`);
-      const r = await PW.orderOwnJob(pick, set.dataSetId, use, ref, price);
-      jobs[r.jobId] = { ...r, jobId: r.jobId, type: r.image, provider: pick, dataSetId: set.dataSetId,
+      const r = await PW.orderOwnJob(pick, chosen.dataSetId, use, ref, price);
+      jobs[r.jobId] = { ...r, jobId: r.jobId, type: r.image, provider: pick, dataSetId: chosen.dataSetId,
         inputs: use.length, price, status: "waiting", fromBlock: Number(r.fromBlock ?? blockNow) };
       typed.byoRef = "";
       picked = new Set();
-      set = await PW.readSet(pick, set.dataSetId, jobs).catch(() => set);
+      set = await PW.readSet(pick, chosen.dataSetId, jobs).catch(() => set);
       await refreshMoney();
       poll();
     });
     $("pol").onchange = (e) => { policy = e.target.value; render(); };
     $("orderbtn").onclick = () => {
       if (policy === "replace-inputs" && !confirm("The provider will be allowed to remove the files this job reads, once it has delivered. Continue?")) return;
-      run("Ordering the job", async () => {
-        const r = await PW.order(pick, set.dataSetId, jobType, policy, use);
-        jobs[r.jobId] = { ...r, jobId: r.jobId, type: jobType, provider: pick, dataSetId: set.dataSetId,
+      withSet("Ordering the job", async (chosen) => {
+        const r = await PW.order(pick, chosen.dataSetId, jobType, policy, use);
+        jobs[r.jobId] = { ...r, jobId: r.jobId, type: jobType, provider: pick, dataSetId: chosen.dataSetId,
           inputs: use.length, price: CFG.jobs[jobType].price, status: "waiting", fromBlock: Number(r.fromBlock ?? blockNow) };
         picked = new Set();
         await refreshMoney();
@@ -281,8 +300,8 @@ function render() {
             : `<button class="b" data-stop="${esc(id)}" ${busy ? "disabled" : ""}>Stop and stop paying</button>`}</td></tr>`).join("")}
         </tbody></table></div>` : ""}`;
     $("svc").onchange = (e) => { service = e.target.value; render(); };
-    $("startsvc").onclick = () => run("Starting the service", async () => {
-      const r = await PW.openSession(pick, set.dataSetId, service);
+    $("startsvc").onclick = () => withSet("Starting the service", async (chosen) => {
+      const r = await PW.openSession(pick, chosen.dataSetId, service);
       sessions[r.sessionId] = { ...r, sessionId: r.sessionId, type: service, rate: svc[service].rate, status: "waiting for the provider" };
       sessions = await PW.findSessions().catch(() => sessions);
       await refreshMoney();

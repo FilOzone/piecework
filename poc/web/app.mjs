@@ -268,11 +268,14 @@ export async function readSet(providerId, dataSetId, jobs = {}) {
   if (!d?.payer || getAddress(d.payer) !== me) throw new Error(`data set #${dataSetId} is not paid for by your wallet`);
   if (getAddress(d.serviceProvider) !== getAddress(p.address)) throw new Error(`data set #${dataSetId} is not held by ${p.name}`);
   const next = Number(await pub.readContract({ address: C.pdp, abi: ABI.PDPVerifier, functionName: "getNextPieceId", args: [BigInt(dataSetId)] }));
-  const names = await pieceNames(dataSetId);
   const mine = knownNames();
-  const files = {};
+  const live = [];
   for (let i = 0; i < next; i++) {
-    if (!(await pub.readContract({ address: C.pdp, abi: ABI.PDPVerifier, functionName: "pieceLive", args: [BigInt(dataSetId), BigInt(i)] }))) continue;
+    if (await pub.readContract({ address: C.pdp, abi: ABI.PDPVerifier, functionName: "pieceLive", args: [BigInt(dataSetId), BigInt(i)] })) live.push(i);
+  }
+  const names = await pieceNames(dataSetId, live);
+  const files = {};
+  for (const i of live) {
     const raw = await pub.readContract({ address: C.pdp, abi: ABI.PDPVerifier, functionName: "getPieceCid", args: [BigInt(dataSetId), BigInt(i)] });
     const cid = CID.decode(hexToBytes(raw.data)).toString();
     files[i] = { name: names[String(i)] ?? mine[cid] ?? `piece-${i}`, cid };
@@ -282,6 +285,18 @@ export async function readSet(providerId, dataSetId, jobs = {}) {
     if (Number(j.dataSetId) !== Number(dataSetId)) continue;
     for (const o of j.outputs ?? []) if (files[o.pieceId]) Object.assign(files[o.pieceId], { kind: "output", name: `${o.name} (job #${j.jobId})` });
   }
+  // A piece's name lives in the event that added it, and a public node will only look back a few hundred
+  // blocks at a time — about forty hours' worth here. After that the name is gone, the file shows as
+  // "piece-11", it stops matching the extension a job asks for, and it is quietly dropped from work the
+  // client believed it had ordered over everything. That is how a transcript ended up excluded from its own
+  // embeddings while the order card said "3 files" and looked right.
+  //
+  // So the moment a name is known, keep it. Names are stable per piece and a piece is immutable, so there is
+  // nothing to invalidate.
+  for (const f of Object.values(files)) {
+    if (!/^piece-\d+$/.test(f.name)) rememberName(f.cid, f.name.replace(/ \(job #\d+\)$/, ""));
+  }
+
   const m = await marks(dataSetId, p.address, Object.keys(files)).catch(() => null);
   if (m) for (const [pid, f] of Object.entries(files)) {
     if (m.scheduled.has(pid)) f.removing = true;
@@ -294,16 +309,38 @@ export async function readSet(providerId, dataSetId, jobs = {}) {
 }
 
 // Public Filecoin nodes refuse a log range over a few hundred blocks, so ask in steps of 300.
-async function pieceNames(dataSetId) {
+//
+// Fourteen steps is about four thousand blocks, or forty hours. That is plenty for a data set someone is
+// working on today and useless for one from last week, and the way it fails is the problem: a piece whose
+// name has scrolled out of reach is shown as "piece-11", stops matching the extension a job asks for, and is
+// dropped from work the client believed covered everything — while the order card says "3 files" and looks
+// entirely reasonable.
+//
+// So the shallow pass stays the common case, and when it leaves a gap the search goes further rather than
+// shrugging. `want` is the set of live piece ids; once every one of them has a name there is nothing to gain
+// from reading older blocks, so this usually costs nothing extra.
+async function pieceNames(dataSetId, want = null) {
   const head = Number(await pub.getBlockNumber());
   const names = {};
-  for (let to = head, n = 0; n < 14; to -= 300, n++) {
+  const missing = () => !want || [...want].some((id) => names[String(id)] === undefined);
+  // Bounded twice over, because a piece that never had a name recorded would otherwise make every refresh
+  // walk a month of blocks and find nothing: at most DEEP steps, and give up after QUIET consecutive steps
+  // that turn up nothing new. A data set older than this keeps working — its pieces just show as piece-N and
+  // have to be ticked by hand rather than matched by extension.
+  const DEEP = 60;   // ~18k blocks, about six days
+  const QUIET = 20;  // consecutive empty steps before concluding there is nothing further back
+  let quiet = 0;
+  for (let to = head, n = 0; n < DEEP; to -= 300, n++) {
+    if (n >= 14 && (!missing() || quiet >= QUIET)) break;
+    if (to <= 0) break;
+    const before = Object.keys(names).length;
     const logs = await pub.getContractEvents({ address: C.fwss, abi: ABI.FilecoinWarmStorageService, eventName: "PieceAdded",
       args: { dataSetId: BigInt(dataSetId) }, fromBlock: BigInt(Math.max(0, to - 299)), toBlock: BigInt(to) }).catch(() => []);
     for (const ev of logs) {
       const i = ev.args.keys?.indexOf("name") ?? -1;
       if (i >= 0) names[String(ev.args.pieceId)] = ev.args.values[i];
     }
+    quiet = Object.keys(names).length === before ? quiet + 1 : 0;
   }
   return names;
 }
