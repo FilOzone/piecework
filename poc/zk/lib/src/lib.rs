@@ -142,10 +142,15 @@ pub fn keccak(data: &[u8]) -> [u8; 32] {
 /// keccak over the concatenated CIDs, in order. Order is part of the commitment: the chain iterates the
 /// job's input piece ids in the order the client gave them.
 pub fn commit_pieces(pieces: &[Vec<u8>]) -> [u8; 32] {
+    commit_cids(&pieces.iter().map(|p| piece_cid(p)).collect::<Vec<_>>())
+}
+
+/// The same commitment, over CIDs that are already known. This is exactly what ComputeService does on chain:
+/// concatenate each input piece's CID in the order the job listed them, then keccak256. abi.encodePacked of
+/// bytes is the bytes, so there is nothing else in the preimage.
+pub fn commit_cids(cids: &[Vec<u8>]) -> [u8; 32] {
     let mut acc = Vec::new();
-    for p in pieces {
-        acc.extend_from_slice(&piece_cid(p));
-    }
+    for c in cids { acc.extend_from_slice(c); }
     keccak(&acc)
 }
 
