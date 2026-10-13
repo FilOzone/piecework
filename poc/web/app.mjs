@@ -24,6 +24,17 @@ export { C, chain, pub };
 // already knows than call the file "piece-6".
 const KNOWN = "pw-names";
 const knownNames = () => { try { return JSON.parse(localStorage.getItem(KNOWN)) ?? {}; } catch { return {}; } };
+
+// Data sets already walked back as far as this page will go, still with pieces whose name was never found.
+// Without this the costly walk would repeat on every refresh, forever, to learn the same nothing.
+const DEEP_DONE = "piecework.deep-scanned";
+const deepScanned = (id) => { try { return (JSON.parse(localStorage.getItem(DEEP_DONE)) ?? []).includes(Number(id)); } catch { return false; } };
+function rememberDeepScanned(id) {
+  try {
+    const all = JSON.parse(localStorage.getItem(DEEP_DONE)) ?? [];
+    if (!all.includes(Number(id))) localStorage.setItem(DEEP_DONE, JSON.stringify([...all, Number(id)]));
+  } catch { /* private window */ }
+}
 function rememberName(cid, name) {
   try { const all = knownNames(); all[String(cid)] = name; localStorage.setItem(KNOWN, JSON.stringify(all)); } catch { /* private window */ }
 }
@@ -323,25 +334,28 @@ async function pieceNames(dataSetId, want = null) {
   const head = Number(await pub.getBlockNumber());
   const names = {};
   const missing = () => !want || [...want].some((id) => names[String(id)] === undefined);
-  // Bounded twice over, because a piece that never had a name recorded would otherwise make every refresh
-  // walk a month of blocks and find nothing: at most DEEP steps, and give up after QUIET consecutive steps
-  // that turn up nothing new. A data set older than this keeps working — its pieces just show as piece-N and
-  // have to be ticked by hand rather than matched by extension.
-  const DEEP = 60;   // ~18k blocks, about six days
-  const QUIET = 20;  // consecutive empty steps before concluding there is nothing further back
-  let quiet = 0;
+  // The first version of this gave up after twenty consecutive steps that found nothing, which sounds
+  // reasonable and is wrong: a data set is filled in bursts with long gaps between them, so the walk found
+  // this week's pieces, crossed four quiet days, and stopped before reaching last week's. The heuristic
+  // mistook a gap for the end.
+  //
+  // So it now keeps going until every live piece has a name or DEEP is reached — and the expensive case is
+  // paid at most once, because a data set that still has unnamed pieces after a full walk is remembered as
+  // such. Nothing else would bound it: a piece whose name was never recorded can never be found, and without
+  // the marker every refresh would go looking for it again.
+  const DEEP = 60; // ~18k blocks, about six days
+  const gaveUp = deepScanned(dataSetId);
   for (let to = head, n = 0; n < DEEP; to -= 300, n++) {
-    if (n >= 14 && (!missing() || quiet >= QUIET)) break;
+    if (n >= 14 && (!missing() || gaveUp)) break;
     if (to <= 0) break;
-    const before = Object.keys(names).length;
     const logs = await pub.getContractEvents({ address: C.fwss, abi: ABI.FilecoinWarmStorageService, eventName: "PieceAdded",
       args: { dataSetId: BigInt(dataSetId) }, fromBlock: BigInt(Math.max(0, to - 299)), toBlock: BigInt(to) }).catch(() => []);
     for (const ev of logs) {
       const i = ev.args.keys?.indexOf("name") ?? -1;
       if (i >= 0) names[String(ev.args.pieceId)] = ev.args.values[i];
     }
-    quiet = Object.keys(names).length === before ? quiet + 1 : 0;
   }
+  if (missing() && !gaveUp) rememberDeepScanned(dataSetId);
   return names;
 }
 
