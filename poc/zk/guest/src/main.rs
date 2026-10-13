@@ -19,8 +19,9 @@
 #![no_main]
 sp1_zkvm::entrypoint!(main);
 
-mod commp;
+// commp now lives in ../lib, where it can be tested outside the zkVM. See that crate's README.
 
+use piecework_lib::{commit_pieces, count_occurrences, keccak, piece_cid, report};
 use alloy_sol_types::SolType;
 use tiny_keccak::{Hasher, Keccak};
 

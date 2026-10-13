@@ -1,0 +1,8 @@
+[package]
+name = "piecework-lib"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+sha2 = { version = "0.10", default-features = false }
+tiny-keccak = { version = "2.0", features = ["keccak"] }
