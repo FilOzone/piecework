@@ -115,22 +115,57 @@ pub fn commp_root(padded: &[u8]) -> [u8; NODE] {
 
 /// The CID bytes as PDPVerifier stores them, which is what the on-chain commitment is taken over.
 ///
-/// THIS IS THE PART MOST LIKELY TO BE WRONG. The POC's pieces are PieceCID v2 (`bafkzcib…`): codec raw
-/// (0x55) and multihash fr32-sha256-trunc254-padbintree (0x1011), whose digest carries the tree height and
-/// the real data length alongside the root. The layout below is a reading of the spec, not a transcription
-/// of a working encoder, and it must be checked against a piece that already exists before it is believed.
+/// CHECKED, unlike the rest of this file. The layout below was read off real pieces in data set 41739 and
+/// confirmed against @filoz/synapse-core's own calculator, which agrees with PDPVerifier byte for byte:
+///
+///   CIDv1 (0x01) | raw (0x55) | varint(0x1011) | digest length | varint(padding) | height | root
+///
+/// where `padding` is how many bytes of the unpadded capacity at this height the payload does not fill:
+///
+///   padding = paddedSizeAtHeight(height) * 127 / 128 - payload length
+///
+/// Two worked examples, both matching the chain:
+///
+///   3,910,695 bytes -> height 17, padding 250,841  (4194304 * 127/128 = 4,161,536)
+///         675 bytes -> height  5, padding     341  (     1024 * 127/128 =     1,016)
+///
+/// The first version of this function guessed a fixed eight-byte little-endian length instead, which would
+/// have produced a CID of the wrong length for every piece. It verified nothing and would have failed as a
+/// broken prover. That is the whole reason this was checked before anyone installed a toolchain.
 pub fn piece_cid_v2(root: &[u8; NODE], unpadded_len: u64, height: u8) -> Vec<u8> {
-    let mut cid = Vec::with_capacity(48);
+    let capacity_unpadded = paded_capacity(height) / 128 * 127;
+    let padding = capacity_unpadded.saturating_sub(unpadded_len);
+
+    let mut digest = varint(padding);
+    digest.push(height);
+    digest.extend_from_slice(root);
+
+    let mut cid = Vec::with_capacity(digest.len() + 5);
     cid.push(0x01); // CIDv1
     cid.push(0x55); // raw
-    // multihash code 0x1011 as an unsigned varint
-    cid.extend_from_slice(&[0x91, 0x20]);
-    let digest_len = 1 + 8 + NODE;
-    cid.push(digest_len as u8);
-    cid.push(height);
-    cid.extend_from_slice(&unpadded_len.to_le_bytes());
-    cid.extend_from_slice(root);
+    cid.extend_from_slice(&varint(0x1011)); // fr32-sha256-trunc254-padbintree
+    cid.push(digest.len() as u8);
+    cid.extend_from_slice(&digest);
     cid
+}
+
+/// Unsigned LEB128, as multiformats uses everywhere.
+fn varint(mut n: u64) -> Vec<u8> {
+    let mut out = Vec::new();
+    loop {
+        let byte = (n & 0x7f) as u8;
+        n >>= 7;
+        if n == 0 {
+            out.push(byte);
+            return out;
+        }
+        out.push(byte | 0x80);
+    }
+}
+
+/// Padded bytes a tree of this height holds: 32 bytes per leaf, 2^height leaves.
+fn paded_capacity(height: u8) -> u64 {
+    (NODE as u64) << height
 }
 
 /// Height of the tree built over `unpadded_len` bytes of real data.
@@ -154,4 +189,32 @@ pub fn piece_cid(bytes: &[u8]) -> Vec<u8> {
     let padded = fr32_pad(bytes);
     let root = commp_root(&padded);
     piece_cid_v2(&root, bytes.len() as u64, tree_height(bytes.len() as u64))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The one test that matters, and it needs no chain: this file is checked into the repository at
+    /// poc/jobs/transcribe/sample/working-group-call.m4a and is piece 7 of data set 41739 on Calibration.
+    /// If a port of this module cannot reproduce these bytes, no proof it helps produce will ever verify.
+    #[test]
+    fn matches_a_piece_that_is_really_stored() {
+        let bytes = std::fs::read(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../jobs/transcribe/sample/working-group-call.m4a"
+        ))
+        .expect("the sample recording");
+        assert_eq!(bytes.len(), 3_910_695);
+        assert_eq!(tree_height(bytes.len() as u64), 17);
+        let got = hex(&piece_cid(&bytes));
+        assert_eq!(
+            got,
+            "0155912024d9a70f11dfd6807767d544c2ef37c933a091b03f27ca72ef424464aa5dc5a542f45cdc04"
+        );
+    }
+
+    fn hex(b: &[u8]) -> String {
+        b.iter().map(|x| format!("{x:02x}")).collect()
+    }
 }
