@@ -1,0 +1,26 @@
+# PieceWork job: the same re-encode as transcode:v1, on the card's dedicated video encoder.
+# Contract unchanged: inputs in /in (read-only), results in /out, run with --network none.
+#   docker build -f Dockerfile.gpu -t piecework/transcode-gpu:v1 .
+#
+# Of all the GPU variants here this is the one where a large difference is most likely, and for a reason that
+# has nothing to do with how fast the card computes. NVENC is a separate fixed-function block on the die: it
+# does not compete with the shaders, so a provider can encode video and run something else on the same card at
+# the same time. Transcription and embeddings cannot do that — they take the whole card.
+#
+# It is also the row where the quality question is sharper. x264 at a given file size still looks better than
+# NVENC at that size; the card buys throughput, not fidelity. Whether that trade is worth it depends on what
+# the client wanted, which is why both remain on offer rather than one replacing the other.
+#
+# Needs the nvidia container toolkit and a card with NVENC, which every sealing card has. VRAM is not the
+# constraint here — encoding a 1080p stream needs a few hundred megabytes.
+FROM nvidia/cuda:12.4.1-runtime-ubuntu22.04
+ENV DEBIAN_FRONTEND=noninteractive
+# Ubuntu's ffmpeg carries the NVENC encoders and loads the driver's libraries at runtime, which the container
+# toolkit provides. There is nothing to compile.
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
+ && rm -rf /var/lib/apt/lists/*
+ENV ENCODER=h264_nvenc PRESET=p4 CQ=28
+COPY run.sh /run.sh
+LABEL org.piecework.job="transcode-gpu" org.piecework.inputs="/in/*.mp4 /in/*.mov /in/*.mkv" \
+      org.piecework.outputs="/out/*-480p.mp4 /out/*-thumb.jpg /out/transcode-report.txt"
+ENTRYPOINT ["/run.sh"]

@@ -120,5 +120,20 @@
       ".webm",
       ".m4v"
     ]
+  },
+  "transcode-gpu:v1": {
+    "name": "Re-encode my video, smaller, on the GPU",
+    "dockerImage": "piecework/transcode-gpu:v1",
+    "gpu": true,
+    "outputs": "*",
+    "price": "0.5",
+    "inputExtensions": [
+      ".mp4",
+      ".mov",
+      ".mkv",
+      ".avi",
+      ".webm",
+      ".m4v"
+    ]
   }
 }
