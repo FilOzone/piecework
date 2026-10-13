@@ -99,7 +99,7 @@ async function fetchPiece(pieceCid) {
 /// The names the client gave the pieces of a data set, from Warm Storage's PieceAdded events (one scan per job,
 /// over recent blocks). Pieces stored without a name simply have none.
 const nameCache = {};
-async function pieceNames(dataSetId, fresh = false) {
+async function pieceNames(dataSetId, fresh = false, want = null) {
   const key = String(dataSetId);
   // A job looks the names up once and finishes, so caching them is free. A live service runs for hours over a
   // data set the client keeps adding to: a cached answer has no name for anything that arrives after it was
@@ -113,7 +113,16 @@ async function pieceNames(dataSetId, fresh = false) {
   const step = cfg.nameLookbackStep ?? 100;
   const requests = cfg.nameLookbackRequests ?? 45;
   const names = {};
-  for (let to = head, n = 0; n < requests; to -= step, n++) {
+  // Forty-five steps is about thirty-seven hours, which is fine for a data set in use today and wrong for one
+  // filled last week. A piece whose name has scrolled out of range is handed to the job as "piece-11", the
+  // extension filter rejects it, and the client pays for work over files the provider never passed in. So
+  // when the caller says which pieces it needs, keep looking until they are all named — bounded, because a
+  // piece added without name metadata can never be found however far back one goes.
+  const missing = () => !want || want.some((id) => names[String(id)] === undefined);
+  const deepest = cfg.nameLookbackDeep ?? 400; // ~40k blocks, a fortnight, and only reached while something is unnamed
+  const limit = want ? deepest : requests;
+  for (let to = head, n = 0; n < limit && to > 0; to -= step, n++) {
+    if (n >= requests && !missing()) break;
     const logs = await pub.getContractEvents({ address: cfg.contracts.fwss, abi: ABI.FWSS, eventName: "PieceAdded",
       args: { dataSetId }, fromBlock: BigInt(Math.max(0, to - step + 1)), toBlock: BigInt(to) }).catch(() => []);
     for (const ev of logs) {
@@ -208,7 +217,7 @@ async function runJob(ev) {
   fs.rmSync(dir, { recursive: true, force: true });
   fs.mkdirSync(path.join(dir, "in"), { recursive: true });
   fs.mkdirSync(path.join(dir, "out"), { recursive: true });
-  const names = await pieceNames(dataSetId).catch(() => ({}));
+  const names = await pieceNames(dataSetId, false, inputPieceIds.map(String)).catch(() => ({}));
   for (const id of inputPieceIds) { // the client's files, as stored on this provider, under the names the client gave them
     const c = await read(cfg.contracts.pdp, ABI.PDPVerifier, "getPieceCid", [dataSetId, id]);
     const pieceCid = CID.decode(hexToBytes(c.data)).toString();

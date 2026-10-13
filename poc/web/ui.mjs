@@ -14,6 +14,9 @@ const store = {
 
 let me = null, money = null, pick = store.get("provider", CFG.providers[0].id);
 let set = null, jobs = {}, picked = new Set(), busy = null, error = null, blockNow = 0;
+// Sessions whose close has been signed but not yet seen on chain. A second press would revert with
+// WrongStatus and show the client a red failure for something that actually worked.
+const closing = new Set();
 let jobType = Object.keys(CFG.jobs)[0], policy = "keep";
 let wrongChain = false;
 let typed = { dep: "1", label: "" }; // what the visitor has typed, kept across re-renders
@@ -279,12 +282,16 @@ function render() {
   $("timecard").hidden = !set || !Object.keys(svc).length;
   if (!$("timecard").hidden) {
     const spec = svc[service];
+    // One session per service per data set is all anyone wants: a second watches the same files, does the
+    // same work and bills a second time. The first click leaves the provider a block or two to answer, which
+    // looks exactly like nothing happening — which is how two get opened.
+    const alreadyRunning = live.some(([, x]) => x.type === service);
     $("timecard").innerHTML = `<h2>Or pay for time instead</h2>
       <p class="muted">The other way to buy: a rate per epoch for a service running next to your files, rather than a price for a result.
       Nothing is charged until the provider says it is running, and closing it stops the charge at that epoch.</p>
       <div class="row">
         <select id="svc">${Object.entries(svc).map(([t, x]) => `<option value="${esc(t)}" ${t === service ? "selected" : ""}>${esc(x.name)} — ${esc(x.rate)} ${esc(CFG.token)} per epoch</option>`).join("")}</select>
-        <button class="b primary" id="startsvc" ${busy ? "disabled" : ""}>Start it</button>
+        <button class="b primary" id="startsvc" ${busy || alreadyRunning ? "disabled" : ""}>${alreadyRunning ? "Already running" : "Start it"}</button>
         <span class="muted">about ${(Number(spec.rate) * 120).toFixed(2)} ${esc(CFG.token)} an hour · 1 epoch = 30 s${live.length ? ` · ${live.length} already running, costing ${(live.reduce((n, [, x]) => n + Number(x.rate), 0) * 120).toFixed(2)} an hour together` : ""}</span>
       </div>
       <p class="muted" style="margin:8px 0 0">${esc(spec.note ?? "")}</p>
@@ -297,7 +304,7 @@ function render() {
           <td>${esc(x.owed ?? x.spent ?? "0")} ${esc(CFG.token)}${x.status === "running" ? ` <span class="muted">and counting</span>` : ""}</td>
           <td>${x.status === "closed"
             ? (x.tx ? `<a href="${esc(CFG.explorer + x.tx)}" target="_blank" rel="noopener">opened</a>` : "")
-            : `<button class="b" data-stop="${esc(id)}" ${busy ? "disabled" : ""}>Stop and stop paying</button>`}</td></tr>`).join("")}
+            : `<button class="b" data-stop="${esc(id)}" ${busy || closing.has(String(id)) ? "disabled" : ""}>${closing.has(String(id)) ? "Stopping…" : "Stop and stop paying"}</button>`}</td></tr>`).join("")}
         </tbody></table></div>` : ""}`;
     $("svc").onchange = (e) => { service = e.target.value; render(); };
     $("startsvc").onclick = () => withSet("Starting the service", async (chosen) => {
@@ -306,11 +313,22 @@ function render() {
       sessions = await PW.findSessions().catch(() => sessions);
       await refreshMoney();
     });
-    document.querySelectorAll("button[data-stop]").forEach((b) => (b.onclick = () => run("Stopping the service", async () => {
-      await PW.closeSession(b.dataset.stop);
-      sessions = await PW.findSessions().catch(() => sessions);
-      await refreshMoney();
-    })));
+    document.querySelectorAll("button[data-stop]").forEach((b) => (b.onclick = () => {
+      const id = String(b.dataset.stop);
+      if (closing.has(id)) return;
+      closing.add(id);
+      run("Stopping the service", async () => {
+        try {
+          await PW.closeSession(id);
+          sessions = await PW.findSessions().catch(() => sessions);
+          await refreshMoney();
+        } finally {
+          // Kept until the chain agrees it is closed, not merely until the call returns: findSessions can
+          // still be reporting the old state when this finishes.
+          if (sessions[id]?.status === "closed") closing.delete(id);
+        }
+      });
+    }));
   }
 
   // jobs
@@ -383,7 +401,21 @@ async function poll() {
     }
   }
   const live = await PW.findSessions().catch(() => null);
-  if (live) sessions = live;
+  if (live) {
+    sessions = live;
+    for (const id of [...closing]) if (sessions[id]?.status === "closed") closing.delete(id);
+  }
+
+  // A live service writes results into the data set without the client doing anything, which is the whole
+  // promise — and until now the page only noticed when something else made it re-read. You added a question,
+  // the answer arrived, and the list went on showing what it had drawn before. So while a session is running,
+  // keep an eye on the piece count and re-read when it moves.
+  if (set && Object.values(sessions).some((x) => x.status !== "closed")) {
+    const now = await PW.pieceCount(set.dataSetId).catch(() => null);
+    if (now !== null && set.nextPieceId !== undefined && now > set.nextPieceId) {
+      set = await PW.readSet(pick, set.dataSetId, jobs).catch(() => set);
+    }
+  }
   render();
 }
 

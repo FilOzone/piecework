@@ -316,7 +316,9 @@ export async function readSet(providerId, dataSetId, jobs = {}) {
   const authorizer = await pub.readContract({ address: C.view, abi: ABI.FilecoinWarmStorageServiceStateView,
     functionName: "getDataSetAuthorizer", args: [BigInt(dataSetId)] }).catch(() => null);
   const canReceiveResults = !!authorizer && getAddress(authorizer) === getAddress(C.cs);
-  return { dataSetId: Number(dataSetId), provider: p.id, files, authorizer, canReceiveResults };
+  // Kept so the page can ask "has anything arrived since?" with one cheap call rather than re-reading every
+  // piece. Counting live files would not do: a removal and an addition cancel out.
+  return { dataSetId: Number(dataSetId), provider: p.id, files, authorizer, canReceiveResults, nextPieceId: next };
 }
 
 // Public Filecoin nodes refuse a log range over a few hundred blocks, so ask in steps of 300.
@@ -358,6 +360,11 @@ async function pieceNames(dataSetId, want = null) {
   if (missing() && !gaveUp) rememberDeepScanned(dataSetId);
   return names;
 }
+
+// How many pieces the data set has ever had. Cheap — one call — so the page can tell whether anything new has
+// arrived without re-reading every piece, which is what makes watching a running service affordable.
+export const pieceCount = async (dataSetId) =>
+  Number(await pub.readContract({ address: C.pdp, abi: ABI.PDPVerifier, functionName: "getNextPieceId", args: [BigInt(dataSetId)] }));
 
 export const fileUrl = (providerId, cid) => `${provider(providerId).curioUrl.replace(/\/$/, "")}/piece/${cid}`;
 
