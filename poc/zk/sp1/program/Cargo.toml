@@ -1,0 +1,8 @@
+[package]
+version = "0.1.0"
+name = "piecework-program"
+edition = "2021"
+
+[dependencies]
+sp1-zkvm = { version = "6.0.1" }
+piecework-lib = { path = "../lib" }

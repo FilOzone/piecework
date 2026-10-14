@@ -33,7 +33,7 @@ pub fn fr32_pad(src: &[u8]) -> Vec<u8> {
     let mut cur_bits: u32 = 0;
     let mut since: u32 = 0;
 
-    let mut push = |bit: u8, out: &mut Vec<u8>, cur: &mut u8, cur_bits: &mut u32| {
+    let push = |bit: u8, out: &mut Vec<u8>, cur: &mut u8, cur_bits: &mut u32| {
         *cur |= bit << *cur_bits;
         *cur_bits += 1;
         if *cur_bits == 8 {
