@@ -45,6 +45,8 @@ console.log(computed === onChain ? "MATCH" : "DIFFERENT — fix this before writ
 const b = Buffer.from(cid.bytes);
 const height = piece.heightFor(bytes.length);
 console.log("\nheight    ", height);
-console.log("padding   ", piece.paddedSizeAtHeight(height) / 128 * 127 - bytes.length);
+// paddedSizeAtHeight returns a BigInt, and at large heights it exceeds Number.MAX_SAFE_INTEGER, so the
+// arithmetic stays in BigInt — the padded size is always a multiple of 128, so the division is exact.
+console.log("padding   ", (piece.paddedSizeAtHeight(height) / 128n * 127n - BigInt(bytes.length)).toString());
 console.log("root      ", "0x" + b.subarray(b.length - 32).toString("hex"));
 if (computed !== onChain) process.exit(1);
