@@ -1,10 +1,15 @@
 # Building and proving happen in here because the host kills freshly built binaries that have a build.rs.
 FROM rust:1.90-bookworm
-RUN apt-get update && apt-get install -y --no-install-recommends curl git ca-certificates build-essential pkg-config libssl-dev protobuf-compiler libprotobuf-dev \
+# libclang-dev is for bindgen, which the native-gnark feature pulls in to generate the Rust bindings for
+# the Go static library. Its absence shows up as a bindgen panic about libclang, well after the Go library
+# has built successfully, so it reads like a gnark problem and is not one.
+RUN apt-get update && apt-get install -y --no-install-recommends curl git ca-certificates build-essential pkg-config libssl-dev protobuf-compiler libprotobuf-dev libclang-dev \
  && rm -rf /var/lib/apt/lists/*
 # SP1's Groth16 wrapper is gnark, which is Go: without a Go toolchain the sp1-recursion-gnark-ffi build script
 # fails with a bare "No such file or directory" that says nothing about Go.
-ENV GO_VERSION=1.23.4
+# 1.24 or newer: sp1-recursion-gnark-ffi's Go module declares `go 1.24.0`, and an older toolchain refuses
+# it outright. 1.23.4 built nothing and reported only that the module needed a newer Go.
+ENV GO_VERSION=1.24.8
 RUN ARCH=$(dpkg --print-architecture) && curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-${ARCH}.tar.gz" | tar -C /usr/local -xz
 ENV PATH="/usr/local/go/bin:${PATH}"
 # Without an explicit proxy, resolving gnark's pseudo-versioned dependency falls back to git ls-remote,

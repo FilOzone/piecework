@@ -11,7 +11,11 @@ path = "src/bin/main.rs"
 [dependencies]
 anyhow = "1"
 tokio = { version = "1", features = ["full"] }
-sp1-sdk = { version = "6.0.1", features = ["blocking"] }
+# native-gnark links gnark into this binary through cgo instead of shelling out to `docker run
+# ghcr.io/succinctlabs/sp1-gnark`. That image has no arm64 manifest, so without this feature --mode groth16
+# cannot work on Apple Silicon at all; with it, the wrap is an in-process call and the architecture stops
+# mattering. It chains sp1-sdk/native-gnark -> sp1-prover/native-gnark -> sp1-recursion-gnark-ffi/native.
+sp1-sdk = { version = "6.0.1", features = ["blocking", "native-gnark"] }
 serde_json = { version = "1.0", default-features = false, features = ["alloc"] }
 serde = { version = "1.0.200", default-features = false, features = ["derive"] }
 clap = { version = "4.0", features = ["derive", "env"] }

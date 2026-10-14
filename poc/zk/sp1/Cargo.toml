@@ -18,3 +18,9 @@ alloy-sol-types = "*"
 # apply looks identical to no patch at all.
 [patch.crates-io]
 sha2 = { git = "https://github.com/sp1-patches/RustCrypto-hashes", package = "sha2", tag = "patch-sha2-0.10.9-sp1-6.2.0" }
+
+# Vendored unchanged except for one `replace` in its Go module — see vendor/.../go/go.mod for why. This is
+# what makes the `native-gnark` feature build: without it SP1 does the Groth16 wrap by spawning
+# ghcr.io/succinctlabs/sp1-gnark as a sibling container, and that image is published amd64-only, so no
+# Apple Silicon machine can wrap a proof at any amount of RAM.
+sp1-recursion-gnark-ffi = { path = "vendor/sp1-recursion-gnark-ffi" }
