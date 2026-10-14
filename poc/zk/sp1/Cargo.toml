@@ -1,6 +1,20 @@
 [workspace]
-members = ["lib", "program", "script"]
+# piecework-lib is deliberately not a member: it lives at poc/zk/lib so its tests run under a plain rust
+# image with no SP1 toolchain, and so `lib/tests/commp.rs` can reach its fixture at poc/jobs/transcribe/
+# sample/ by relative path. program and script reach it with ../../lib. Moving it under sp1/ makes the
+# workspace self-contained and silently breaks that fixture path, so the one test that checks the
+# derivation against a piece really stored on Calibration stops running at all.
+members = ["program", "script"]
 resolver = "2"
 
 [workspace.dependencies]
 alloy-sol-types = "*"
+
+# Deriving the piece CID is a sha256 merkle tree over fr32-padded bytes, so almost every cycle the guest
+# spends is a sha256 compression. Stock sha2 runs those as ordinary RISC-V: measured at 669 cycles/byte
+# with `syscalls: none`, flat from 4 KB to 1 MB. This routes them into SP1's SHA_EXTEND/SHA_COMPRESS
+# precompiles instead. The tag has to name both the sha2 version Cargo resolves (0.10.9) and an SP1 6.x
+# release, and after changing it check `syscalls` in --execute output: a patch that silently fails to
+# apply looks identical to no patch at all.
+[patch.crates-io]
+sha2 = { git = "https://github.com/sp1-patches/RustCrypto-hashes", package = "sha2", tag = "patch-sha2-0.10.9-sp1-6.2.0" }

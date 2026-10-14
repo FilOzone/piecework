@@ -30,18 +30,60 @@ enough that you do not want it twice.
 
     docker build -t piecework/sp1:v6 .
 
-    # build first: cargo update -p tempfile is needed because sp1-prover 6.9.0 wants a newer
-    # tempfile than resolves by default. Takes about three minutes.
-    docker run --rm -v "$PWD:/work" -w /work piecework/sp1:v6 \
-      sh -c 'cargo update -p tempfile && cargo build --release'
+    # Mount poc/, not sp1/. piecework-lib lives at poc/zk/lib and its commP test reaches its fixture at
+    # poc/jobs/transcribe/sample/, so a narrower mount builds but cannot run the test that matters.
+    cd ../../..            # to poc/
+    docker run --rm -v "$PWD:/work" -w /work/zk/sp1 piecework/sp1:v6 \
+      sh -c 'cargo build --release'
+
+    # the derivation against a piece really stored on Calibration — run this after any commp.rs change
+    docker run --rm -v "$PWD:/work" -w /work/zk/sp1 piecework/sp1:v6 \
+      sh -c 'cargo test --release --manifest-path ../lib/Cargo.toml'
 
     # then run it over any file you like — `in/` is not in the repo, so supply your own input
-    mkdir -p in && cp ../../data/dataset/meeting-notes.txt in/notes.txt
-    docker run --rm -v "$PWD:/work" -w /work piecework/sp1:v6 \
-      sh -c './target/release/piecework --execute --term revenue in/notes.txt'
+    mkdir -p zk/sp1/in && cp jobs/transcribe/sample/call-script.txt zk/sp1/in/notes.txt
+    docker run --rm -v "$PWD:/work" -w /work/zk/sp1 piecework/sp1:v6 \
+      sh -c './target/release/piecework --execute --term sealing in/notes.txt'
 
-`--execute` runs the guest and reports cycles and both commitments without proving anything. It is fast, and
-it is the right way to check a guest before paying for a proof.
+`Cargo.lock` is committed, which pins both `tempfile` (`sp1-prover` 6.9.0 calls a method that only exists
+in a version newer than resolves by default) and the patched `sha2` below. Build from the lock and neither
+needs a manual `cargo update`.
+
+`--execute` runs the guest and reports cycles, both commitments, and the syscalls it made, without proving
+anything. It is fast, and it is the right way to check a guest before paying for a proof.
+
+## What the binding costs
+
+Measured with `--execute` over deterministic inputs from 128 B to 1 MB, counting cycles and syscalls:
+
+| input | cycles, stock `sha2` | cycles, patched | cycles/byte |
+|---|---|---|---|
+| 4 KB | 2,802,994 | 970,310 | 237 |
+| 64 KB | 43,898,216 | 14,893,692 | 227 |
+| 256 KB | 175,396,179 | 59,441,767 | 227 |
+| 1 MB | 701,384,698 | 237,630,734 | 227 |
+
+**Linear, with no economy of scale.** 669 cycles/byte before the patch, **227 after**, flat across four
+orders of magnitude. The fixed overhead is only ~60k cycles, so cost is essentially `227 × input bytes`.
+
+Two things follow, and they are the constraint on the whole feature:
+
+- **`[patch.crates-io]` for `sha2` is not optional, it is 2.95× of the cost.** Without it `--execute`
+  reports `syscalls: none` and every compression in the merkle tree runs as interpreted RISC-V. A patch
+  that fails to apply looks exactly like no patch, so check the `syscalls` line, not the build log.
+- **Proving is affordable only over small inputs.** For comparison, a published SP1 run over a 5.4 MB
+  slice took 59.5M guest cycles and 140 minutes to prove on a laptop CPU. 59.5M cycles is **256 KB** for
+  us. So a proof-gated job belongs on a slice of a piece, not on a piece: the 1.07 GB maximum piece size
+  would be ~243 **billion** cycles.
+
+The reason we are ~20× more expensive per byte than that run is the binding itself. It commits
+`sha256` of the bytes it was handed — one linear pass. We derive the Filecoin piece CID: fr32 padding and
+a merkle tree, which is what makes the proof about *the piece the client stored* rather than about bytes
+the prover chose. That is the property worth having, and this is its price.
+
+The obvious way to escape the linear cost is to prove over a **sub-slice plus a merkle path** to the piece
+root, so the guest pays for the slice and `log n` hashes instead of re-deriving the whole tree. Not built,
+and it would need the contract to accept a slice commitment rather than a whole-piece one.
 
 `--prove` produces the real thing. `--mode groth16` (the default) is the only one a contract can check. Note
 that `--prove` needs more than the command above: SP1 shells out to `docker` for the wrap, so running it from

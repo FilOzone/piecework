@@ -1,0 +1,4 @@
+target/
+# Inputs to prove over. Deliberately not in the repo: they are whatever file you point the prover at,
+# and the ones worth measuring on are megabytes.
+sp1/in/

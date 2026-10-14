@@ -52,6 +52,15 @@ async fn main() -> anyhow::Result<()> {
         println!("cycles            : {}", report.total_instruction_count());
         println!("inputCommitment   : 0x{}", hex(&pv[..32]));
         println!("outputCommitment  : 0x{}", hex(&pv[32..64]));
+        // Deriving the piece CID is a sha256 merkle tree, so nearly every cycle here is hashing. That
+        // only costs what it should if sha2 resolves from sp1-patches and the compressions become
+        // SHA_EXTEND/SHA_COMPRESS syscalls. Zero of those means the tree is running in software, and
+        // the cycle count is an artefact of the build rather than the price of the binding.
+        let mut calls: Vec<_> = report.syscall_counts.iter().filter(|(_, n)| **n > 0).collect();
+        calls.sort_by_key(|(_, n)| std::cmp::Reverse(**n));
+        println!("syscalls          : {}", if calls.is_empty() { "none".into() } else {
+            calls.iter().map(|(s, n)| format!("{s:?}={n}")).collect::<Vec<_>>().join(" ")
+        });
         return Ok(());
     }
 
