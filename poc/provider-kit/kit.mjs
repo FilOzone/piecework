@@ -42,7 +42,15 @@ const execFile = promisify(execFileCb);
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ABI = JSON.parse(fs.readFileSync(path.join(HERE, "abi.json"), "utf8"));
 const JOBS = JSON.parse(fs.readFileSync(path.join(HERE, "jobs.json"), "utf8"));
-const BY_DIGEST = Object.fromEntries(Object.keys(JOBS).map((name) => [keccak256(toHex(name)), name]));
+// poc/, mounted read-only into the prover so it can reach zk/sp1. The guest's ELF is compiled into the host
+// binary, so nothing is read from the repo at run time; this is for the binary itself.
+const PROVER_REPO = path.resolve(HERE, "..");
+// A proved job is found by its verification key, because that is what the client puts on chain as the
+// imageDigest and what the chain's verifier checks the proof against. Everything else is still keccak256 of
+// the image name — a label the provider could quietly change what runs behind, which is exactly the
+// weakness the proved path does not have.
+const BY_DIGEST = Object.fromEntries(Object.entries(JOBS).map(([name, j]) =>
+  [(j.vkey ?? keccak256(toHex(name))).toLowerCase(), name]));
 // Services sold by the epoch rather than by the job: the client opens a session, this kit starts the service
 // next to the client's data and says it is ready, which is when the meter starts.
 const SERVICES = fs.existsSync(path.join(HERE, "services.json")) ? JSON.parse(fs.readFileSync(path.join(HERE, "services.json"), "utf8")) : {};
@@ -172,7 +180,7 @@ async function runJob(ev) {
   // The policy is here: no network, the client's files read-only, a ceiling on what the program may consume,
   // and a price the provider is willing to accept for that ceiling. What the program is remains unknown and
   // does not need to be known: it cannot reach the network, and it can only write into a folder we collect.
-  let spec = JOBS[BY_DIGEST[imageDigest]];
+  let spec = JOBS[BY_DIGEST[imageDigest.toLowerCase()]];
   const byo = cfg.bringYourOwnJob;
   if (!spec) {
     if (!byo?.enabled) return say(`Job #${jobId}: unknown program ${imageDigest.slice(0, 12)}…, and I only run my own catalogue.`);
@@ -218,13 +226,16 @@ async function runJob(ev) {
   fs.mkdirSync(path.join(dir, "in"), { recursive: true });
   fs.mkdirSync(path.join(dir, "out"), { recursive: true });
   const names = await pieceNames(dataSetId, false, inputPieceIds.map(String)).catch(() => ({}));
+  const inputFiles = []; // in inputPieceIds order: a proved job's commitment depends on it
   for (const id of inputPieceIds) { // the client's files, as stored on this provider, under the names the client gave them
     const c = await read(cfg.contracts.pdp, ABI.PDPVerifier, "getPieceCid", [dataSetId, id]);
     const pieceCid = CID.decode(hexToBytes(c.data)).toString();
     const given = names[String(id)];
     const ext = spec.inputExtensions?.[0] ?? spec.inputExtension ?? "";
     const safe = given && /^[\w .()-]{1,80}$/.test(given) ? given : `piece-${id}${ext}`;
-    fs.writeFileSync(path.join(dir, "in", fs.existsSync(path.join(dir, "in", safe)) ? `${id}-${safe}` : safe), await fetchPiece(pieceCid));
+    const file = fs.existsSync(path.join(dir, "in", safe)) ? `${id}-${safe}` : safe;
+    fs.writeFileSync(path.join(dir, "in", file), await fetchPiece(pieceCid));
+    inputFiles.push(file);
   }
   J.inputBytes = fs.readdirSync(path.join(dir, "in")).reduce((n, f) => n + fs.statSync(path.join(dir, "in", f)).size, 0);
   J.stage = "running"; J.t.running = now(); save();
@@ -281,6 +292,18 @@ async function runJob(ev) {
       await runBounded(`piecework-job-${jobId}`,
         [...mounts, "--cpus", spec.cpus, "--memory", spec.memory, "--pids-limit", "512", spec.dockerImage],
         spec.seconds);
+    } else if (spec.prove) {
+      // The repo goes in read-only — the guest's ELF is compiled into the binary, so nothing is read from
+      // it at run time — and /root/.sp1 is a named volume holding the Groth16 circuit. With that cached the
+      // run needs no network, so --network none still holds for a job that produces a proof.
+      say(`Job #${jobId}: this one has to be proved. Running the zkVM guest and wrapping the result in a `
+        + `Groth16 proof; expect several minutes, most of it the wrap rather than the work.`);
+      await execFile("docker", ["run", "--rm", "--network", "none",
+        "-v", `${PROVER_REPO}:/work:ro`, "-v", `${cfg.proverCache ?? "piecework-sp1"}:/root/.sp1`,
+        "-v", `${dir}:/job`, "-w", "/work/zk/sp1", spec.proverImage ?? "piecework/sp1:v6",
+        "./target/release/piecework", "--prove", "--mode", "groth16", "--term", String(spec.term ?? "payment"),
+        "--out", "/job/out", "--proof", "/job/proof.json",
+        ...inputFiles.map((f) => `/job/in/${f}`)], { maxBuffer: 1 << 28 });
     } else {
       const run = ["run", "--rm", ...mounts, spec.dockerImage];
       await execFile("docker", spec.script ? [...run, "sh", "-c", spec.script] : run, { maxBuffer: 1 << 26 });
@@ -303,7 +326,23 @@ async function runJob(ev) {
   const stored = await storeResults(dataSetId, clientDataSetId, files);
   say(`Job #${jobId}: results added to the client's data set as pieces #${stored.pieceIds.join(", #")} (tx ${stored.tx}).`);
   J.stage = "committing"; J.t.committing = now(); J.addTx = stored.tx; J.outputs = files.map((f, i) => ({ name: f.name, pieceId: String(stored.pieceIds[i]), cid: stored.cids[i] })); save();
-  const r = await send(cfg.contracts.computeService, ABI.ComputeService, "commitOutputs", [jobId, stored.pieceIds]);
+  let r;
+  if (spec.prove) {
+    const pr = JSON.parse(fs.readFileSync(path.join(dir, "proof.json"), "utf8"));
+    const proof = encodeAbiParameters([{ type: "bytes" }, { type: "bytes" }], [pr.publicValues, pr.proofBytes]);
+    J.vkey = pr.vkey; save();
+    say(`Job #${jobId}: proved. vkey ${pr.vkey}, journal ${pr.publicValues.slice(0, 18)}… — claiming payment, `
+      + `which only moves if the chain's verifier agrees.`);
+    try {
+      r = await send(cfg.contracts.computeService, ABI.ComputeService, "commitOutputs", [jobId, stored.pieceIds, proof]);
+    } catch (e) {
+      J.stage = "rejected"; save();
+      return say(`Job #${jobId}: the chain refused my proof (${e.shortMessage ?? e.message}). I am not paid, and `
+        + `the client can take the price back at the deadline.`);
+    }
+  } else {
+    r = await send(cfg.contracts.computeService, ABI.ComputeService, "commitOutputs", [jobId, stored.pieceIds]);
+  }
   J.stage = "paid"; J.t.paid = now(); J.done = true; J.commitTx = r.transactionHash; save();
   say(`Job #${jobId}: committed and paid (tx ${r.transactionHash}).`);
 
