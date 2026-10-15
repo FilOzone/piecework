@@ -24,7 +24,15 @@
       "name": "@TippyFlits (ezpdpz-calib)",
       "address": "0xa3971A7234a3379A1813d9867B531e7EeB20ae07",
       "curioUrl": "https://calib.ezpdpz.net",
-      "note": "A PDP storage provider running Curio, in the UK. Registry id 9 on Calibration; it also runs the PieceWork provider kit, which is what lets it sell compute."
+      "note": "A PDP storage provider running Curio, in the UK. Registry id 9 on Calibration; it also runs the PieceWork provider kit, which is what lets it sell compute. Runs the six jobs it has images for; the newer ones are listed but greyed out until it has them.",
+      "offers": [
+        "pii-redact:v1",
+        "embed:v1",
+        "indexer:v1",
+        "query:v1",
+        "transcode:v1",
+        "transcribe:v1"
+      ]
     }
   ],
   "jobs": {
@@ -139,6 +147,37 @@
       "verified": true,
       "imageDigest": "0x006ea1696714f9709a7beb7adb073ec17c5aaa0dd3fb03047df8545902b014df",
       "note": "The provider is paid only if a zero-knowledge proof convinces the chain that the count was computed over exactly the pieces you named. Delivering the right answer is not enough \u2014 it has to be the right answer about your data. Proving takes about ten minutes, so this job's deadline is an hour rather than the usual twenty minutes."
+    },
+    "ocr:v1": {
+      "name": "Read my scanned pages into text",
+      "price": "0.4",
+      "outputs": [
+        "(a -text.txt per file, plus a report)"
+      ],
+      "deadlineEpochs": 80,
+      "inputExtensions": [
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".tif",
+        ".tiff",
+        ".bmp",
+        ".pdf"
+      ],
+      "note": "Tesseract on the provider's processor, or a neural detector on its card where it has one. A scanned archive is large and its text is tiny, so moving the images to the compute costs far more than moving the compute to the images."
+    },
+    "extract:v1": {
+      "name": "Pull the facts out of my documents",
+      "price": "0.4",
+      "outputs": [
+        "(a -fields.json per document, plus a report)"
+      ],
+      "deadlineEpochs": 120,
+      "inputExtensions": [
+        ".txt",
+        ".md"
+      ],
+      "note": "Finds the counterparty, date, amount, currency and payment terms in each document and returns them as JSON. A 1.5-billion-parameter model runs entirely on the provider's hardware with no network, which is the point: the documents that most need this are the ones that cannot be sent to someone else's API."
     }
   },
   "policies": [

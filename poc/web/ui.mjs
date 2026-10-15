@@ -201,14 +201,22 @@ function render() {
   // ordering
   $("ordercard").hidden = !set;
   if (set) {
-    // A verified job is only offered by a provider that can actually produce a proof. Offering one that
-    // cannot is the mistake already made twice here with query and transcode: the order is accepted, the
-    // provider declines it, and the client waits out the deadline for a refund. A provider declares the
-    // capability in config; nothing infers it.
-    const canProve = !!(CFG.providers.find((x) => x.id === pick)?.proving);
-    const offered = Object.entries(CFG.jobs).filter(([, j]) => !j.verified || canProve);
-    if (!offered.some(([t]) => t === jobType)) jobType = offered[0]?.[0] ?? jobType;
+    // What a provider will actually run. The catalogue used to be global, so a job appeared for every
+    // provider whether or not it had the image — the order is accepted, the provider declines it, and the
+    // client waits out the deadline for a refund that looks exactly like nothing happening. That happened
+    // with query and transcode before James had built them.
+    //
+    // Every job is still listed, because a page people are pointed at should show what the system does. It
+    // is ordering that is gated, and the row says why. A provider declares `offers` (and `proving` for the
+    // jobs that need a prover); declaring nothing means everything unverified, which is what the providers
+    // that predate this field expect.
+    const prov = CFG.providers.find((x) => x.id === pick);
+    const canRun = (t, j) => (j.verified ? !!prov?.proving : true)
+      && (!prov?.offers || prov.offers.includes(t));
+    const runnable = Object.entries(CFG.jobs).filter(([t, j]) => canRun(t, j));
+    if (!canRun(jobType, CFG.jobs[jobType])) jobType = runnable[0]?.[0] ?? jobType;
     const spec = CFG.jobs[jobType];
+    const offered = Object.entries(CFG.jobs); // listed; `canRun` decides what can be ordered
     const exts = spec.inputExtensions ?? [spec.inputExtension ?? ""];
   const eligible = files.filter(([, f]) => exts.some((e) => f.name.endsWith(e)) && !isDerived(f.name));
     const use = picked.size ? [...picked] : eligible.map(([pid]) => pid);
@@ -216,13 +224,20 @@ function render() {
       <p class="muted">The price is held in Filecoin Pay. The provider runs the program next to your files, adds the results to your data set,
       and is paid only if it does so before the deadline. If it does not, you take the money back.</p>
       <div class="row">
-        <select id="jt">${offered.map(([t, j]) => `<option value="${esc(t)}" ${t === jobType ? "selected" : ""}>${esc(j.name)} — ${esc(j.price)} ${esc(CFG.token)}${j.verified ? " · proved" : ""}</option>`).join("")}</select>
+        <select id="jt">${offered.map(([t, j]) => `<option value="${esc(t)}" ${t === jobType ? "selected" : ""} ${canRun(t, j) ? "" : "disabled"}>${esc(j.name)} — ${esc(j.price)} ${esc(CFG.token)}${j.verified ? " · proved" : ""}${canRun(t, j) ? "" : " — not offered by this provider"}</option>`).join("")}</select>
         <select id="pol">${CFG.policies.map((x) => `<option value="${esc(x.id)}" ${x.id === policy ? "selected" : ""}>${esc(x.label)}</option>`).join("")}</select>
         <button class="b primary" id="orderbtn" ${busy || !use.length || !set.canReceiveResults ? "disabled" : ""}>Order</button>
       </div>
       ${spec.note ? `<p class="muted" style="margin:10px 0 0">${esc(spec.note)}</p>` : ""}
-      ${!canProve && Object.values(CFG.jobs).some((j) => j.verified)
-        ? `<p class="muted" style="margin:8px 0 0">This provider does not run a prover, so the proof-backed job is not listed for it. Pick a provider that does to order one.</p>` : ""}
+      ${(() => {
+        const absent = Object.entries(CFG.jobs).filter(([t, j]) => !canRun(t, j));
+        if (!absent.length) return "";
+        const elsewhere = absent.filter(([t, j]) => CFG.providers.some((q) => q.id !== pick
+          && (j.verified ? q.proving : true) && (!q.offers || q.offers.includes(t))));
+        return `<p class="muted" style="margin:8px 0 0">${absent.length} job${absent.length === 1 ? "" : "s"} in the list ${absent.length === 1 ? "is" : "are"} greyed out: this provider does not run ${absent.length === 1 ? "it" : "them"} yet.`
+          + (elsewhere.length ? ` ${elsewhere.length} of them can be ordered from another provider.` : ` Nobody offers ${absent.length === 1 ? "it" : "them"} yet — the program exists, no provider has installed it.`)
+          + `</p>`;
+      })()}
       <p class="muted" style="margin:8px 0 0">It will read <b>${use.length} file${use.length === 1 ? "" : "s"}</b>${picked.size ? " (the ones you ticked)" : ` — every ${esc(exts.join(", "))} file in the data set`}.
       ${policy === "replace-inputs" ? "After delivery the provider may remove exactly those files. This cannot be undone." : "Nothing is removed."}</p>
 
