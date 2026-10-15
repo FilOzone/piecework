@@ -213,6 +213,16 @@
           "name": "status",
           "type": "uint8",
           "internalType": "enum ComputeService.JobStatus"
+        },
+        {
+          "name": "verifier",
+          "type": "address",
+          "internalType": "address"
+        },
+        {
+          "name": "inputCommitment",
+          "type": "bytes32",
+          "internalType": "bytes32"
         }
       ],
       "stateMutability": "view"
