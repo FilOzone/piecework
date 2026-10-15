@@ -45,15 +45,17 @@ indistinguishable from a broken prover. Run `check-commp.mjs` again after any ch
 
 ## Shape
 
-    sp1/        the real implementation, built and run. See sp1/README.md.
-    sp1/script/ the host: reads the input files, runs the prover, abi-encodes
-                (publicValues, proofBytes) into the single `bytes` argument commitOutputs takes.
+    sp1/        the prover. See sp1/README.md for building it and what it costs.
+    sp1/script/ the host: reads the input files, runs the guest, writes the output piece the provider
+                delivers, and emits proof.json. `--vkey` prints the verification key, `--execute` the
+                cycle count and both commitments without proving.
     sp1/program/ runs inside the zkVM: derives the input CIDs, does the work, derives the
                 output CID, and commits (inputCommitment, outputCommitment) to the journal.
-    sp1/lib/    piecework-lib: commP and the commitments, shared by both, with tests.
-
-    host/       the earlier v4 sketch, superseded by sp1/script. NEVER BUILT.
-    guest/      the earlier v4 sketch, superseded by sp1/program. NEVER BUILT.
+    lib/        piecework-lib: commP, the commitments, and the output format the guest and the host
+                both use. Outside sp1/ on purpose — its tests run without the SP1 toolchain, and its
+                commP fixture is reached relative to here.
+    order-proved-job.mjs  orders a proof-gated job against the local chain and reports whether the
+                money moved. The cycle takes about eight minutes, which is why it is a script.
 
 The job itself is deliberately tiny — counting occurrences of a term across the input pieces. Not because it
 is useful, but because the interesting part is the binding, and a cheap job keeps the proving time low enough
