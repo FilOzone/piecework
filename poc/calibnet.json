@@ -45,19 +45,37 @@
   "verification": {
     "note": "Verified compute, deployed 2026-10-09. The ComputeService above accepts a verifier address on postJob; SP1ComputeVerifier below is one to pass.",
     "sp1Verifier": {
-      "address": "0x3097f8d998a782e9b46e80aeb352d2b02c4f2eff",
-      "version": "v4.0.0-rc.3",
-      "source": "succinctlabs/sp1-contracts contracts/src/v4.0.0-rc.3/SP1VerifierGroth16.sol, unmodified",
-      "tx": "0x012d2595c8284a8243a5d3e669bac2f229bd9a490ac96cf595eeea9957dd469b",
-      "checked": "SP1's own fixture proof from contracts/test/SP1VerifierGroth16.t.sol verifies here; the same proof with one byte changed is rejected."
+      "address": "0x37F30aDEe3Ca3D037Dc14A8cFC149a059Ebf805b",
+      "version": "v6.1.0",
+      "tx": "0xcee1ad331de36044d3e3eee5309a74b6961f024c9fd182a0c66a8504d6479e6f",
+      "block": 4158035,
+      "source": "succinctlabs/sp1-contracts contracts/src/v6.1.0/SP1VerifierGroth16.sol, unmodified",
+      "checked": "VERSION() read back from the deployed contract; contracts/test/RealProof.t.sol runs this same bytecode against a proof from our own guest, and against that proof with one byte changed."
     },
     "sp1ComputeVerifier": {
-      "address": "0xdb8ab46550003c4777c7d1e96a4524888bdf0131",
-      "note": "IComputeProofVerifier adapter: checks the journal commits to the piece CIDs ComputeService derived, before asking SP1 whether the proof is good."
+      "address": "0x9e7D951196d20AE23438A4E5420E56Ea0057380B",
+      "tx": "0x9872e867b0bd455cb440cb5d9d2e548cc968b60b4b11e9e2d1e04b580083e3d6",
+      "block": 4158037,
+      "note": "IComputeProofVerifier adapter: refuses before looking at the proof unless its journal commits to the piece CIDs ComputeService derived for itself."
     },
+    "superseded": [
+      {
+        "address": "0x3097f8d998a782e9b46e80aeb352d2b02c4f2eff",
+        "version": "v4.0.0-rc.3",
+        "source": "succinctlabs/sp1-contracts contracts/src/v4.0.0-rc.3/SP1VerifierGroth16.sol, unmodified",
+        "tx": "0x012d2595c8284a8243a5d3e669bac2f229bd9a490ac96cf595eeea9957dd469b",
+        "checked": "SP1's own fixture proof from contracts/test/SP1VerifierGroth16.t.sol verifies here; the same proof with one byte changed is rejected.",
+        "why": "superseded: v4.0.0-rc.3 cannot verify a v6.1.0 proof"
+      },
+      {
+        "address": "0xdb8ab46550003c4777c7d1e96a4524888bdf0131",
+        "note": "IComputeProofVerifier adapter: checks the journal commits to the piece CIDs ComputeService derived, before asking SP1 whether the proof is good.",
+        "why": "superseded: pointed at the old verifier"
+      }
+    ],
     "precompileProbe": {
       "address": "0xbccbe90228b56eebb2f3afa2478a3ea709f85e6b",
-      "note": "Throwaway. Settles that FEVM implements modexp, ecAdd, ecMul and ecPairing, which a top-level eth_call cannot tell from a missing precompile \u2014 both return nothing."
+      "note": "Throwaway. Settles that FEVM implements modexp, ecAdd, ecMul and ecPairing, which a top-level eth_call cannot tell from a missing precompile — both return nothing."
     }
   },
   "note": "Adds the opt-in verifier: a client may name a verifier contract when posting a job, and the price is released only if that verifier is satisfied as well as the delivery condition. Naming none behaves exactly as the previous deployment did."
