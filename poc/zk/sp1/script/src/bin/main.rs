@@ -21,6 +21,11 @@ struct Cli {
     /// works when the machine cannot hold the wrap.
     #[arg(long, default_value = "groth16")] mode: String,
     #[arg(long, default_value = "sealing")] term: String,
+    /// Where to write the job's output. The provider stores whatever lands here as a piece, and the
+    /// contract checks keccak(cid(that piece)) against the outputCommitment in the journal — so these
+    /// bytes have to be the ones the guest hashed, not a re-derivation that happens to look the same.
+    /// Both come from piecework_lib::report, which is why they cannot drift.
+    #[arg(long)] out: Option<PathBuf>,
     /// The pieces, in the order the client listed them. Order is part of the commitment.
     inputs: Vec<PathBuf>,
 }
@@ -37,12 +42,26 @@ async fn main() -> anyhow::Result<()> {
     stdin.write(&(cli.inputs.len() as u32));
     stdin.write_vec(cli.term.as_bytes().to_vec());
     let mut total = 0usize;
+    let mut occurrences = 0u64;
     for p in &cli.inputs {
         let b = fs::read(p)?;
         total += b.len();
+        occurrences += piecework_lib::count_occurrences(&b, cli.term.as_bytes());
         stdin.write_vec(b);
     }
     println!("{} piece(s), {total} bytes, term {:?}", cli.inputs.len(), cli.term);
+
+    // Written before proving rather than after, so a run that dies in the wrap still leaves the provider
+    // the outputs it could deliver. Delivery without a proof earns nothing, but it is recoverable: the
+    // proof can be retried against pieces already on chain, where re-running the job would change nothing
+    // and cost another ten minutes.
+    if let Some(dir) = &cli.out {
+        fs::create_dir_all(dir)?;
+        let body = piecework_lib::report(&cli.term, occurrences, cli.inputs.len());
+        let path = dir.join("term-count.txt");
+        fs::write(&path, &body)?;
+        println!("wrote {} ({} bytes)", path.display(), body.len());
+    }
 
     // from_env is async in v6: it may reach for a network prover before deciding to run locally.
     let client = ProverClient::from_env().await;
