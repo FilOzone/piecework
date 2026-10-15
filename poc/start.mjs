@@ -286,7 +286,15 @@ async function connectCalibnet() {
   }
   for (const n of FOC.NAMES) ABI[n] = FOC.artifact(n).abi;
   ABI.ERC20 = localArtifact("MockERC20").abi; // standard ERC-20 functions
-  C = { ...CALIBNET, cs: loadJSON(DEPLOY_FILE, {}).computeService };
+  // getAddress every address that comes out of JSON. Addresses read off the chain are checksummed, and
+  // comparing one of those against a lowercase literal is false for the same address — which showed up as
+  // a data set reporting its authorizer unset while the chain said it was set correctly, so the page asked
+  // for a signature that would have changed nothing.
+  const deployed = loadJSON(DEPLOY_FILE, {});
+  C = Object.fromEntries(Object.entries({ ...CALIBNET, cs: deployed.computeService })
+    .map(([k, v]) => [k, typeof v === "string" && /^0x[0-9a-fA-F]{40}$/.test(v) ? getAddress(v) : v]));
+  C.computeProofVerifier = deployed.verification?.sp1ComputeVerifier?.address
+    ? getAddress(deployed.verification.sp1ComputeVerifier.address) : undefined;
 }
 
 // ---------------------------------------------------------------- persistent provider state
@@ -518,13 +526,26 @@ async function runJob(jobId, client, spec, inputPieceIds, deadline) {
   // Order matters for a proved job and nowhere else: inputCommitment is keccak over the piece CIDs in the
   // order the client listed them, so the prover has to be handed the files in inputPieceIds order or the
   // journal will not match what the contract derives.
-  const inputNames = [];
+  const inputNames = [], missing = [];
   for (const id of inputPieceIds) {
     const name = c.pieces[Number(id)]?.name;
-    if (name && spec.inputs(name)) {
-      fs.copyFileSync(path.join(clientDir(client), name), path.join(dir, "in", name));
-      inputNames.push(name);
-    }
+    if (!name) { missing.push(`#${id}`); continue; }
+    if (!spec.inputs(name)) continue;
+    const src = path.join(clientDir(client), name);
+    // A data set's pieces are on chain; their bytes are on whichever provider stored them. This provider
+    // can only compute over what it physically holds, and saying so now beats an ENOENT from the middle of
+    // a run — or, for a proved job, eight minutes of proving before anything notices.
+    if (!fs.existsSync(src)) { missing.push(`#${id} ${name}`); continue; }
+    fs.copyFileSync(src, path.join(dir, "in", name));
+    inputNames.push(name);
+  }
+  if (missing.length) {
+    J.stage = "blocked";
+    return plog(`Job #${jobId}: I do not hold the bytes for ${missing.join(", ")}, so I cannot compute over ${missing.length > 1 ? "them" : "it"}. Those pieces are in your data set on chain but were stored by a different machine. Upload them here and order again; you can take your money back at the deadline.`);
+  }
+  if (!inputNames.length) {
+    J.stage = "blocked";
+    return plog(`Job #${jobId}: none of the pieces you named are files this job can read.`);
   }
   J.stage = "running";
   plog(`Job #${jobId}: running the program in a container on your files (no network, read-only inputs)…`);
