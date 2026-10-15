@@ -1,0 +1,28 @@
+# PieceWork job: the same OCR as ocr:v1, on the card.
+# Contract unchanged: inputs in /in (read-only), results in /out, run with --network none.
+#   docker build -f Dockerfile.gpu -t piecework/ocr-gpu:v1 .
+#
+# Why this row is worth measuring rather than assuming. OCR is the one workload here where the GPU may buy
+# accuracy as well as speed: tesseract is a classical engine and degrades on skew, noise and low DPI, where a
+# neural detector holds up. So there are two numbers, not one — pages per minute, and error rate on the same
+# pages. A card that is three times faster and no more accurate is a weaker result than it sounds, because
+# tesseract on many cores is cheap.
+#
+# Needs the nvidia container toolkit. VRAM is modest: the detection and recognition models together are a few
+# hundred megabytes, so this fits any sealing card with room to spare.
+FROM nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-pip poppler-utils \
+ && rm -rf /var/lib/apt/lists/*
+RUN pip3 install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cu124 \
+ && pip3 install --no-cache-dir easyocr
+# Fetch the weights now, while there is still a network. At run time there is not.
+RUN mkdir -p /models && python3 -c "import easyocr; easyocr.Reader(['en'], gpu=False, model_storage_directory='/models', user_network_directory='/models')"
+ENV ENGINE=easyocr WHERE=GPU
+COPY run.sh /run.sh
+COPY ocr-one.sh /ocr-one.sh
+COPY easyocr-one.py /easyocr-one.py
+RUN chmod +x /run.sh /ocr-one.sh
+LABEL org.piecework.job="ocr-gpu" org.piecework.inputs="/in/*.png /in/*.jpg /in/*.tif /in/*.pdf" \
+      org.piecework.outputs="/out/*-text.txt /out/ocr-report.txt"
+ENTRYPOINT ["/run.sh"]

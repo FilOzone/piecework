@@ -43,6 +43,12 @@ for name, job in {
                      "inputExtensions": [".mp4", ".mov", ".mkv", ".avi", ".webm", ".m4v"]},
     # Transcription needs a long deadline on a CPU: the model runs at roughly real time there, so an hour of
     # audio is an hour of compute. The GPU build is where that stops being true.
+    "ocr:v1": {"name": "Read my scanned pages into text", "price": "0.4",
+               "outputs": ["(a -text.txt per page, plus a report)"], "deadlineEpochs": 80,
+               "inputExtensions": [".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".pdf"]},
+    "extract:v1": {"name": "Pull the facts out of my documents", "price": "0.4",
+                   "outputs": ["(a -fields.json per document, plus a report)"], "deadlineEpochs": 120,
+                   "inputExtensions": [".txt", ".md"]},
     "transcribe:v1": {"name": "Transcribe my recordings, searchable by the moment", "price": "0.5",
                       "outputs": ["(a transcript, subtitles and segments per recording)"],
                       "deadlineEpochs": 240,

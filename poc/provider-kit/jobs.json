@@ -149,5 +149,57 @@
       ".txt"
     ],
     "vkey": "0x006ea1696714f9709a7beb7adb073ec17c5aaa0dd3fb03047df8545902b014df"
+  },
+  "ocr:v1": {
+    "name": "Read my scanned pages into text",
+    "dockerImage": "piecework/ocr:v1",
+    "outputs": "*",
+    "price": "0.4",
+    "inputExtensions": [
+      ".png",
+      ".jpg",
+      ".jpeg",
+      ".tif",
+      ".tiff",
+      ".bmp",
+      ".pdf"
+    ]
+  },
+  "ocr-gpu:v1": {
+    "name": "Read my scanned pages into text (on the card)",
+    "dockerImage": "piecework/ocr-gpu:v1",
+    "gpu": true,
+    "outputs": "*",
+    "price": "0.4",
+    "inputExtensions": [
+      ".png",
+      ".jpg",
+      ".jpeg",
+      ".tif",
+      ".tiff",
+      ".bmp",
+      ".pdf"
+    ]
+  },
+  "extract:v1": {
+    "name": "Pull the facts out of my documents",
+    "dockerImage": "piecework/extract:v1",
+    "outputs": "*",
+    "price": "0.4",
+    "inputExtensions": [
+      ".txt",
+      ".md"
+    ]
+  },
+  "extract-gpu:v1": {
+    "name": "Pull the facts out of my documents (on the card)",
+    "dockerImage": "piecework/extract-gpu:v1",
+    "gpu": true,
+    "outputs": "*",
+    "price": "0.4",
+    "inputExtensions": [
+      ".txt",
+      ".md"
+    ]
   }
 }

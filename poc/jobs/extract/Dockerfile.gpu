@@ -1,0 +1,40 @@
+# PieceWork job: the same extraction as extract:v1, on the card.
+# Contract unchanged: inputs in /in (read-only), results in /out, run with --network none.
+#   docker build -f Dockerfile.gpu -t piecework/extract-gpu:v1 .
+#
+# What this row is really measuring. Token generation is memory-bandwidth bound, not arithmetic bound: the
+# model's weights have to be read once per token whatever the device. So the card's advantage here is its
+# bandwidth — roughly 400 GB/s on an A4000 against perhaps 50 on a server processor — and not its FLOPs.
+# Expect several times faster rather than the twenty times people assume when they hear "GPU", and compare
+# it against the CPU build on the same documents rather than against an impression.
+#
+# A 1.5B model at four bits is about a gigabyte of VRAM, so this fits any sealing card several times over.
+# That is the point of choosing a small model: the documents that most need extraction are the ones that
+# cannot legally be sent to someone else's API, and a card bought for sealing is enough to serve them.
+FROM nvidia/cuda:12.4.1-devel-ubuntu22.04 AS build
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-pip build-essential cmake git \
+ && rm -rf /var/lib/apt/lists/*
+# GGML_CUDA is what puts the layers on the card; without it this builds a CPU library that silently ignores
+# GPU_LAYERS and reports a GPU run that never touched the GPU.
+ENV CMAKE_ARGS="-DGGML_CUDA=on"
+RUN pip3 install --no-cache-dir --target=/site llama-cpp-python==0.3.2 huggingface-hub==0.26.2
+ARG REPO=Qwen/Qwen2.5-1.5B-Instruct-GGUF
+ARG FILE=qwen2.5-1.5b-instruct-q4_k_m.gguf
+RUN PYTHONPATH=/site python3 -c "\
+from huggingface_hub import hf_hub_download; import shutil;\
+shutil.copy(hf_hub_download(repo_id='$REPO', filename='$FILE'), '/model.gguf')"
+
+FROM nvidia/cuda:12.4.1-runtime-ubuntu22.04
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends python3 libgomp1 \
+ && rm -rf /var/lib/apt/lists/*
+COPY --from=build /site /usr/lib/python3/dist-packages
+RUN mkdir -p /model
+COPY --from=build /model.gguf /model/model.gguf
+# -1 puts every layer on the card. The script is the same file the CPU image runs; only this differs.
+ENV MODEL=/model/model.gguf GPU_LAYERS=-1 WHERE=GPU
+COPY extract.py /extract.py
+LABEL org.piecework.job="extract-gpu" org.piecework.inputs="/in/*.txt" \
+      org.piecework.outputs="/out/*-fields.json /out/extract-report.txt"
+ENTRYPOINT ["python3", "/extract.py"]
