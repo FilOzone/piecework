@@ -16,6 +16,11 @@ pub const ELF: sp1_sdk::Elf = include_elf!("piecework-program");
 struct Cli {
     #[arg(long)] execute: bool,
     #[arg(long)] prove: bool,
+    /// Print the verification key and stop. The client has to know this before it orders — it goes on
+    /// chain as the job's imageDigest, and SP1ComputeVerifier uses it as the key the proof is checked
+    /// against. Change the guest and it changes, after which nothing verifies, so a catalogue entry for a
+    /// proved job should carry a value read from here rather than copied out of a log.
+    #[arg(long)] vkey: bool,
     /// Groth16 is the only mode a contract can check, and the only one that needs a wrapping step large
     /// enough to run a laptop out of memory. core proves the same execution and is for showing the pipeline
     /// works when the machine cannot hold the wrap.
@@ -26,6 +31,9 @@ struct Cli {
     /// bytes have to be the ones the guest hashed, not a re-derivation that happens to look the same.
     /// Both come from piecework_lib::report, which is why they cannot drift.
     #[arg(long)] out: Option<PathBuf>,
+    /// Where to write the proof. Per-job rather than the working directory, so two jobs proving at once
+    /// cannot overwrite each other's artifact — ten minutes of work each.
+    #[arg(long, default_value = "proof.json")] proof: PathBuf,
     /// The pieces, in the order the client listed them. Order is part of the commitment.
     inputs: Vec<PathBuf>,
 }
@@ -36,7 +44,14 @@ fn hex(b: &[u8]) -> String { b.iter().map(|x| format!("{x:02x}")).collect() }
 async fn main() -> anyhow::Result<()> {
     sp1_sdk::utils::setup_logger();
     let cli = Cli::parse();
-    if cli.execute == cli.prove { anyhow::bail!("pass exactly one of --execute or --prove"); }
+    if !cli.vkey && cli.execute == cli.prove {
+        anyhow::bail!("pass exactly one of --execute, --prove or --vkey");
+    }
+    if cli.vkey {
+        let client = ProverClient::from_env().await;
+        println!("{}", client.setup(ELF).await?.verifying_key().bytes32());
+        return Ok(());
+    }
 
     let mut stdin = SP1Stdin::new();
     stdin.write(&(cli.inputs.len() as u32));
@@ -95,11 +110,12 @@ async fn main() -> anyhow::Result<()> {
     println!("vkey              : {}", pk.verifying_key().bytes32());
     println!("publicValues      : 0x{}", hex(&pv));
     println!("proofBytes        : 0x{}", hex(&proof.bytes()));
-    fs::write("proof.json", serde_json::to_string_pretty(&serde_json::json!({
+    if let Some(d) = cli.proof.parent() { if !d.as_os_str().is_empty() { fs::create_dir_all(d)?; } }
+    fs::write(&cli.proof, serde_json::to_string_pretty(&serde_json::json!({
         "vkey": pk.verifying_key().bytes32(),
         "publicValues": format!("0x{}", hex(&pv)),
         "proofBytes": format!("0x{}", hex(&proof.bytes())),
     }))?)?;
-    println!("wrote proof.json");
+    println!("wrote {}", cli.proof.display());
     Ok(())
 }

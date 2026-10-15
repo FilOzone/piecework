@@ -27,7 +27,7 @@ import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
 import {
   createPublicClient, createWalletClient, http as rpc, fallback, parseUnits, formatUnits, keccak256, toHex, BaseError, getAddress,
-  verifyMessage, hexToString, decodeEventLog, decodeAbiParameters,
+  verifyMessage, hexToString, decodeEventLog, decodeAbiParameters, encodeAbiParameters,
 } from "viem";
 import { foundry, filecoinCalibration } from "viem/chains";
 import { privateKeyToAccount, generatePrivateKey } from "viem/accounts";
@@ -82,7 +82,7 @@ const NET = CAL
     rpcBackup: "https://rpc.ankr.com/filecoin_testnet", epochSeconds: 30, token: "tUSDFC",
     explorer: "https://filecoin-testnet.blockscout.com/tx/", poll: 5000, settleEvery: 4,
     session: { rate: U("0.01"), lockupPeriod: 10n }, // 0.01 per 30 s; margin = 10 epochs (5 min)
-    deadlines: { index: 20n, sales: 20n, late: 4n },
+    deadlines: { index: 20n, sales: 20n, late: 4n, proved: 120n }, // 30s epochs: an hour for a ten-minute proof
     approval: { rateAllowance: U("0.1"), lockupAllowance: U(3), maxLockupPeriod: 600n },
     storage: { deposit: U(1), rate: U("0.1"), lockup: U(2) },
   }
@@ -90,7 +90,7 @@ const NET = CAL
     chain: foundry, rpc: `http://127.0.0.1:${RPC_PORT}`, epochSeconds: 1, token: "luca_usdfc",
     explorer: null, poll: 700, settleEvery: 5,
     session: { rate: U("0.001"), lockupPeriod: 60n },
-    deadlines: { index: 120n, sales: 120n, late: 15n },
+    deadlines: { index: 120n, sales: 120n, late: 15n, proved: 1800n }, // 1s blocks: 30 minutes
     approval: { rateAllowance: U("0.01"), lockupAllowance: U(3), maxLockupPeriod: 600n },
     storage: { deposit: U(1), rate: U(1), lockup: U(1) },
   };
@@ -107,15 +107,26 @@ const PARAMS = {
     pii: { name: "Find and remove personal data in my documents", image: "pii-redact:v1", price: U("0.5"), deadline: NET.deadlines.index,
       desc: "Scans your financial documents (loan agreements, KYC forms, invoices, trade confirmations) for personal and account data: names, addresses, dates of birth, emails, phone numbers, IBANs, bank codes, card numbers, tax and passport numbers, wallet addresses. Produces a report and a redacted copy of every document, for example to share with investors or auditors. Runs Microsoft Presidio on the provider's CPU; the documents never leave the provider.",
       reads: "your documents (.txt)", writes: "pii-report.txt and redacted-documents.txt" },
+    proved: { name: "Count a term, and prove it ran on my data", image: "term-count-proved:v1", price: U("0.5"), deadline: NET.deadlines.proved,
+      // The one job whose on-chain digest is a verification key rather than keccak256 of a name. That is
+      // what lets the chain check the proof, and what makes the digest mean the actual code for once.
+      vkey: "0x006ea1696714f9709a7beb7adb073ec17c5aaa0dd3fb03047df8545902b014df",
+      verified: true,
+      desc: "Counts how often a term appears across the files you pick, and returns a Groth16 proof that the count was computed over exactly those pieces. The provider is paid only if the chain's verifier accepts the proof, so delivering the right answer is no longer enough — it has to be the right answer about your data. Proving takes about ten minutes and costs far more than the counting does; the point is the guarantee, not the arithmetic.",
+      reads: "the .txt files you pick", writes: "term-count.txt" },
     late: { name: "Build a search index: see what happens if the provider misses the deadline", image: "indexer-slow:v1", price: U("0.5"), deadline: NET.deadlines.late,
       desc: "Same program as the search index, but the provider deliberately misses the deadline, to show what happens then: nobody is paid, and a \"Get my money back\" button appears.", reads: "your .txt files", writes: "nothing (late)" },
   },
   approval: NET.approval,
 };
 const digest = (image) => keccak256(toHex(image));
-const IMAGE_BY_DIGEST = Object.fromEntries(
-  [PARAMS.session.image, ...Object.values(PARAMS.jobs).map((j) => j.image)].map((i) => [digest(i), i]),
-);
+// A proved job is found by its verification key, because that is what the client puts on chain as the
+// imageDigest. Everything else is still keccak256 of the image name — a label the provider could change
+// what runs behind, which is exactly the weakness the proved path does not have.
+const IMAGE_BY_DIGEST = Object.fromEntries([
+  [digest(PARAMS.session.image), PARAMS.session.image],
+  ...Object.values(PARAMS.jobs).map((j) => [j.vkey ?? digest(j.image), j.image]),
+]);
 
 // Programs run inside the job containers (alpine Linux, no network, inputs read-only).
 const JOB_SCRIPTS = {
@@ -138,6 +149,25 @@ JOB_SCRIPTS["pii-redact:v1"] = {
   dockerImage: "piecework/pii-redact:v1",
   outputs: ["pii-report.txt", "redacted-documents.txt"],
   inputs: (name) => name.endsWith(".txt") && !/^(search-index|sales-summary|pii-report|redacted-documents)/.test(name),
+};
+
+// The proved job. There is no separate program here: the SP1 guest *is* the job, which is what makes the
+// proof worth anything — the thing being proved is the work being paid for, not a second computation that
+// happens to agree with it. The host runs the guest, writes the output the provider delivers, and emits a
+// Groth16 proof whose journal commits the input and output piece CIDs.
+//
+// Deliberately trivial work (count a term) over deliberately small inputs. Deriving the piece CIDs
+// in-circuit costs 227 cycles/byte and does not amortize, so the binding dominates and the job is free by
+// comparison. A proof takes about ten minutes regardless, which is why this job's deadline is hours.
+JOB_SCRIPTS["term-count-proved:v1"] = {
+  prove: true,
+  term: "payment",
+  // The guest's verification key, which goes on chain as this job's imageDigest instead of the
+  // keccak256("name") an ordinary catalogue job uses. Read it with `piecework --vkey`; it changes whenever
+  // the guest changes, and a stale value here fails exactly like a forged proof.
+  vkey: "0x006ea1696714f9709a7beb7adb073ec17c5aaa0dd3fb03047df8545902b014df",
+  output: "term-count.txt",
+  inputs: (name) => /\.(txt|bin)$/.test(name) && !/^term-count/.test(name),
 };
 
 // ---------------------------------------------------------------- helpers
@@ -192,8 +222,10 @@ async function send(account, address, abi, functionName, args = [], what = funct
 }
 const read = (address, abi, functionName, args = []) => pub.readContract({ address, abi, functionName, args });
 
-function localArtifact(name) {
-  const j = JSON.parse(fs.readFileSync(path.join(CONTRACTS, "out", `${name}.sol`, `${name}.json`), "utf8"));
+// contract defaults to file, which is the usual case. SP1's verifier is the exception: the file is
+// SP1VerifierGroth16.sol and the contract inside it is plain SP1Verifier.
+function localArtifact(file, contract = file) {
+  const j = JSON.parse(fs.readFileSync(path.join(CONTRACTS, "out", `${file}.sol`, `${contract}.json`), "utf8"));
   return { abi: j.abi, bytecode: j.bytecode.object };
 }
 
@@ -221,6 +253,21 @@ async function startLocalChain() {
   const foc = await FOC.deployLocal({ pub, wallet, chain: foundry, deployer, usdfc });
   C = foc.C;
   Object.assign(ABI, foc.ABI);
+  // Verified compute, opt-in. SP1's own Groth16 verifier at the circuit version our prover emits (v6.1.0 —
+  // a proof from one version does not verify against another, and the failure is indistinguishable from a
+  // forged proof), with our adapter in front of it to check the journal commits to the piece CIDs
+  // ComputeService derived for itself. A client names the adapter at postJob to require a proof; naming
+  // nothing behaves exactly as before.
+  const deployLocal = async (file, contract = file, args = []) => {
+    const a = localArtifact(file, contract);
+    const h = await wallet.deployContract({ account: deployer, abi: a.abi, bytecode: a.bytecode, chain: foundry, args });
+    const r = await pub.waitForTransactionReceipt({ hash: h });
+    if (r.status !== "success") throw new Error(`deploy ${contract} failed`);
+    return getAddress(r.contractAddress);
+  };
+  C.sp1 = await deployLocal("SP1VerifierGroth16", "SP1Verifier");
+  C.verifier = await deployLocal("SP1ComputeVerifier", "SP1ComputeVerifier", [C.sp1]);
+  ABI.SP1ComputeVerifier = localArtifact("SP1ComputeVerifier").abi;
   await send(deployer, C.usdfc, ABI.ERC20, "mint", [client, PARAMS.walletStart + NET.storage.deposit]);
   say("Installed:", C);
 }
@@ -468,9 +515,16 @@ async function runJob(jobId, client, spec, inputPieceIds, deadline) {
   fs.rmSync(dir, { recursive: true, force: true });
   fs.mkdirSync(path.join(dir, "in"), { recursive: true });
   fs.mkdirSync(path.join(dir, "out"), { recursive: true });
+  // Order matters for a proved job and nowhere else: inputCommitment is keccak over the piece CIDs in the
+  // order the client listed them, so the prover has to be handed the files in inputPieceIds order or the
+  // journal will not match what the contract derives.
+  const inputNames = [];
   for (const id of inputPieceIds) {
     const name = c.pieces[Number(id)]?.name;
-    if (name && spec.inputs(name)) fs.copyFileSync(path.join(clientDir(client), name), path.join(dir, "in", name));
+    if (name && spec.inputs(name)) {
+      fs.copyFileSync(path.join(clientDir(client), name), path.join(dir, "in", name));
+      inputNames.push(name);
+    }
   }
   J.stage = "running";
   plog(`Job #${jobId}: running the program in a container on your files (no network, read-only inputs)…`);
@@ -481,7 +535,18 @@ async function runJob(jobId, client, spec, inputPieceIds, deadline) {
   }
   await sleep(3000); // let the demo show the "running" stage
   const t0 = Date.now();
-  if (spec.dockerImage) await execFile("docker", ["run", "--rm", "--network", "none", "-v", `${dir}/in:/in:ro`, "-v", `${dir}/out:/out`, spec.dockerImage], XENV);
+  if (spec.prove) {
+    // The repo goes in read-only (the guest's ELF is compiled into the binary, so nothing is read from it
+    // at run time) and /root/.sp1 is a named volume holding the 1.6 GB Groth16 circuit. With that cached
+    // the run needs no network, so --network none still holds for a job that produces a proof.
+    plog(`Job #${jobId}: this one has to be proved, so it runs the zkVM guest and wraps the result in a Groth16 proof. Expect about ten minutes.`);
+    await execFile("docker", ["run", "--rm", "--network", "none",
+      "-v", `${HERE}:/work:ro`, "-v", "piecework-sp1:/root/.sp1", "-v", `${dir}:/job`,
+      "-w", "/work/zk/sp1", "piecework/sp1:v6",
+      "./target/release/piecework", "--prove", "--mode", "groth16", "--term", spec.term,
+      "--out", "/job/out", "--proof", "/job/proof.json",
+      ...inputNames.map((n) => `/job/in/${n}`)], { ...XENV, maxBuffer: 64 * 1024 * 1024 });
+  } else if (spec.dockerImage) await execFile("docker", ["run", "--rm", "--network", "none", "-v", `${dir}/in:/in:ro`, "-v", `${dir}/out:/out`, spec.dockerImage], XENV);
   else await execFile("docker", ["run", "--rm", "--network", "none", "-v", `${dir}/in:/in:ro`, "-v", `${dir}/out:/out`,
     "alpine:3.20", "sh", "-c", spec.script], XENV);
   plog(`Job #${jobId}: the program finished in ${((Date.now() - t0) / 1000).toFixed(1)} s.`);
@@ -502,7 +567,34 @@ async function runJob(jobId, client, spec, inputPieceIds, deadline) {
   J.outputs = p.pieces;
   plog(`Job #${jobId}: ${names.length > 1 ? `results ${names.map((n) => `"${n}"`).join(" and ")}` : `result "${names[0]}"`} added to your data set as piece${names.length > 1 ? "s" : ""} #${p.pieces.map((x) => x.pieceId).join(", #")}.`, p);
   J.stage = "committing";
-  const r = await send(providerAcct, C.cs, ABI.ComputeService, "commitOutputs", [jobId, p.pieces.map((x) => BigInt(x.pieceId))]);
+  const ids = p.pieces.map((x) => BigInt(x.pieceId));
+  // The verifier is whatever the client named at postJob, so the provider does not get to choose how its
+  // work is checked. A proved job carries abi.encode(publicValues, proofBytes) in the third argument; an
+  // ordinary one uses the two-argument overload and behaves exactly as it always has.
+  let r;
+  if (spec.prove) {
+    const pr = loadJSON(path.join(dir, "proof.json"), null);
+    if (!pr) { J.stage = "blocked"; return plog(`Job #${jobId}: the prover produced no proof, so I cannot claim payment.`); }
+    // PIECEWORK_TAMPER_PROOF=1 stands in for a dishonest or broken provider: everything else about the job
+    // is identical and correct, and one byte of the proof is wrong. The point is that the positive case
+    // passing proves nothing on its own — a contract that ignored the verifier would pay just the same.
+    let bytes = pr.proofBytes;
+    if (process.env.PIECEWORK_TAMPER_PROOF) {
+      const last = parseInt(bytes.slice(-2), 16) ^ 0x01;
+      bytes = bytes.slice(0, -2) + last.toString(16).padStart(2, "0");
+      plog(`Job #${jobId}: (tamper switch on) sending a proof with one byte changed. This should not be paid.`);
+    }
+    const proof = encodeAbiParameters([{ type: "bytes" }, { type: "bytes" }], [pr.publicValues, bytes]);
+    plog(`Job #${jobId}: proved. vkey ${pr.vkey}, journal ${pr.publicValues.slice(0, 18)}… — claiming payment, which only moves if the chain's verifier agrees.`);
+    try {
+      r = await send(providerAcct, C.cs, ABI.ComputeService, "commitOutputs", [jobId, ids, proof]);
+    } catch (e) {
+      J.stage = "rejected";
+      return plog(`Job #${jobId}: the chain refused my proof (${reason(e)}). I am not paid, the price stays escrowed, and you can take it back at the deadline.`);
+    }
+  } else {
+    r = await send(providerAcct, C.cs, ABI.ComputeService, "commitOutputs", [jobId, ids]);
+  }
   J.stage = "paid";
   plog(`Job #${jobId}: result committed on-chain; Filecoin Pay released the price to me.`, r);
 }
@@ -836,7 +928,7 @@ async function config() {
     pdp: await pdpConfig(),
     params: {
       session: { image: digest(PARAMS.session.image), name: PARAMS.session.name, desc: PARAMS.session.desc, rate: PARAMS.session.rate.toString(), lockupPeriod: PARAMS.session.lockupPeriod.toString() },
-      jobs: Object.fromEntries(Object.entries(PARAMS.jobs).map(([k, j]) => [k, { name: j.name, desc: j.desc, reads: j.reads, writes: j.writes, image: digest(j.image), price: j.price.toString(), deadline: j.deadline.toString(), inputs: JOB_SCRIPTS[j.image].inputs.toString() }])),
+      jobs: Object.fromEntries(Object.entries(PARAMS.jobs).map(([k, j]) => [k, { name: j.name, desc: j.desc, reads: j.reads, writes: j.writes, image: j.vkey ?? digest(j.image), verified: !!j.verified, price: j.price.toString(), deadline: j.deadline.toString(), inputs: JOB_SCRIPTS[j.image].inputs.toString() }])),
       approval: Object.fromEntries(Object.entries(PARAMS.approval).map(([k, v]) => [k, v.toString()])),
       storage: Object.fromEntries(Object.entries(NET.storage).map(([k, v]) => [k, v.toString()])),
     },
