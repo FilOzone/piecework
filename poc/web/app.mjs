@@ -557,9 +557,20 @@ export async function order(providerId, dataSetId, type, policy, pieceIds) {
   const inputs = pieceIds.map((x) => BigInt(x));
   const removals = policy === "replace-inputs" ? inputs : [];
   const deadline = (await pub.getBlockNumber()) + BigInt(spec.deadlineEpochs ?? 40);
-  step(`Ordering the job on ${inputs.length} file${inputs.length > 1 ? "s" : ""}: the price goes on hold`);
+  // A verified job is ordered differently in two ways, and both matter. Its digest is the guest's
+  // verification key rather than keccak256 of the job's name, because that is the value the verifier checks
+  // the proof against — a name hash passed here would never verify. And it names a verifier, which is what
+  // makes the price conditional on the proof: with address(0) the contract pays on delivery alone, exactly
+  // as every other job does.
+  const verifier = spec.verified ? CFG.contracts.computeProofVerifier : null;
+  if (spec.verified && !verifier) throw new Error("this job needs a proof, but no verifier is configured for this network");
+  const digest = spec.verified ? spec.imageDigest : keccak256(toHex(type));
+  step(spec.verified
+    ? `Ordering a job that has to be proved, on ${inputs.length} file${inputs.length > 1 ? "s" : ""}: the price goes on hold`
+    : `Ordering the job on ${inputs.length} file${inputs.length > 1 ? "s" : ""}: the price goes on hold`);
+  const args = [getAddress(p.address), digest, BigInt(dataSetId), inputs, removals, price, deadline];
   const r = await send(C.cs, ABI.ComputeService, "postJob",
-    [getAddress(p.address), keccak256(toHex(type)), BigInt(dataSetId), inputs, removals, price, deadline]);
+    verifier ? [...args, getAddress(verifier)] : args);
   for (const log of r.logs) {
     try {
       const ev = decodeEventLog({ abi: ABI.ComputeService, data: log.data, topics: log.topics });

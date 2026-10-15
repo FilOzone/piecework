@@ -201,6 +201,13 @@ function render() {
   // ordering
   $("ordercard").hidden = !set;
   if (set) {
+    // A verified job is only offered by a provider that can actually produce a proof. Offering one that
+    // cannot is the mistake already made twice here with query and transcode: the order is accepted, the
+    // provider declines it, and the client waits out the deadline for a refund. A provider declares the
+    // capability in config; nothing infers it.
+    const canProve = !!(CFG.providers.find((x) => x.id === pick)?.proving);
+    const offered = Object.entries(CFG.jobs).filter(([, j]) => !j.verified || canProve);
+    if (!offered.some(([t]) => t === jobType)) jobType = offered[0]?.[0] ?? jobType;
     const spec = CFG.jobs[jobType];
     const exts = spec.inputExtensions ?? [spec.inputExtension ?? ""];
   const eligible = files.filter(([, f]) => exts.some((e) => f.name.endsWith(e)) && !isDerived(f.name));
@@ -209,11 +216,13 @@ function render() {
       <p class="muted">The price is held in Filecoin Pay. The provider runs the program next to your files, adds the results to your data set,
       and is paid only if it does so before the deadline. If it does not, you take the money back.</p>
       <div class="row">
-        <select id="jt">${Object.entries(CFG.jobs).map(([t, j]) => `<option value="${esc(t)}" ${t === jobType ? "selected" : ""}>${esc(j.name)} — ${esc(j.price)} ${esc(CFG.token)}</option>`).join("")}</select>
+        <select id="jt">${offered.map(([t, j]) => `<option value="${esc(t)}" ${t === jobType ? "selected" : ""}>${esc(j.name)} — ${esc(j.price)} ${esc(CFG.token)}${j.verified ? " · proved" : ""}</option>`).join("")}</select>
         <select id="pol">${CFG.policies.map((x) => `<option value="${esc(x.id)}" ${x.id === policy ? "selected" : ""}>${esc(x.label)}</option>`).join("")}</select>
         <button class="b primary" id="orderbtn" ${busy || !use.length || !set.canReceiveResults ? "disabled" : ""}>Order</button>
       </div>
       ${spec.note ? `<p class="muted" style="margin:10px 0 0">${esc(spec.note)}</p>` : ""}
+      ${!canProve && Object.values(CFG.jobs).some((j) => j.verified)
+        ? `<p class="muted" style="margin:8px 0 0">This provider does not run a prover, so the proof-backed job is not listed for it. Pick a provider that does to order one.</p>` : ""}
       <p class="muted" style="margin:8px 0 0">It will read <b>${use.length} file${use.length === 1 ? "" : "s"}</b>${picked.size ? " (the ones you ticked)" : ` — every ${esc(exts.join(", "))} file in the data set`}.
       ${policy === "replace-inputs" ? "After delivery the provider may remove exactly those files. This cannot be undone." : "Nothing is removed."}</p>
 

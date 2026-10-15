@@ -29,6 +29,9 @@ cfg["providers"] = cfg.get("providers", []) + [{
     "address": "0xA0C38545600fe067D79Cac5215049eEb4BF387d0",
     "curioUrl": "http://localhost:8080",
     "note": "The provider running on your own laptop. Here to try new jobs before a real provider ever sees them.",
+    # This machine does run a prover, which is what makes the proof-backed job appear in the list for it.
+    # James's node has no prover, so the same job stays hidden when he is selected.
+    "proving": True,
 }]
 # everything the local kit can run, including the two the public page does not offer
 for name, job in {

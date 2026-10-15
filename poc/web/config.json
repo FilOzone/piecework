@@ -10,7 +10,8 @@
     "payments": "0x09a0fDc2723fAd1A7b8e3e00eE5DF73841df55a0",
     "pdp": "0x85e366Cf9DD2c0aE37E963d9556F5f4718d6417C",
     "fwss": "0x02925630df557F957f70E112bA06e50965417CA0",
-    "view": "0x1B68d64f01bAa42014B9774605867BF4eDC0320f"
+    "view": "0x1B68d64f01bAa42014B9774605867BF4eDC0320f",
+    "computeProofVerifier": "0x9e7D951196d20AE23438A4E5420E56Ea0057380B"
   },
   "faucets": {
     "tFIL": "https://faucet.calibnet.chainsafe-fil.io/funds.html",
@@ -124,6 +125,20 @@
         ".m4v"
       ],
       "note": "Writes three files back per recording: a transcript with the time at the start of every paragraph (read it, or order embeddings over it and search by meaning), subtitles any video player will load, and a short report saying how long the audio was and how fast it ran. On a processor this is roughly real time, so an hour of audio is an hour of compute."
+    },
+    "term-count-proved:v1": {
+      "name": "Count a term, and prove it ran on my data",
+      "price": "0.5",
+      "outputs": [
+        "term-count.txt"
+      ],
+      "deadlineEpochs": 120,
+      "inputExtensions": [
+        ".txt"
+      ],
+      "verified": true,
+      "imageDigest": "0x006ea1696714f9709a7beb7adb073ec17c5aaa0dd3fb03047df8545902b014df",
+      "note": "The provider is paid only if a zero-knowledge proof convinces the chain that the count was computed over exactly the pieces you named. Delivering the right answer is not enough \u2014 it has to be the right answer about your data. Proving takes about ten minutes, so this job's deadline is an hour rather than the usual twenty minutes."
     }
   },
   "policies": [
