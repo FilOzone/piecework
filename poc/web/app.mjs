@@ -412,13 +412,16 @@ const nextId = (name) => pub.readContract({ address: C.cs, abi: ABI.ComputeServi
 
 export async function findJobs() {
   const next = await nextId("nextJobId");
-  const byDigest = Object.fromEntries(Object.keys(CFG.jobs).map((t) => [keccak256(toHex(t)), t]));
+  // A verified job goes on chain under its verification key, not keccak256 of its name, so it has to be
+  // looked up by that or the row falls back to raw hex and loses its name, price and description with it.
+  const byDigest = Object.fromEntries(Object.entries(CFG.jobs).map(([t, j]) =>
+    [(j.verified && j.imageDigest ? j.imageDigest : keccak256(toHex(t))).toLowerCase(), t]));
   const jobs = {};
   for (let id = Math.max(1, next - 200); id < next; id++) {
     const j = await pub.readContract({ address: C.cs, abi: ABI.ComputeService, functionName: "jobs", args: [BigInt(id)] }).catch(() => null);
     if (!j?.[0] || getAddress(j[0]) !== me) continue;
     const p = CFG.providers.find((x) => getAddress(x.address) === getAddress(j[1]));
-    jobs[String(id)] = { jobId: String(id), type: byDigest[j[6]] ?? j[6].slice(0, 10), provider: p?.id ?? j[1],
+    jobs[String(id)] = { jobId: String(id), type: byDigest[j[6].toLowerCase()] ?? j[6].slice(0, 10), provider: p?.id ?? j[1],
       dataSetId: Number(j[5]), price: formatUnits(j[3], 18), deadline: Number(j[4]),
       status: ["none", "waiting", "paid", "refunded"][Number(j[8])], outputs: [] };
   }

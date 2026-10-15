@@ -346,7 +346,7 @@ function render() {
   if (list.length) $("jobscard").innerHTML = `<h2>Your jobs</h2><div class="tw"><table>
     <thead><tr><th>Job</th><th>Status</th><th>Results</th><th></th></tr></thead><tbody>
     ${list.map(([id, j]) => `<tr>
-      <td>#${esc(id)} ${esc(CFG.jobs[j.type]?.name ?? j.type)}<br><span class="muted">${j.inputs} files · ${esc(CFG.jobs[j.type]?.price ?? "")} ${esc(CFG.token)} · data set #${esc(j.dataSetId)}</span></td>
+      <td>#${esc(id)} ${esc(CFG.jobs[j.type]?.name ?? j.type)}${CFG.jobs[j.type]?.verified ? ` <span class="muted">· proved</span>` : ""}<br><span class="muted">${j.inputs == null ? "" : `${j.inputs} files · `}${esc(j.price ?? CFG.jobs[j.type]?.price ?? "")} ${esc(CFG.token)} · data set #${esc(j.dataSetId)}</span></td>
       <td><span class="pill ${esc(j.status)}">${esc(jobStatusText(j))}</span>
         ${j.status === "waiting" && blockNow && j.deadline > blockNow ? `<div class="muted">${jobTiming(j)}</div>`
           : j.status === "waiting" && blockNow ? '<div class="muted">deadline passed</div>' : ""}</td>
