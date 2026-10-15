@@ -45,6 +45,8 @@ const JOBS = JSON.parse(fs.readFileSync(path.join(HERE, "jobs.json"), "utf8"));
 // poc/, mounted read-only into the prover so it can reach zk/sp1. The guest's ELF is compiled into the host
 // binary, so nothing is read from the repo at run time; this is for the binary itself.
 const PROVER_REPO = path.resolve(HERE, "..");
+// Named volume holding SP1's Groth16 circuit: 9.4 GB, fetched once, reused by every proof after.
+const PROVER_CACHE = "piecework-sp1";
 // A proved job is found by its verification key, because that is what the client puts on chain as the
 // imageDigest and what the chain's verifier checks the proof against. Everything else is still keccak256 of
 // the image name — a label the provider could quietly change what runs behind, which is exactly the
@@ -298,8 +300,24 @@ async function runJob(ev) {
       // run needs no network, so --network none still holds for a job that produces a proof.
       say(`Job #${jobId}: this one has to be proved. Running the zkVM guest and wrapping the result in a `
         + `Groth16 proof; expect several minutes, most of it the wrap rather than the work.`);
-      await execFile("docker", ["run", "--rm", "--network", "none",
-        "-v", `${PROVER_REPO}:/work:ro`, "-v", `${cfg.proverCache ?? "piecework-sp1"}:/root/.sp1`,
+      // --shm-size: from about 64 KB of input the native executor dies with SIGBUS on Docker's default
+      // 64 MB /dev/shm and the prover then hangs with no error at all, which is the worst way for this to
+      // fail. Found on a 2 TB machine, so it is not a memory shortage — it is the shared-memory segment.
+      //
+      // The network is open only while the Groth16 circuit is missing. It is 9.4 GB and SP1 fetches it on
+      // first use; with --network none and a cold cache the run fails with "artifact not found". After the
+      // first fetch the cache volume persists and every later job runs sealed off, which is what the job
+      // contract promises. A provider that would rather never open it can pre-fetch with warm-prover.sh.
+      const warm = await execFile("docker", ["run", "--rm", "-v", `${PROVER_CACHE}:/root/.sp1`,
+        "alpine", "sh", "-c", "ls /root/.sp1/circuits/groth16/*/ >/dev/null 2>&1 && echo yes || echo no"])
+        .then((r) => r.stdout.trim() === "yes").catch(() => false);
+      if (!warm) {
+        say(`Job #${jobId}: the Groth16 circuit (9.4 GB) is not cached yet, so this first proof needs the `
+          + `network to fetch it. Later proofs run with no network at all.`);
+      }
+      await execFile("docker", ["run", "--rm", ...(warm ? ["--network", "none"] : []),
+        "--shm-size", String(cfg.proverShmSize ?? "16g"),
+        "-v", `${PROVER_REPO}:/work:ro`, "-v", `${PROVER_CACHE}:/root/.sp1`,
         "-v", `${dir}:/job`, "-w", "/work/zk/sp1", spec.proverImage ?? "piecework/sp1:v6",
         "./target/release/piecework", "--prove", "--mode", "groth16", "--term", String(spec.term ?? "payment"),
         "--out", "/job/out", "--proof", "/job/proof.json",

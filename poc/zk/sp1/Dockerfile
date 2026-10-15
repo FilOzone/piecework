@@ -16,6 +16,16 @@ ENV PATH="/usr/local/go/bin:${PATH}"
 # which prompts for GitHub credentials in a container and fails as "could not read Username" — an error
 # that says nothing about Go modules.
 ENV GOPROXY=https://proxy.golang.org,direct GOSUMDB=sum.golang.org GOFLAGS=-mod=mod
-RUN curl -L https://sp1up.succinct.xyz | bash && /root/.sp1/bin/sp1up
+# Pinned. Unpinned, sp1up installs whatever toolchain is current, and a different toolchain compiles a
+# different guest ELF — which is a different verification key, which is a different job as far as the chain
+# is concerned. Two machines building the same commit a week apart produced 0x006ea169… and 0x00b7d5ba…,
+# and a proof made under one key is rejected under the other in a way indistinguishable from forgery.
+#
+# The committed ELF in program/elf/ is what the host actually embeds, so this pin only matters when
+# regenerating the guest. Belt and braces, deliberately: the failure it prevents is silent.
+# v6.9.0, matching the sp1-sdk version the host depends on. No `|| sp1up` fallback: a pin that silently
+# falls back to unpinned reads as pinned and is not, which is worse than leaving it off.
+ARG SP1_VERSION=v6.9.0
+RUN curl -L https://sp1up.succinct.xyz | bash && /root/.sp1/bin/sp1up --version "${SP1_VERSION}"
 ENV PATH="/root/.sp1/bin:${PATH}"
 WORKDIR /work

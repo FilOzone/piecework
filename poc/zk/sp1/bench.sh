@@ -9,6 +9,9 @@
 # has to work over slices of a file rather than whole files, which is a contract change, so it is worth
 # measuring rather than guessing.
 #
+# Peak memory is worth capturing alongside: on Linux, `cgroup memory.current` sampled each second, which
+# includes page cache and so overstates true RSS — the 9.4 GB circuit alone accounts for a lot of it.
+#
 # Each size runs to completion or death and the script carries on, so one failure does not end the run.
 # Expect several minutes per size: most of it is the Groth16 wrap, which costs about the same regardless.
 set -u
@@ -16,7 +19,7 @@ set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
 POC="$(cd "$HERE/../.." && pwd)"
 IMAGE="${IMAGE:-piecework/sp1:v6}"
-CACHE="${CACHE:-piecework-sp1}"        # named volume for the 1.6 GB Groth16 circuit, fetched once
+CACHE="${CACHE:-piecework-sp1}"        # named volume for the 9.4 GB Groth16 circuit, fetched once
 SIZES="${SIZES:-4096 16384 65536 262144 1048576}"
 
 command -v docker >/dev/null || { echo "docker is not on PATH"; exit 1; }
@@ -50,7 +53,11 @@ open(sys.argv[2],'wb').write((line * (n // len(line) + 1))[:n])
 
   name="piecework-bench-$n-$$"
   start=$(date +%s)
-  docker run --rm --name "$name" --network none \
+  # No --network none here. SP1 fetches the 9.4 GB Groth16 circuit on first use, and with the network shut
+  # and a cold cache every size fails with "artifact not found" — which reads like a broken prover.
+  # --shm-size because from about 64 KB up the native executor dies with SIGBUS on Docker's default 64 MB
+  # /dev/shm and then hangs silently; that is not a memory shortage and more RAM will not fix it.
+  docker run --rm --name "$name" --shm-size "${SHM:-16g}" \
     -v "$POC:/work:ro" -v "$CACHE:/root/.sp1" -v "$HERE/in:/in:ro" \
     -w /work/zk/sp1 "$IMAGE" \
     ./target/release/piecework --prove --mode groth16 --term payment --proof /tmp/p.json "/in/bench-$n.bin" \

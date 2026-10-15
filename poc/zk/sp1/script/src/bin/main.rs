@@ -6,11 +6,25 @@
 //! Execute is the cheap one: no proof, but it reports the cycle count, which is what decides whether proving
 //! the thing is affordable at all.
 use clap::Parser;
-use sp1_sdk::{include_elf, prover::{ProveRequest, ProvingKey}, HashableKey, Prover, ProverClient, SP1Stdin};
+use sp1_sdk::{prover::{ProveRequest, ProvingKey}, HashableKey, Prover, ProverClient, SP1Stdin};
 use std::{fs, path::PathBuf};
 
-// include_elf! yields an Elf wrapper in SP1 v6; the prover takes it directly.
-pub const ELF: sp1_sdk::Elf = include_elf!("piecework-program");
+// The guest, as bytes, committed to the repository rather than rebuilt here.
+//
+// The verification key is a hash of this ELF, and it is the job's identity on chain: a client orders a
+// proved job by naming it, and the chain checks the proof against it. So it has to be the same number for
+// everyone. It was not. Building the guest from source on two machines produced two different keys —
+// 0x006ea169… here and 0x00b7d5ba… on a provider's box — because `sp1up` installs whatever toolchain is
+// current, and a different toolchain compiles a different ELF.
+//
+// That quietly undid the thing the proved path is for. A catalogue job's digest is keccak256 of its name, a
+// label the provider can change what runs behind; the proved job's digest was supposed to be the code
+// itself. It only is if everyone can agree what the code compiles to, and they could not.
+//
+// So the artifact ships, not the recipe — the same reasoning as a client handing a provider its program as
+// a piece rather than a repository to build from. Regenerate with REBUILD_GUEST=1 and commit the result;
+// the vkey changes when it does, and every catalogue entry naming it has to change too.
+pub const ELF: sp1_sdk::Elf = sp1_sdk::Elf::Static(include_bytes!("../../../program/elf/piecework-program"));
 
 #[derive(Parser)]
 struct Cli {
