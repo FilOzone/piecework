@@ -148,7 +148,8 @@
     "inputExtensions": [
       ".txt"
     ],
-    "vkey": "0x00086aa33ae9a50b602a5c0749919347cd2bec916aa57765fbfe446276f3c4bd"
+    "vkey": "0x00086aa33ae9a50b602a5c0749919347cd2bec916aa57765fbfe446276f3c4bd",
+    "deadlineEpochs": 240
   },
   "ocr:v1": {
     "name": "Read my scanned pages into text",
