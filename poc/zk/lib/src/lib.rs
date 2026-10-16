@@ -188,3 +188,93 @@ pub fn report(term: &str, total: u64, pieces: usize) -> String {
          over exactly those pieces.\n"
     )
 }
+
+// ---------------------------------------------------------------- summing amounts
+//
+// The job this exists for: prove a total over a file without showing the file. The answer goes in the
+// output piece, which holds the total and nothing else; the input stays in the client's data set. A
+// counterparty given the output, the proof, and the input piece ids checks that the proof commits to
+// exactly those pieces — which are on chain, and which PDP shows are still held — and learns the total
+// without ever seeing a line of it.
+
+/// Amounts are parsed in minor units (cents) and summed as integers.
+///
+/// Floating point is not an option here. The sum is the thing being proved: it has to be exactly
+/// reproducible by anyone re-running the guest, and binary floating point is neither exact for decimal
+/// money nor associative, so the same lines in a different order could give a different total. An i128 of
+/// cents holds any plausible sum without rounding and without overflow.
+pub const MAX_DECIMALS: usize = 2;
+
+/// One amount per line, optionally after a label and a comma: `invoice-2, 4800.00` or just `4800.00`.
+/// A thousands separator is allowed inside the integer part. Anything else is a parse failure rather than a
+/// guess — in a computation someone is paying to have proved, a line quietly read as zero is worse than a
+/// line that stops the job.
+pub fn parse_amount(line: &str) -> Option<i128> {
+    // A comma is ambiguous here and getting it wrong is expensive: "4,800.00" read as a label followed by
+    // an amount gives 800.00, a total short by four thousand, proved and paid for. So a comma counts as a
+    // thousands separator when it sits between a digit and exactly three digits, and as a field separator
+    // otherwise. The amount is whatever follows the last field separator.
+    let bytes = line.as_bytes();
+    let thousands = |i: usize| -> bool {
+        let before_digit = i > 0 && bytes[i - 1].is_ascii_digit();
+        let three = bytes.len() > i + 3 && bytes[i + 1..i + 4].iter().all(|c| c.is_ascii_digit());
+        let ends = bytes.len() == i + 4 || !bytes[i + 4].is_ascii_digit();
+        before_digit && three && ends
+    };
+    let cut = (0..bytes.len()).rev().find(|&i| bytes[i] == b',' && !thousands(i));
+    let field = match cut { Some(i) => &line[i + 1..], None => line }.trim();
+    let field = field.strip_prefix('$').or_else(|| field.strip_prefix('\u{20ac}')).unwrap_or(field).trim();
+    let (neg, field) = match field.strip_prefix('-') {
+        Some(rest) => (true, rest.trim()),
+        None => (false, field),
+    };
+    let (int_part, frac_part) = match field.split_once('.') {
+        Some((a, b)) => (a, b),
+        None => (field, ""),
+    };
+    if frac_part.len() > MAX_DECIMALS || !frac_part.bytes().all(|c| c.is_ascii_digit()) {
+        return None;
+    }
+    let digits: Vec<u8> = int_part.bytes().filter(|c| *c != b',' && *c != b'_').collect();
+    if digits.is_empty() || !digits.iter().all(|c| c.is_ascii_digit()) {
+        return None;
+    }
+    let mut cents: i128 = 0;
+    for d in &digits {
+        cents = cents.checked_mul(10)?.checked_add((d - b'0') as i128)?;
+    }
+    for _ in 0..MAX_DECIMALS {
+        cents = cents.checked_mul(10)?;
+    }
+    for (i, d) in frac_part.bytes().enumerate() {
+        cents = cents.checked_add(((d - b'0') as i128) * 10i128.pow((MAX_DECIMALS - 1 - i) as u32))?;
+    }
+    Some(if neg { -cents } else { cents })
+}
+
+/// Every parsable line, summed. Blank lines and anything that is not an amount are skipped and counted
+/// separately: a file with a header row should still total, but the client needs to see that something was
+/// not read rather than have it folded silently into the answer.
+pub fn sum_amounts(bytes: &[u8]) -> (i128, u64, u64) {
+    let text = core::str::from_utf8(bytes).unwrap_or("");
+    let (mut total, mut counted, mut skipped) = (0i128, 0u64, 0u64);
+    for line in text.lines() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        match parse_amount(line) {
+            Some(v) => { total += v; counted += 1; }
+            None => skipped += 1,
+        }
+    }
+    (total, counted, skipped)
+}
+
+/// Cents back into a decimal string, for the output piece. Done by hand because the point is that anyone
+/// can reproduce these exact bytes: the output's CID is what the proof commits to.
+pub fn format_cents(cents: i128) -> String {
+    let neg = cents < 0;
+    let a = cents.unsigned_abs();
+    let (whole, frac) = (a / 100, a % 100);
+    format!("{}{}.{:02}", if neg { "-" } else { "" }, whole, frac)
+}
