@@ -17,7 +17,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends python3 python3
  && rm -rf /var/lib/apt/lists/*
 # GGML_CUDA is what puts the layers on the card; without it this builds a CPU library that silently ignores
 # GPU_LAYERS and reports a GPU run that never touched the GPU.
-ENV CMAKE_ARGS="-DGGML_CUDA=on"
+# The CUDA devel image ships no libcuda.so.1 — the real one comes from the driver at run time, via the
+# container toolkit. Without it the link fails on undefined cuMemCreate and friends, in llama-llava-cli and
+# llama-minicpmv-cli rather than anything this job uses, so the error points somewhere irrelevant. The stub
+# satisfies the linker; the driver's own library is what gets loaded on the provider.
+RUN ln -s /usr/local/cuda/lib64/stubs/libcuda.so /usr/local/cuda/lib64/stubs/libcuda.so.1
+ENV LD_LIBRARY_PATH=/usr/local/cuda/lib64/stubs
+# CUDA_ARCHITECTURES=86 is Ampere, which covers the A4000 and the 3090 — the cards actually in question.
+# Left unset, the build compiles for every generation nvcc knows, two files at a time: 43 minutes and still
+# going, against under three with this and a parallel build. A provider waiting out the former would
+# reasonably conclude the thing was broken.
+ENV CMAKE_ARGS="-DGGML_CUDA=on -DCMAKE_CUDA_ARCHITECTURES=${CUDA_ARCH:-86}" CMAKE_BUILD_PARALLEL_LEVEL=32
 RUN pip3 install --no-cache-dir --target=/site llama-cpp-python==0.3.2 huggingface-hub==0.26.2
 ARG REPO=Qwen/Qwen2.5-1.5B-Instruct-GGUF
 ARG FILE=qwen2.5-1.5b-instruct-q4_k_m.gguf
