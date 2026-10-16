@@ -145,7 +145,7 @@
         ".txt"
       ],
       "verified": true,
-      "imageDigest": "0x006ea1696714f9709a7beb7adb073ec17c5aaa0dd3fb03047df8545902b014df",
+      "imageDigest": "0x00086aa33ae9a50b602a5c0749919347cd2bec916aa57765fbfe446276f3c4bd",
       "note": "The provider is paid only if a zero-knowledge proof convinces the chain that the count was computed over exactly the pieces you named. Delivering the right answer is not enough \u2014 it has to be the right answer about your data. Proving takes about ten minutes, so this job's deadline is an hour rather than the usual twenty minutes."
     },
     "ocr:v1": {

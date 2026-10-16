@@ -171,6 +171,20 @@ pub fn count_occurrences(haystack: &[u8], needle: &[u8]) -> u64 {
     n
 }
 
+/// The job's output, and the bytes the guest commits to.
+///
+/// It has to clear 127 bytes, which is the smallest piece a provider will store. The first version of this
+/// returned 39 and the job proved correctly, then failed at delivery with "Invalid upload size" after eight
+/// minutes of proving — on a real provider, because the stand-in never enforced the minimum. A result too
+/// small to store is a job that cannot be paid for.
+///
+/// Padding would have done it, but a result worth reading does the same job: what was counted, over how
+/// many pieces, and what the proof alongside it actually attests to.
 pub fn report(term: &str, total: u64, pieces: usize) -> String {
-    format!("term: {term}\noccurrences: {total}\npieces: {pieces}\n")
+    format!(
+        "term: {term}\noccurrences: {total}\npieces: {pieces}\n\n\
+         This count was produced inside a zkVM. The proof delivered with it commits to the Filecoin piece \
+         CIDs of the inputs above and of this file, so it attests that exactly these bytes were counted \
+         over exactly those pieces.\n"
+    )
 }

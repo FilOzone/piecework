@@ -110,7 +110,7 @@ const PARAMS = {
     proved: { name: "Count a term, and prove it ran on my data", image: "term-count-proved:v1", price: U("0.5"), deadline: NET.deadlines.proved,
       // The one job whose on-chain digest is a verification key rather than keccak256 of a name. That is
       // what lets the chain check the proof, and what makes the digest mean the actual code for once.
-      vkey: "0x006ea1696714f9709a7beb7adb073ec17c5aaa0dd3fb03047df8545902b014df",
+      vkey: "0x00086aa33ae9a50b602a5c0749919347cd2bec916aa57765fbfe446276f3c4bd",
       verified: true,
       desc: "Counts how often a term appears across the files you pick, and returns a Groth16 proof that the count was computed over exactly those pieces. The provider is paid only if the chain's verifier accepts the proof, so delivering the right answer is no longer enough — it has to be the right answer about your data. Proving takes about ten minutes and costs far more than the counting does; the point is the guarantee, not the arithmetic.",
       reads: "the .txt files you pick", writes: "term-count.txt" },
@@ -165,7 +165,7 @@ JOB_SCRIPTS["term-count-proved:v1"] = {
   // The guest's verification key, which goes on chain as this job's imageDigest instead of the
   // keccak256("name") an ordinary catalogue job uses. Read it with `piecework --vkey`; it changes whenever
   // the guest changes, and a stale value here fails exactly like a forged proof.
-  vkey: "0x006ea1696714f9709a7beb7adb073ec17c5aaa0dd3fb03047df8545902b014df",
+  vkey: "0x00086aa33ae9a50b602a5c0749919347cd2bec916aa57765fbfe446276f3c4bd",
   output: "term-count.txt",
   inputs: (name) => /\.(txt|bin)$/.test(name) && !/^term-count/.test(name),
 };
@@ -1168,7 +1168,17 @@ async function main() {
     return c && { dataSetId: c.dataSetId, files: Object.fromEntries(Object.entries(c.pieces).map(([id, p]) => [id, { name: p.name, cid: p.cid, kind: p.kind }])) };
   } });
   lastBlock = await pub.getBlockNumber();
-  eventLoop();
+  // --storage-only serves the stand-in Curio and the page but does not watch the chain for jobs. That is
+  // what lets the provider kit be tested against a real Curio endpoint: the kit needs somewhere to fetch
+  // pieces from and store results to, and the only such endpoint here is served by this process — which
+  // would otherwise race the kit for the same jobs under the same provider key, and win about half the
+  // time. Two providers on one key is the one configuration nothing in this system expects.
+  if (process.argv.includes("--storage-only")) {
+    say("Storage only: serving the stand-in Curio and the page, not taking jobs. The provider kit can run "
+      + "against this.");
+  } else {
+    eventLoop();
+  }
   serve();
   say(`Ready (${NETWORK}). Open http://localhost:${WEB_PORT}  (Ctrl+C to stop)`);
   if (process.argv.includes("--open")) spawn("open", [`http://localhost:${WEB_PORT}`]);

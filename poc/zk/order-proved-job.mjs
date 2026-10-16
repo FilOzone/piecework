@@ -68,7 +68,7 @@ const piece = d.files
 if (!piece) throw new Error("no .txt piece in the client's data set to prove over");
 const pieceId = piece.pieceId;
 
-const VKEY = "0x006ea1696714f9709a7beb7adb073ec17c5aaa0dd3fb03047df8545902b014df";
+const VKEY = "0x00086aa33ae9a50b602a5c0749919347cd2bec916aa57765fbfe446276f3c4bd";
 const price = parseUnits("0.5", 18); // luca_usdfc has 18 decimals, like USDFC
 const head = await pub.getBlockNumber();
 // Local blocks are a second apart and a proof takes about ten minutes, so this is roughly a 30-minute

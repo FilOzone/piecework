@@ -16,6 +16,13 @@ import {SP1ComputeVerifier, ISP1Verifier} from "../src/SP1ComputeVerifier.sol";
 /// constraints to produce these bytes, which is exactly why they belong in a test rather than in a session
 /// transcript: regenerating them is expensive, and a change that breaks the binding is cheap to make.
 ///
+/// These constants are a historical artifact and are meant to stay that way. The guest has changed since —
+/// its output had to clear the 127-byte minimum piece size — so the catalogue's key is now 0x00086aa3… and
+/// no longer this one. That does not weaken the test: it checks that a proof this prover produced is one
+/// SP1's verifier accepts and that the adapter binds it to the right commitments, and a proof is as good
+/// evidence of that a month later as on the day. Regenerating it would cost eight minutes and prove the
+/// same thing.
+///
 /// Provenance: `piecework --prove --mode groth16 --term sealing` over a 4,096-byte input, SP1 v6.9.0,
 /// circuit v6.1.0, 15,972,262 constraints. The guest derives each input piece's Filecoin CID in-circuit,
 /// so publicValues is keccak(cid(input)) ‖ keccak(cid(output)) and nothing cheaper will satisfy it.

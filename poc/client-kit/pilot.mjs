@@ -410,8 +410,20 @@ export function createPilot({ HERE, RUN, NET, C, ABI, pub, signer, say, demoData
       const deadline = (await pub.getBlockNumber()) + BigInt(spec.deadlineEpochs ?? 40);
       step(`Ordering the job on ${inputs.length} files: the price is put on hold (one block)`);
       if (removals.length) step(`The provider will be allowed to remove ${removals.length} old ${removals.length === 1 ? "file" : "files"} once it has delivered`);
+      // A verified job goes on chain under the guest's verification key, not keccak256 of its name, and it
+      // names a verifier — that pairing is what makes the price conditional on a proof. Ordering one with a
+      // name hash posts a job no provider recognises: the kit refuses it as an unknown program, and the
+      // client waits out the deadline for a refund. The browser client was taught this; this one was not.
+      // A verification key in the catalogue entry is what makes a job a proved one — the provider catalogue
+      // calls the field vkey and the browser client's config calls it imageDigest, so accept either rather
+      // than depend on a separate boolean that one of them does not set.
+      const vkey = spec.vkey ?? (spec.verified ? spec.imageDigest : null);
+      const verifier = vkey ? C.computeProofVerifier : null;
+      if (vkey && !verifier) throw new Error("this job needs a proof, but no verifier is configured for this network");
+      const digest = vkey ?? keccak256(toHex(type));
+      const args = [getAddress(p.address), digest, BigInt(set.dataSetId), inputs, removals, price, deadline];
       const r = await send(C.cs, ABI.ComputeService, "postJob",
-        [getAddress(p.address), keccak256(toHex(type)), BigInt(set.dataSetId), inputs, removals, price, deadline]);
+        verifier ? [...args, getAddress(verifier)] : args);
       let posted = null; // read the job id from this transaction's own logs
       for (const log of r.logs) {
         try {

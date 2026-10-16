@@ -209,7 +209,15 @@ async function runJob(ev) {
       say(`Job #${jobId}: the results are already in the data set as pieces #${ids.join(", #")}; claiming payment `
         + `without running the program again.`);
       prior.stage = "committing"; save();
-      const r = await send(cfg.contracts.computeService, ABI.ComputeService, "commitOutputs", [jobId, ids]);
+      // A proved job must carry its proof here too. The whole point of resuming is not to redo work the
+      // provider has already paid for, and for this job that work is eight minutes of proving — so the
+      // proof is read back from the job directory rather than regenerated. Claiming without it would be
+      // refused by the verifier, which looks identical to a bad proof.
+      const pr = spec.prove ? JSON.parse(fs.readFileSync(path.join(WORK, `job-${jobId}`, "proof.json"), "utf8")) : null;
+      const r = pr
+        ? await send(cfg.contracts.computeService, ABI.ComputeService, "commitOutputs",
+            [jobId, ids, encodeAbiParameters([{ type: "bytes" }, { type: "bytes" }], [pr.publicValues, pr.proofBytes])])
+        : await send(cfg.contracts.computeService, ABI.ComputeService, "commitOutputs", [jobId, ids]);
       prior.stage = "paid"; prior.t = { ...prior.t, paid: now() }; prior.done = true; prior.commitTx = r.transactionHash; save();
       say(`Job #${jobId}: committed and paid (tx ${r.transactionHash}).`);
       const { clientDataSetId } = await read(cfg.contracts.view, ABI.View, "getDataSet", [BigInt(dataSetId)]);
@@ -680,8 +688,13 @@ async function checkHealth(verbose) {
   const ping = await fetch(`${curio}/pdp/ping`).then((r) => r.status).catch(() => "unreachable");
   health.curio = ping === 200 ? "reachable" : `not reachable (${ping})`;
   health.gas = Number(formatUnits(await pub.getBalance({ address: account.address }), 18)).toFixed(3);
-  for (const [name, spec] of Object.entries(JOBS))
-    health.images[name] = { image: spec.dockerImage, ready: await execFile("docker", ["image", "inspect", spec.dockerImage]).then(() => true, () => false) };
+  for (const [name, spec] of Object.entries(JOBS)) {
+    // A proved job has no job image: the SP1 guest is the program, and what has to be present is the
+    // prover. Reading dockerImage for it reported "image undefined MISSING", which says a runnable job
+    // cannot run — the kind of startup line a provider reads once and believes.
+    const image = spec.prove ? (spec.proverImage ?? "piecework/sp1:v6") : spec.dockerImage;
+    health.images[name] = { image, ready: await execFile("docker", ["image", "inspect", image]).then(() => true, () => false) };
+  }
   health.block = Number(await pub.getBlockNumber());
   health.checkedAt = new Date().toISOString();
   if (verbose) {

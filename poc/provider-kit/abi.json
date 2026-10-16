@@ -213,6 +213,16 @@
           "name": "status",
           "type": "uint8",
           "internalType": "enum ComputeService.JobStatus"
+        },
+        {
+          "name": "verifier",
+          "type": "address",
+          "internalType": "address"
+        },
+        {
+          "name": "inputCommitment",
+          "type": "bytes32",
+          "internalType": "bytes32"
         }
       ],
       "stateMutability": "view"
@@ -912,6 +922,108 @@
       "type": "error",
       "name": "WrongStatus",
       "inputs": []
+    },
+    {
+      "type": "function",
+      "name": "commitOutputs",
+      "inputs": [
+        {
+          "name": "jobId",
+          "type": "uint256",
+          "internalType": "uint256"
+        },
+        {
+          "name": "outputPieceIds",
+          "type": "uint256[]",
+          "internalType": "uint256[]"
+        },
+        {
+          "name": "proof",
+          "type": "bytes",
+          "internalType": "bytes"
+        }
+      ],
+      "outputs": [],
+      "stateMutability": "nonpayable"
+    },
+    {
+      "type": "function",
+      "name": "postJob",
+      "inputs": [
+        {
+          "name": "provider",
+          "type": "address",
+          "internalType": "address"
+        },
+        {
+          "name": "imageDigest",
+          "type": "bytes32",
+          "internalType": "bytes32"
+        },
+        {
+          "name": "dataSetId",
+          "type": "uint256",
+          "internalType": "uint256"
+        },
+        {
+          "name": "inputPieceIds",
+          "type": "uint256[]",
+          "internalType": "uint256[]"
+        },
+        {
+          "name": "removeOnDelivery",
+          "type": "uint256[]",
+          "internalType": "uint256[]"
+        },
+        {
+          "name": "price",
+          "type": "uint256",
+          "internalType": "uint256"
+        },
+        {
+          "name": "deadline",
+          "type": "uint256",
+          "internalType": "uint256"
+        },
+        {
+          "name": "verifier",
+          "type": "address",
+          "internalType": "address"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "jobId",
+          "type": "uint256",
+          "internalType": "uint256"
+        }
+      ],
+      "stateMutability": "nonpayable"
+    },
+    {
+      "type": "event",
+      "name": "JobNeedsProof",
+      "inputs": [
+        {
+          "name": "jobId",
+          "type": "uint256",
+          "indexed": true,
+          "internalType": "uint256"
+        },
+        {
+          "name": "verifier",
+          "type": "address",
+          "indexed": false,
+          "internalType": "address"
+        },
+        {
+          "name": "inputCommitment",
+          "type": "bytes32",
+          "indexed": false,
+          "internalType": "bytes32"
+        }
+      ],
+      "anonymous": false
     }
   ],
   "PDPVerifier": [

@@ -36,5 +36,17 @@
       ".md",
       ".csv"
     ]
+  },
+  "term-count-proved:v1": {
+    "name": "Count a term, and prove it ran on my data",
+    "outputs": [
+      "term-count.txt"
+    ],
+    "inputExtensions": [
+      ".txt"
+    ],
+    "deadlineEpochs": 120,
+    "verified": true,
+    "vkey": "0x00086aa33ae9a50b602a5c0749919347cd2bec916aa57765fbfe446276f3c4bd"
   }
 }
