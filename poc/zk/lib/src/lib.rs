@@ -5,7 +5,7 @@
 //! that is already stored on Calibration and compared with what PDPVerifier returns for it. If those disagree
 //! by a byte, every proof the guest ever produces is refused, and the symptom looks like a broken prover.
 
-use sha2::{Digest, Sha256};
+use sha2::digest::generic_array::GenericArray;
 use tiny_keccak::{Hasher, Keccak};
 
 const NODE: usize = 32;
@@ -18,17 +18,96 @@ fn trunc254(mut d: [u8; NODE]) -> [u8; NODE] {
     d
 }
 
+/// SHA-256 of a message that is always exactly 64 bytes, which makes both of its blocks known in
+/// advance: the pair itself, then a padding block that is a constant.
+///
+/// Going through `Digest` instead costs about 2000 cycles a call in buffering machinery for a length
+/// that never varies, and a 16 KB piece calls this 1023 times — which made the merkle tree, not the
+/// hashing, the dominant cost of binding a proof to a piece.
 fn hash_pair(l: &[u8; NODE], r: &[u8; NODE]) -> [u8; NODE] {
-    let mut h = Sha256::new();
-    h.update(l);
-    h.update(r);
-    trunc254(h.finalize().into())
+    const IV: [u32; 8] = [
+        0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab,
+        0x5be0cd19,
+    ];
+    // The 1 bit, zeros, then the message length in bits — 512 — as a big-endian u64.
+    const PAD: [u8; 64] = {
+        let mut p = [0u8; 64];
+        p[0] = 0x80;
+        p[62] = 0x02;
+        p
+    };
+
+    let mut block = [0u8; 64];
+    block[..NODE].copy_from_slice(l);
+    block[NODE..].copy_from_slice(r);
+
+    let mut state = IV;
+    sha2::compress256(
+        &mut state,
+        &[*GenericArray::from_slice(&block), *GenericArray::from_slice(&PAD)],
+    );
+
+    let mut out = [0u8; NODE];
+    for (i, w) in state.iter().enumerate() {
+        out[i * 4..i * 4 + 4].copy_from_slice(&w.to_be_bytes());
+    }
+    trunc254(out)
 }
 
 /// Repack so that every 127 bytes become 128: two zero bits inserted after each 254 bits, because the tree is
 /// built over field elements that hold 254 usable bits.
 pub fn fr32_pad(src: &[u8]) -> Vec<u8> {
     let mut out: Vec<u8> = Vec::with_capacity(src.len() * 128 / 127 + 128);
+    let full = src.len() / 127;
+    for b in 0..full {
+        pad_block(&src[b * 127..(b + 1) * 127], &mut out);
+    }
+    // A 127-byte block ends on a whole output byte with no carry (1016 source bits + 8 inserted = 1024),
+    // so the bit-wise tail starts from clean state and the two paths compose.
+    pad_tail(&src[full * 127..], &mut out);
+    while out.len() % NODE != 0 {
+        out.push(0);
+    }
+    out
+}
+
+/// One 127-byte block, eight times cheaper than doing it a bit at a time.
+///
+/// 127 bytes is 1016 bits is exactly four 254-bit groups, so a whole block becomes four 32-byte nodes
+/// with no carry between blocks. Node `k` begins at source bit `254k`, whose offset within a byte is
+/// `254k mod 8` — 0, 6, 4, 2 — and that shift is the same for all 32 bytes of the node. So each output
+/// byte is one shift-or of two neighbouring source bytes, rather than eight shift-mask-push steps.
+///
+/// Measured in the zkVM: the bit-wise version costs 115 cycles per byte, about half of the whole
+/// piece-CID derivation. This is the same transform, not an approximation of it — `fr32_matches_bitwise`
+/// holds it against the original over every length that can behave differently.
+fn pad_block(src: &[u8], out: &mut Vec<u8>) {
+    debug_assert_eq!(src.len(), 127);
+    // 128th byte stays zero: node 3's last output byte reads one past the block, and the bits it takes
+    // from there are inserted zeros, not data.
+    let mut buf = [0u8; 128];
+    buf[..127].copy_from_slice(src);
+
+    let mut block = [0u8; 128];
+    for k in 0..4usize {
+        let s = (254 * k % 8) as u32;
+        let base = 254 * k / 8;
+        for j in 0..32usize {
+            block[k * 32 + j] = if s == 0 {
+                buf[base + j]
+            } else {
+                (buf[base + j] >> s) | (buf[base + j + 1] << (8 - s))
+            };
+        }
+        // The top two bits of every node are the padding, so they are zero whatever landed there.
+        block[k * 32 + 31] &= 0x3f;
+    }
+    out.extend_from_slice(&block);
+}
+
+/// The leftover under 127 bytes, done a bit at a time. This is the original implementation: short
+/// enough not to matter for cost, and it is the definition the fast path is tested against.
+fn pad_tail(src: &[u8], out: &mut Vec<u8>) {
     let mut cur: u8 = 0;
     let mut cur_bits: u32 = 0;
     let mut since: u32 = 0;
@@ -45,11 +124,11 @@ pub fn fr32_pad(src: &[u8]) -> Vec<u8> {
 
     for &byte in src {
         for i in 0..8 {
-            push((byte >> i) & 1, &mut out, &mut cur, &mut cur_bits);
+            push((byte >> i) & 1, out, &mut cur, &mut cur_bits);
             since += 1;
             if since == 254 {
-                push(0, &mut out, &mut cur, &mut cur_bits);
-                push(0, &mut out, &mut cur, &mut cur_bits);
+                push(0, out, &mut cur, &mut cur_bits);
+                push(0, out, &mut cur, &mut cur_bits);
                 since = 0;
             }
         }
@@ -57,10 +136,6 @@ pub fn fr32_pad(src: &[u8]) -> Vec<u8> {
     if cur_bits != 0 {
         out.push(cur);
     }
-    while out.len() % NODE != 0 {
-        out.push(0);
-    }
-    out
 }
 
 /// The merkle root over the padded bytes, zero-padded to a power of two.
