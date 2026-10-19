@@ -565,8 +565,14 @@ export async function order(providerId, dataSetId, type, policy, pieceIds) {
   // the proof against — a name hash passed here would never verify. And it names a verifier, which is what
   // makes the price conditional on the proof: with address(0) the contract pays on delivery alone, exactly
   // as every other job does.
-  const verifier = spec.verified ? CFG.contracts.computeProofVerifier : null;
-  if (spec.verified && !verifier) throw new Error("this job needs a proof, but no verifier is configured for this network");
+  // Which verifier, not whether one: the two proved jobs differ only in the adapter they name. The bound
+  // one makes the chain check that the proof's inputs are the pieces the job named; the attested one does
+  // not, which is why it is cheaper to prove and cheaper to buy. Naming it per job is the whole mechanism —
+  // ComputeService stores the address the client passes and asks it, so nothing here needed changing.
+  const verifierKey = spec.verifier ?? "computeProofVerifier";
+  const verifier = spec.verified ? (CFG.contracts[verifierKey] ?? null) : null;
+  if (spec.verified && !verifier) throw new Error(
+    `this job needs the ${verifierKey} contract, which is not deployed on this network`);
   const digest = spec.verified ? spec.imageDigest : keccak256(toHex(type));
   step(spec.verified
     ? `Ordering a job that has to be proved, on ${inputs.length} file${inputs.length > 1 ? "s" : ""}: the price goes on hold`

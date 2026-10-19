@@ -148,7 +148,23 @@
     "inputExtensions": [
       ".txt"
     ],
-    "vkey": "0x0068b196d712d26f23804c5fa42fcd360e3991ac19c9fba882aef1056f6c0ca1",
+    "vkey": "0x0038c8f3827c1ba3c9396591d54c84aec5c15f8c24a39f7258734a2f8e9ad45e",
+    "deadlineEpochs": 240
+  },
+  "term-count-attested:v1": {
+    "name": "Count a term, and prove the count (not whose data)",
+    "prove": true,
+    "guest": "attested",
+    "proverImage": "piecework/sp1:v6",
+    "term": "payment",
+    "outputs": [
+      "term-count.txt"
+    ],
+    "price": "0.125",
+    "inputExtensions": [
+      ".txt"
+    ],
+    "vkey": "0x0096b367600f7d1b588460df38c64dc90f895ced7e3f6657a6e259dc92614beb",
     "deadlineEpochs": 240
   },
   "ocr:v1": {

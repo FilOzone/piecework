@@ -11,7 +11,8 @@
     "pdp": "0x85e366Cf9DD2c0aE37E963d9556F5f4718d6417C",
     "fwss": "0x02925630df557F957f70E112bA06e50965417CA0",
     "view": "0x1B68d64f01bAa42014B9774605867BF4eDC0320f",
-    "computeProofVerifier": "0x9e7D951196d20AE23438A4E5420E56Ea0057380B"
+    "computeProofVerifier": "0x9e7D951196d20AE23438A4E5420E56Ea0057380B",
+    "computeProofVerifierUnbound": null
   },
   "faucets": {
     "tFIL": "https://faucet.calibnet.chainsafe-fil.io/funds.html",
@@ -62,7 +63,7 @@
         ".md",
         ".csv"
       ],
-      "note": "Turns documents into vectors so they can be searched by meaning rather than by keyword. Transcripts count as documents \u2014 this is what makes a recording searchable."
+      "note": "Turns documents into vectors so they can be searched by meaning rather than by keyword. Transcripts count as documents — this is what makes a recording searchable."
     },
     "indexer:v1": {
       "name": "Build a search index of my files",
@@ -145,8 +146,24 @@
         ".txt"
       ],
       "verified": true,
-      "imageDigest": "0x0068b196d712d26f23804c5fa42fcd360e3991ac19c9fba882aef1056f6c0ca1",
-      "note": "The provider is paid only if a zero-knowledge proof convinces the chain that the count was computed over exactly the pieces you named. Delivering the right answer is not enough \u2014 it has to be the right answer about your data. Proving takes about ten minutes, so this job's deadline is an hour rather than the usual twenty minutes."
+      "imageDigest": "0x0038c8f3827c1ba3c9396591d54c84aec5c15f8c24a39f7258734a2f8e9ad45e",
+      "note": "The provider is paid only if a zero-knowledge proof convinces the chain that the count was computed over exactly the pieces you named. Delivering the right answer is not enough — it has to be the right answer about your data. Proving takes about ten minutes, so this job's deadline is an hour rather than the usual twenty minutes. Costs four times as much to prove as the attested version of the same job, which is why it costs four times as much to order.",
+      "verifier": "computeProofVerifier"
+    },
+    "term-count-attested:v1": {
+      "name": "Count a term, and prove the count — without proving whose data it was",
+      "price": "0.125",
+      "outputs": [
+        "term-count.txt"
+      ],
+      "deadlineEpochs": 120,
+      "inputExtensions": [
+        ".txt"
+      ],
+      "verified": true,
+      "verifier": "computeProofVerifierUnbound",
+      "imageDigest": "0x0096b367600f7d1b588460df38c64dc90f895ced7e3f6657a6e259dc92614beb",
+      "note": "The chain verifies the proof, so the count itself is not in doubt. What it does not check is which bytes were counted: the proof commits to a sha256 of each input rather than to its Filecoin piece CID, and nothing on chain ties those digests to the pieces you pay to store. They are recorded in the delivering transaction and written into the result, so you can retrieve a piece, hash it, and see whether it matches — evidence after the fact rather than a condition on payment. A quarter the price because it is a quarter the proving cost: 24 cycles a byte against 99. Order the bound job if you want the chain to enforce that the count was taken over your data."
     },
     "ocr:v1": {
       "name": "Read my scanned pages into text",
@@ -199,7 +216,7 @@
       "name": "Keep my data set searchable",
       "rate": "0.002",
       "lockupEpochs": 60,
-      "note": "Whenever you add a document, it is turned into vectors next to your files and written back into the same data set. You never order anything \u2014 what you are buying is that your data set stays searchable as it changes."
+      "note": "Whenever you add a document, it is turned into vectors next to your files and written back into the same data set. You never order anything — what you are buying is that your data set stays searchable as it changes."
     },
     "redact-live:v1": {
       "name": "Keep my data set clean",
@@ -211,7 +228,7 @@
       "name": "Keep my data set answering questions",
       "rate": "0.002",
       "lockupEpochs": 60,
-      "note": "While this runs, add a file whose name starts with \"ask\" \u2014 the question inside it is answered from the vectors already stored next to your data, and the answer appears in your data set. Nothing about your documents leaves the provider. It needs \"Keep my data set searchable\" to have run first, so there are vectors to answer from."
+      "note": "While this runs, add a file whose name starts with \"ask\" — the question inside it is answered from the vectors already stored next to your data, and the answer appears in your data set. Nothing about your documents leaves the provider. It needs \"Keep my data set searchable\" to have run first, so there are vectors to answer from."
     }
   }
 }

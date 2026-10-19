@@ -4,7 +4,7 @@
 # sample/ by relative path. program and script reach it with ../../lib. Moving it under sp1/ makes the
 # workspace self-contained and silently breaks that fixture path, so the one test that checks the
 # derivation against a piece really stored on Calibration stops running at all.
-members = ["program", "script"]
+members = ["program", "program-flat", "script"]
 resolver = "2"
 
 [workspace.dependencies]

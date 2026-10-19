@@ -328,6 +328,10 @@ async function runJob(ev) {
         "-v", `${PROVER_REPO}:/work:ro`, "-v", `${PROVER_CACHE}:/root/.sp1`,
         "-v", `${dir}:/job`, "-w", "/work/zk/sp1", spec.proverImage ?? "piecework/sp1:v6",
         "./target/release/piecework", "--prove", "--mode", "groth16", "--term", String(spec.term ?? "payment"),
+        // Which guest, and so which verification key the proof will carry. Defaulting to the bound one is
+        // safe in the sense that a mismatch is always refused rather than mispaid: the key is the job's
+        // identity on chain, so proving the wrong guest produces a proof no catalogue entry names.
+        "--guest", String(spec.guest ?? "bound"),
         "--out", "/job/out", "--proof", "/job/proof.json",
         ...inputFiles.map((f) => `/job/in/${f}`)], { maxBuffer: 1 << 28 });
     } else {

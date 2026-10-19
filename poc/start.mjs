@@ -110,9 +110,15 @@ const PARAMS = {
     proved: { name: "Count a term, and prove it ran on my data", image: "term-count-proved:v1", price: U("0.5"), deadline: NET.deadlines.proved,
       // The one job whose on-chain digest is a verification key rather than keccak256 of a name. That is
       // what lets the chain check the proof, and what makes the digest mean the actual code for once.
-      vkey: "0x0068b196d712d26f23804c5fa42fcd360e3991ac19c9fba882aef1056f6c0ca1",
+      vkey: "0x0038c8f3827c1ba3c9396591d54c84aec5c15f8c24a39f7258734a2f8e9ad45e",
       verified: true,
       desc: "Counts how often a term appears across the files you pick, and returns a Groth16 proof that the count was computed over exactly those pieces. The provider is paid only if the chain's verifier accepts the proof, so delivering the right answer is no longer enough — it has to be the right answer about your data. Proving takes about ten minutes and costs far more than the counting does; the point is the guarantee, not the arithmetic.",
+      reads: "the .txt files you pick", writes: "term-count.txt" },
+    attested: { name: "Count a term, and prove the count — without proving whose data it was", image: "term-count-attested:v1", price: U("0.125"), deadline: NET.deadlines.proved,
+      vkey: "0x0096b367600f7d1b588460df38c64dc90f895ced7e3f6657a6e259dc92614beb",
+      verified: true,
+      verifier: "computeProofVerifierUnbound",
+      desc: "The same count and the same Groth16 proof, checked by the chain the same way — but the proof commits to a sha256 of each input rather than to its Filecoin piece CID, so the chain cannot tell whether the bytes counted were the pieces you pay to store. The digests are recorded in the delivering transaction and written into the result, so you can retrieve a piece and check it yourself afterwards. A quarter of the price because it is a quarter of the proving cost: 24 cycles a byte against 99. The difference between the two jobs is one comparison in one contract.",
       reads: "the .txt files you pick", writes: "term-count.txt" },
     late: { name: "Build a search index: see what happens if the provider misses the deadline", image: "indexer-slow:v1", price: U("0.5"), deadline: NET.deadlines.late,
       desc: "Same program as the search index, but the provider deliberately misses the deadline, to show what happens then: nobody is paid, and a \"Get my money back\" button appears.", reads: "your .txt files", writes: "nothing (late)" },
@@ -157,15 +163,28 @@ JOB_SCRIPTS["pii-redact:v1"] = {
 // Groth16 proof whose journal commits the input and output piece CIDs.
 //
 // Deliberately trivial work (count a term) over deliberately small inputs. Deriving the piece CIDs
-// in-circuit costs 227 cycles/byte and does not amortize, so the binding dominates and the job is free by
-// comparison. A proof takes about ten minutes regardless, which is why this job's deadline is hours.
+// in-circuit costs 99 cycles/byte and does not amortize, so the binding dominates and the job is nearly
+// free by comparison — which stops being true for the attested variant below, where the same counting is
+// about half the bill. A proof takes about ten minutes either way, which is why the deadline is hours.
 JOB_SCRIPTS["term-count-proved:v1"] = {
   prove: true,
   term: "payment",
   // The guest's verification key, which goes on chain as this job's imageDigest instead of the
   // keccak256("name") an ordinary catalogue job uses. Read it with `piecework --vkey`; it changes whenever
   // the guest changes, and a stale value here fails exactly like a forged proof.
-  vkey: "0x0068b196d712d26f23804c5fa42fcd360e3991ac19c9fba882aef1056f6c0ca1",
+  vkey: "0x0038c8f3827c1ba3c9396591d54c84aec5c15f8c24a39f7258734a2f8e9ad45e",
+  output: "term-count.txt",
+  inputs: (name) => /\.(txt|bin)$/.test(name) && !/^term-count/.test(name),
+};
+
+// The attested variant: same job, same output file, different guest. The only field that differs is
+// `guest`, which selects the ELF the host embeds and therefore the verification key the proof carries.
+// The weaker claim is the client's to choose, and it is cheaper because it is cheaper to prove.
+JOB_SCRIPTS["term-count-attested:v1"] = {
+  prove: true,
+  guest: "attested",
+  term: "payment",
+  vkey: "0x0096b367600f7d1b588460df38c64dc90f895ced7e3f6657a6e259dc92614beb",
   output: "term-count.txt",
   inputs: (name) => /\.(txt|bin)$/.test(name) && !/^term-count/.test(name),
 };
@@ -268,6 +287,15 @@ async function startLocalChain() {
   C.sp1 = await deployLocal("SP1VerifierGroth16", "SP1Verifier");
   C.verifier = await deployLocal("SP1ComputeVerifier", "SP1ComputeVerifier", [C.sp1]);
   ABI.SP1ComputeVerifier = localArtifact("SP1ComputeVerifier").abi;
+  // The attested job's adapter: the same contract with the input-commitment check removed, so the chain
+  // verifies the proof but not what it ran over. A client picks between the two by naming an address at
+  // postJob, which is why both are deployed rather than one being a configuration of the other.
+  C.verifierUnbound = await deployLocal("SP1UnboundVerifier", "SP1UnboundVerifier", [C.sp1]);
+  // Both under the names the clients look for. C.verifier is this file's own name for it and predates the
+  // public client; app.mjs and pilot.mjs resolve `computeProofVerifier`, and a job naming a key that does
+  // not exist fails as "not deployed on this network" rather than anything more useful.
+  C.computeProofVerifier = C.verifier;
+  C.computeProofVerifierUnbound = C.verifierUnbound;
   await send(deployer, C.usdfc, ABI.ERC20, "mint", [client, PARAMS.walletStart + NET.storage.deposit]);
   say("Installed:", C);
 }
@@ -295,6 +323,11 @@ async function connectCalibnet() {
     .map(([k, v]) => [k, typeof v === "string" && /^0x[0-9a-fA-F]{40}$/.test(v) ? getAddress(v) : v]));
   C.computeProofVerifier = deployed.verification?.sp1ComputeVerifier?.address
     ? getAddress(deployed.verification.sp1ComputeVerifier.address) : undefined;
+  // Undefined until the attested adapter is deployed to Calibration. Left undefined on purpose: the
+  // attested job then refuses to be ordered, naming the missing contract, instead of being ordered against
+  // the bound adapter and refused by it eight minutes later for a commitment it was never going to match.
+  C.computeProofVerifierUnbound = deployed.verification?.sp1UnboundVerifier?.address
+    ? getAddress(deployed.verification.sp1UnboundVerifier.address) : undefined;
 }
 
 // ---------------------------------------------------------------- persistent provider state
@@ -565,6 +598,7 @@ async function runJob(jobId, client, spec, inputPieceIds, deadline) {
       "-v", `${HERE}:/work:ro`, "-v", "piecework-sp1:/root/.sp1", "-v", `${dir}:/job`,
       "-w", "/work/zk/sp1", "piecework/sp1:v6",
       "./target/release/piecework", "--prove", "--mode", "groth16", "--term", spec.term,
+      "--guest", String(spec.guest ?? "bound"),
       "--out", "/job/out", "--proof", "/job/proof.json",
       ...inputNames.map((n) => `/job/in/${n}`)], { ...XENV, maxBuffer: 64 * 1024 * 1024 });
   } else if (spec.dockerImage) await execFile("docker", ["run", "--rm", "--network", "none", "-v", `${dir}/in:/in:ro`, "-v", `${dir}/out:/out`, spec.dockerImage], XENV);
@@ -949,7 +983,7 @@ async function config() {
     pdp: await pdpConfig(),
     params: {
       session: { image: digest(PARAMS.session.image), name: PARAMS.session.name, desc: PARAMS.session.desc, rate: PARAMS.session.rate.toString(), lockupPeriod: PARAMS.session.lockupPeriod.toString() },
-      jobs: Object.fromEntries(Object.entries(PARAMS.jobs).map(([k, j]) => [k, { name: j.name, desc: j.desc, reads: j.reads, writes: j.writes, image: j.vkey ?? digest(j.image), verified: !!j.verified, price: j.price.toString(), deadline: j.deadline.toString(), inputs: JOB_SCRIPTS[j.image].inputs.toString() }])),
+      jobs: Object.fromEntries(Object.entries(PARAMS.jobs).map(([k, j]) => [k, { name: j.name, desc: j.desc, reads: j.reads, writes: j.writes, image: j.vkey ?? digest(j.image), verified: !!j.verified, verifier: j.verifier ?? null, price: j.price.toString(), deadline: j.deadline.toString(), inputs: JOB_SCRIPTS[j.image].inputs.toString() }])),
       approval: Object.fromEntries(Object.entries(PARAMS.approval).map(([k, v]) => [k, v.toString()])),
       storage: Object.fromEntries(Object.entries(NET.storage).map(([k, v]) => [k, v.toString()])),
     },

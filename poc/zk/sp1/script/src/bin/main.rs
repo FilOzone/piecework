@@ -26,6 +26,12 @@ use std::{fs, path::PathBuf};
 // the vkey changes when it does, and every catalogue entry naming it has to change too.
 pub const ELF: sp1_sdk::Elf = sp1_sdk::Elf::Static(include_bytes!("../../../program/elf/piecework-program"));
 
+// The attested guest: the same job with a flat sha256 over the inputs instead of their piece CIDs. A
+// separate program, so a separate key and a separate catalogue entry — the two make different claims and
+// a client picks between them by naming a different verifier when it posts the job.
+pub const ELF_FLAT: sp1_sdk::Elf =
+    sp1_sdk::Elf::Static(include_bytes!("../../../program-flat/elf/piecework-program-flat"));
+
 #[derive(Parser)]
 struct Cli {
     #[arg(long)] execute: bool,
@@ -39,6 +45,10 @@ struct Cli {
     /// enough to run a laptop out of memory. core proves the same execution and is for showing the pipeline
     /// works when the machine cannot hold the wrap.
     #[arg(long, default_value = "groth16")] mode: String,
+    /// Which guest: `bound` derives the pieces' Filecoin CIDs and the chain checks them against PDP;
+    /// `attested` hashes the inputs flat, which is eight times cheaper to prove and binds to nothing the
+    /// chain can verify. Different programs, so different verification keys — read each with --vkey.
+    #[arg(long, default_value = "bound")] guest: String,
     #[arg(long, default_value = "sealing")] term: String,
     /// Where to write the job's output. The provider stores whatever lands here as a piece, and the
     /// contract checks keccak(cid(that piece)) against the outputCommitment in the journal — so these
@@ -61,9 +71,17 @@ async fn main() -> anyhow::Result<()> {
     if !cli.vkey && cli.execute == cli.prove {
         anyhow::bail!("pass exactly one of --execute, --prove or --vkey");
     }
+    // Named rather than numbered, and rejected rather than defaulted: silently proving the wrong guest
+    // produces a valid proof under a key no catalogue entry names, which is indistinguishable from forgery
+    // at the point it is refused.
+    let elf = match cli.guest.as_str() {
+        "bound" => ELF,
+        "attested" => ELF_FLAT,
+        other => anyhow::bail!("--guest must be `bound` or `attested`, not `{other}`"),
+    };
     if cli.vkey {
         let client = ProverClient::from_env().await;
-        println!("{}", client.setup(ELF).await?.verifying_key().bytes32());
+        println!("{}", client.setup(elf).await?.verifying_key().bytes32());
         return Ok(());
     }
 
@@ -95,7 +113,7 @@ async fn main() -> anyhow::Result<()> {
     // from_env is async in v6: it may reach for a network prover before deciding to run locally.
     let client = ProverClient::from_env().await;
     if cli.execute {
-        let (public_values, report) = client.execute(ELF, stdin.clone()).await?;
+        let (public_values, report) = client.execute(elf, stdin.clone()).await?;
         let pv = public_values.as_slice();
         println!("cycles            : {}", report.total_instruction_count());
         println!("inputCommitment   : 0x{}", hex(&pv[..32]));
@@ -114,7 +132,7 @@ async fn main() -> anyhow::Result<()> {
 
     // setup yields the proving key; the verifying key hangs off it, and its bytes32 is what goes on
     // chain as the job's imageDigest.
-    let pk = client.setup(ELF).await?;
+    let pk = client.setup(elf).await?;
     let proof = match cli.mode.as_str() {
         "core" => client.prove(&pk, stdin).core().await?,
         "compressed" => client.prove(&pk, stdin).compressed().await?,

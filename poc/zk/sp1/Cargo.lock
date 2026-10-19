@@ -3512,6 +3512,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "piecework-program-flat"
+version = "0.1.0"
+dependencies = [
+ "piecework-lib",
+ "sp1-zkvm",
+]
+
+[[package]]
 name = "piecework-script"
 version = "0.1.0"
 dependencies = [

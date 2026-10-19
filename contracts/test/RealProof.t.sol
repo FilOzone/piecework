@@ -7,6 +7,7 @@ import {Test} from "forge-std/Test.sol";
 // here as well would be a clashing declaration of the same name.
 import {SP1Verifier} from "../src/vendor/sp1-v6.1.0/SP1VerifierGroth16.sol";
 import {SP1ComputeVerifier, ISP1Verifier} from "../src/SP1ComputeVerifier.sol";
+import {SP1UnboundVerifier} from "../src/SP1UnboundVerifier.sol";
 
 /// A real Groth16 proof, produced by this repo's own guest program, checked against SP1's own verifier.
 ///
@@ -59,10 +60,12 @@ contract RealProofTest is Test {
 
     SP1Verifier sp1;
     SP1ComputeVerifier adapter;
+    SP1UnboundVerifier unbound;
 
     function setUp() public {
         sp1 = new SP1Verifier();
         adapter = new SP1ComputeVerifier(ISP1Verifier(address(sp1)));
+        unbound = new SP1UnboundVerifier(ISP1Verifier(address(sp1)));
     }
 
     /// The verifier we would deploy is the one the prover's circuit was built for. A mismatch here is the
@@ -115,5 +118,58 @@ contract RealProofTest is Test {
     function test_R7_rubbishIsARefusalNotARevert() public view {
         assertFalse(adapter.verifyComputeProof(
             VKEY, INPUT_COMMITMENT, OUTPUT_COMMITMENT, hex"dead"));
+    }
+
+    // ---------------------------------------------------------------------------------------------------
+    // The attested job, against the same proof bytes.
+    //
+    // Two adapters differing by one comparison, exercised on one genuine proof, so what the cheaper job
+    // gives up and what it keeps are pinned from both sides rather than described in a comment. U1 is R4
+    // with the opposite expectation; that pair is the whole difference between the two things a client can
+    // buy. The proof here is the bound guest's, which is fine and is the point: this adapter does not look
+    // at the input commitment at all, so a proof carrying piece CIDs satisfies it exactly as one carrying
+    // flat digests would.
+    // ---------------------------------------------------------------------------------------------------
+
+    /// The defining behaviour, and the one that would be a critical fault in the bound adapter: a genuine
+    /// proof is accepted although the commitment the chain derived for this job's inputs is something else
+    /// entirely. Compare test_R4, same proof, same arguments, refused.
+    function test_U1_theInputCommitmentIsNotChecked() public view {
+        assertTrue(unbound.verifyComputeProof(
+            VKEY, keccak256("some other pieces"), OUTPUT_COMMITMENT, abi.encode(PUBLIC_VALUES, PROOF)));
+        // And the bound adapter refuses the identical call, which is what makes this a choice.
+        assertFalse(adapter.verifyComputeProof(
+            VKEY, keccak256("some other pieces"), OUTPUT_COMMITMENT, abi.encode(PUBLIC_VALUES, PROOF)));
+    }
+
+    /// Dropping the input check must not quietly drop the output check with it: the delivered result is
+    /// still bound to the proof, which is what stops a provider being paid for someone else's output.
+    function test_U2_theOutputCommitmentIsStillChecked() public view {
+        assertFalse(unbound.verifyComputeProof(
+            VKEY, INPUT_COMMITMENT, keccak256("some other result"), abi.encode(PUBLIC_VALUES, PROOF)));
+    }
+
+    /// The proof is still verified. "Not bound to the inputs" must not become "not verified at all", which
+    /// is the misreading the whole adapter invites.
+    function test_U3_aTamperedProofIsStillRejected() public {
+        bytes memory tampered = PROOF;
+        tampered[tampered.length - 1] = bytes1(uint8(tampered[tampered.length - 1]) ^ 0x01);
+        assertFalse(unbound.verifyComputeProof(
+            VKEY, INPUT_COMMITMENT, OUTPUT_COMMITMENT, abi.encode(PUBLIC_VALUES, tampered)));
+    }
+
+    /// The program is still pinned, so ordering the attested job cannot be satisfied by a proof of some
+    /// other program — including the bound guest's own key, which is a different number.
+    function test_U4_theWrongProgramIsStillRefused() public view {
+        assertFalse(unbound.verifyComputeProof(
+            bytes32(uint256(VKEY) ^ 1), INPUT_COMMITMENT, OUTPUT_COMMITMENT,
+            abi.encode(PUBLIC_VALUES, PROOF)));
+    }
+
+    function test_U5_rubbishIsARefusalNotARevert() public view {
+        assertFalse(unbound.verifyComputeProof(
+            VKEY, INPUT_COMMITMENT, OUTPUT_COMMITMENT, hex"dead"));
+        assertFalse(unbound.verifyComputeProof(
+            VKEY, INPUT_COMMITMENT, OUTPUT_COMMITMENT, abi.encode(hex"00", PROOF)));
     }
 }

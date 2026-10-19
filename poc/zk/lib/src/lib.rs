@@ -6,6 +6,7 @@
 //! by a byte, every proof the guest ever produces is refused, and the symptom looks like a broken prover.
 
 use sha2::digest::generic_array::GenericArray;
+use sha2::{Digest, Sha256};
 use tiny_keccak::{Hasher, Keccak};
 
 const NODE: usize = 32;
@@ -223,6 +224,22 @@ pub fn commit_pieces(pieces: &[Vec<u8>]) -> [u8; 32] {
 /// The same commitment, over CIDs that are already known. This is exactly what ComputeService does on chain:
 /// concatenate each input piece's CID in the order the job listed them, then keccak256. abi.encodePacked of
 /// bytes is the bytes, so there is nothing else in the preimage.
+/// A piece's bytes hashed flat, instead of reduced to its Filecoin CID.
+///
+/// This is the cheap binding: one linear pass, about 12.5 cycles a byte in the zkVM against 100 for
+/// `piece_cid`, because it is 64 bytes per compression with no fr32 padding beneath it and no tree above.
+///
+/// What it saves it gives up in meaning. A digest of the bytes the prover was handed says nothing about the
+/// piece the client pays to store, and no contract can check it against PDP — there is no on-chain path
+/// from a piece CID to a sha256 of the raw data. Returned as a `Vec<u8>` so it drops into `commit_cids`
+/// where a CID would go: the journal keeps its shape, and only the meaning of the first field changes.
+/// `SP1UnboundVerifier` is the contract that accepts it, and says what that costs the client.
+pub fn sha256_digest(bytes: &[u8]) -> Vec<u8> {
+    let mut h = Sha256::new();
+    h.update(bytes);
+    h.finalize().to_vec()
+}
+
 pub fn commit_cids(cids: &[Vec<u8>]) -> [u8; 32] {
     let mut acc = Vec::new();
     for c in cids { acc.extend_from_slice(c); }
@@ -261,6 +278,35 @@ pub fn report(term: &str, total: u64, pieces: usize) -> String {
          This count was produced inside a zkVM. The proof delivered with it commits to the Filecoin piece \
          CIDs of the inputs above and of this file, so it attests that exactly these bytes were counted \
          over exactly those pieces.\n"
+    )
+}
+
+/// The same answer, for the job whose proof is not bound to the stored pieces.
+///
+/// Deliberately a separate function rather than a flag on `report`: that one's bytes are part of the bound
+/// guest's output commitment, so changing it changes a verification key and every catalogue entry naming it.
+///
+/// The wording is the point. `report` says the proof attests that exactly these bytes were counted over
+/// exactly those pieces, and for this job that is false — so saying it would be worse than saying nothing.
+/// Someone reading the delivered file should be able to tell which of the two jobs produced it without
+/// looking anything up.
+pub fn report_attested(term: &str, total: u64, pieces: usize, digests: &[Vec<u8>]) -> String {
+    let mut listed = String::new();
+    for d in digests {
+        listed.push_str("  sha256: ");
+        for b in d {
+            listed.push_str(&format!("{b:02x}"));
+        }
+        listed.push('\n');
+    }
+    format!(
+        "term: {term}\noccurrences: {total}\npieces: {pieces}\n\n\
+         inputs this count was taken over:\n{listed}\n\
+         This count was produced inside a zkVM and the chain checked the proof, so the computation is not \
+         in doubt. The proof commits to the sha256 digests above, NOT to the Filecoin piece CIDs of the \
+         inputs, and nothing on chain ties those digests to the pieces you pay to store — that is what \
+         makes this job cheap to prove. Retrieve a piece and hash it: if its sha256 is not listed above, \
+         the digests are on chain in the delivering transaction as evidence of what was claimed.\n"
     )
 }
 

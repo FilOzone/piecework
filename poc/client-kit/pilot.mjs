@@ -418,8 +418,12 @@ export function createPilot({ HERE, RUN, NET, C, ABI, pub, signer, say, demoData
       // calls the field vkey and the browser client's config calls it imageDigest, so accept either rather
       // than depend on a separate boolean that one of them does not set.
       const vkey = spec.vkey ?? (spec.verified ? spec.imageDigest : null);
-      const verifier = vkey ? C.computeProofVerifier : null;
-      if (vkey && !verifier) throw new Error("this job needs a proof, but no verifier is configured for this network");
+      // Per job, not per network: the bound and attested jobs are the same contract and the same rail,
+      // differing only in which adapter the client names. See web/app.mjs for the same two lines.
+      const verifierKey = spec.verifier ?? "computeProofVerifier";
+      const verifier = vkey ? (C[verifierKey] ?? null) : null;
+      if (vkey && !verifier) throw new Error(
+        `this job needs the ${verifierKey} contract, which is not deployed on this network`);
       const digest = vkey ?? keccak256(toHex(type));
       const args = [getAddress(p.address), digest, BigInt(set.dataSetId), inputs, removals, price, deadline];
       const r = await send(C.cs, ABI.ComputeService, "postJob",
