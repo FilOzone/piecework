@@ -294,7 +294,7 @@
         ".txt"
       ],
       "verified": true,
-      "imageDigest": "0x0038c8f3827c1ba3c9396591d54c84aec5c15f8c24a39f7258734a2f8e9ad45e",
+      "imageDigest": "0x002faeef6f22ecb5f451643ff42c37ec420eb37f4e535ddcf14f72d0c6942d47",
       "note": "The provider is paid only if a zero-knowledge proof convinces the chain that the count was computed over exactly the pieces you named. Delivering the right answer is not enough — it has to be the right answer about your data. Proving takes about ten minutes, so this job's deadline is an hour rather than the usual twenty minutes. Costs four times as much to prove as the attested version of the same job, which is why it costs four times as much to order.",
       "verifier": "computeProofVerifier"
     },
@@ -310,7 +310,7 @@
       ],
       "verified": true,
       "verifier": "computeProofVerifierUnbound",
-      "imageDigest": "0x0096b367600f7d1b588460df38c64dc90f895ced7e3f6657a6e259dc92614beb",
+      "imageDigest": "0x0019f78dfa23d6ecc3140563c3746ba611461e81f5c70d9de052c22841d69cc0",
       "note": "The chain verifies the proof, so the count itself is not in doubt. What it does not check is which bytes were counted: the proof commits to a sha256 of each input rather than to its Filecoin piece CID, and nothing on chain ties those digests to the pieces you pay to store. They are recorded in the delivering transaction and written into the result, so you can retrieve a piece, hash it, and see whether it matches — evidence after the fact rather than a condition on payment. A quarter the price because it is a quarter the proving cost: 24 cycles a byte against 99. Order the bound job if you want the chain to enforce that the count was taken over your data."
     },
     "ocr:v1": {

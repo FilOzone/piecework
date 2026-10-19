@@ -113,12 +113,12 @@ const PARAMS = {
     proved: { name: "Count a term, and prove it ran on my data", image: "term-count-proved:v1", price: U("0.5"), deadline: NET.deadlines.proved,
       // The one job whose on-chain digest is a verification key rather than keccak256 of a name. That is
       // what lets the chain check the proof, and what makes the digest mean the actual code for once.
-      vkey: "0x0038c8f3827c1ba3c9396591d54c84aec5c15f8c24a39f7258734a2f8e9ad45e",
+      vkey: "0x002faeef6f22ecb5f451643ff42c37ec420eb37f4e535ddcf14f72d0c6942d47",
       verified: true,
       desc: "Counts how often a term appears across the files you pick, and returns a Groth16 proof that the count was computed over exactly those pieces. The provider is paid only if the chain's verifier accepts the proof, so delivering the right answer is no longer enough — it has to be the right answer about your data. Proving takes about ten minutes and costs far more than the counting does; the point is the guarantee, not the arithmetic.",
       reads: "the .txt files you pick", writes: "term-count.txt" },
     attested: { name: "Count a term, and prove the count — without proving whose data it was", image: "term-count-attested:v1", price: U("0.125"), deadline: NET.deadlines.proved,
-      vkey: "0x0096b367600f7d1b588460df38c64dc90f895ced7e3f6657a6e259dc92614beb",
+      vkey: "0x0019f78dfa23d6ecc3140563c3746ba611461e81f5c70d9de052c22841d69cc0",
       verified: true,
       verifier: "computeProofVerifierUnbound",
       desc: "The same count and the same Groth16 proof, checked by the chain the same way — but the proof commits to a sha256 of each input rather than to its Filecoin piece CID, so the chain cannot tell whether the bytes counted were the pieces you pay to store. The digests are recorded in the delivering transaction and written into the result, so you can retrieve a piece and check it yourself afterwards. A quarter of the price because it is a quarter of the proving cost: 24 cycles a byte against 99. The difference between the two jobs is one comparison in one contract.",
@@ -175,7 +175,7 @@ JOB_SCRIPTS["term-count-proved:v1"] = {
   // The guest's verification key, which goes on chain as this job's imageDigest instead of the
   // keccak256("name") an ordinary catalogue job uses. Read it with `piecework --vkey`; it changes whenever
   // the guest changes, and a stale value here fails exactly like a forged proof.
-  vkey: "0x0038c8f3827c1ba3c9396591d54c84aec5c15f8c24a39f7258734a2f8e9ad45e",
+  vkey: "0x002faeef6f22ecb5f451643ff42c37ec420eb37f4e535ddcf14f72d0c6942d47",
   output: "term-count.txt",
   inputs: (name) => /\.(txt|bin)$/.test(name) && !/^term-count/.test(name),
 };
@@ -187,7 +187,7 @@ JOB_SCRIPTS["term-count-attested:v1"] = {
   prove: true,
   guest: "attested",
   term: "payment",
-  vkey: "0x0096b367600f7d1b588460df38c64dc90f895ced7e3f6657a6e259dc92614beb",
+  vkey: "0x0019f78dfa23d6ecc3140563c3746ba611461e81f5c70d9de052c22841d69cc0",
   output: "term-count.txt",
   inputs: (name) => /\.(txt|bin)$/.test(name) && !/^term-count/.test(name),
 };

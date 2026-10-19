@@ -67,9 +67,9 @@ const C = d.contracts;
 const ATTESTED = process.argv.includes("--attested");
 const JOB = ATTESTED
   ? { label: "attested", price: "0.125", verifierKey: "verifierUnbound",
-      vkey: "0x0096b367600f7d1b588460df38c64dc90f895ced7e3f6657a6e259dc92614beb" }
+      vkey: "0x0019f78dfa23d6ecc3140563c3746ba611461e81f5c70d9de052c22841d69cc0" }
   : { label: "bound", price: "0.5", verifierKey: "verifier",
-      vkey: "0x0038c8f3827c1ba3c9396591d54c84aec5c15f8c24a39f7258734a2f8e9ad45e" };
+      vkey: "0x002faeef6f22ecb5f451643ff42c37ec420eb37f4e535ddcf14f72d0c6942d47" };
 
 const verifier = C[JOB.verifierKey];
 if (!verifier) throw new Error(
