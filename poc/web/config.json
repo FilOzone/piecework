@@ -65,6 +65,21 @@
       ],
       "note": "Turns documents into vectors so they can be searched by meaning rather than by keyword. Transcripts count as documents — this is what makes a recording searchable."
     },
+    "embed-gpu:v1": {
+      "name": "Make my documents searchable by meaning (embeddings) (on the card)",
+      "price": "0.3",
+      "outputs": [
+        "embeddings.jsonl",
+        "embeddings-report.txt"
+      ],
+      "deadlineEpochs": 40,
+      "inputExtensions": [
+        ".txt",
+        ".md",
+        ".csv"
+      ],
+      "note": "The same embeddings on a provider's GPU. Not measured against the processor here, so order it for throughput on a large archive rather than on a promised speed-up."
+    },
     "indexer:v1": {
       "name": "Build a search index of my files",
       "price": "0.5",
@@ -96,6 +111,34 @@
       ],
       "note": "Put a .sql file in the data set alongside your tables; it runs over the csv, parquet and json already stored here and returns the rows, so gigabytes stay put and only the answer moves."
     },
+    "image-clean:v1": {
+      "name": "Take the people, or the background, out of my photographs",
+      "price": "0.4",
+      "outputs": [
+        "(a -clean.png and -mask.png per file, plus a report)"
+      ],
+      "deadlineEpochs": 80,
+      "inputExtensions": [
+        ".jpg",
+        ".jpeg",
+        ".png"
+      ],
+      "note": "Put a line in what.txt saying background or people. It writes the cleaned image and the mask beside it, so you can see what the model decided to remove rather than taking its word for it. A photo archive is the case where moving the compute to the data pays best, because the inputs are large and the answer is another image. Not yet exercised on a real photograph."
+    },
+    "image-clean-gpu:v1": {
+      "name": "Take the people, or the background, out of my photographs (on the card)",
+      "price": "0.4",
+      "outputs": [
+        "(a -clean.png and -mask.png per file, plus a report)"
+      ],
+      "deadlineEpochs": 80,
+      "inputExtensions": [
+        ".jpg",
+        ".jpeg",
+        ".png"
+      ],
+      "note": "The same job and the same models on a provider's GPU. Segmentation is work a card does well, but by how much is unmeasured here, so treat these two rows as the same result at different speeds until there are numbers."
+    },
     "transcode:v1": {
       "name": "Re-encode my video, smaller",
       "price": "0.5",
@@ -112,6 +155,23 @@
         ".m4v"
       ],
       "note": "Re-encodes each video to 480p and writes a thumbnail beside it. The original is untouched unless you choose a policy that replaces it."
+    },
+    "transcode-gpu:v1": {
+      "name": "Re-encode my video, smaller (on the card)",
+      "price": "0.5",
+      "outputs": [
+        "(named after your files)"
+      ],
+      "deadlineEpochs": 80,
+      "inputExtensions": [
+        ".mp4",
+        ".mov",
+        ".mkv",
+        ".avi",
+        ".webm",
+        ".m4v"
+      ],
+      "note": "The same transcode through the card's dedicated encoder (NVENC), which every card bought for sealing has. Of all the GPU rows here this is where the largest difference is most likely, but NVENC buys throughput rather than fidelity: at the same file size the picture is usually a little worse. Unmeasured here."
     },
     "transcribe:v1": {
       "name": "Transcribe my recordings, searchable by the moment",
@@ -134,6 +194,28 @@
         ".m4v"
       ],
       "note": "Writes three files back per recording: a transcript with the time at the start of every paragraph (read it, or order embeddings over it and search by meaning), subtitles any video player will load, and a short report saying how long the audio was and how fast it ran. On a processor this is roughly real time, so an hour of audio is an hour of compute."
+    },
+    "transcribe-gpu:v1": {
+      "name": "Transcribe my recordings, searchable by the moment (on the card)",
+      "price": "0.5",
+      "outputs": [
+        "(a transcript, subtitles and segments per recording)"
+      ],
+      "deadlineEpochs": 240,
+      "inputExtensions": [
+        ".mp3",
+        ".m4a",
+        ".wav",
+        ".flac",
+        ".ogg",
+        ".opus",
+        ".mp4",
+        ".mov",
+        ".mkv",
+        ".webm",
+        ".m4v"
+      ],
+      "note": "Measured on a storage provider's own hardware over the same 94.7 minutes of audio: 9x real time on two EPYC 7282 processors, 22x on an RTX A4000, and 15x for the larger large-v3-turbo model on that card. So the card is worth about 2.4x on the same model, and the better model gives some of that back for accuracy on names, which is what matters in an archive you intend to search. About 360 hours of audio a day on a card that would otherwise be idle. Needs about 6 GB of VRAM: an A4000, 3090, 4090 or V100 all clear it, and no H100 is required."
     },
     "term-count-proved:v1": {
       "name": "Count a term, and prove it ran on my data",
@@ -183,6 +265,24 @@
       ],
       "note": "Tesseract on the provider's processor, or a neural detector on its card where it has one. A scanned archive is large and its text is tiny, so moving the images to the compute costs far more than moving the compute to the images."
     },
+    "ocr-gpu:v1": {
+      "name": "Read my scanned pages into text (on the card)",
+      "price": "0.4",
+      "outputs": [
+        "(a -text.txt per file, plus a report)"
+      ],
+      "deadlineEpochs": 80,
+      "inputExtensions": [
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".tif",
+        ".tiff",
+        ".bmp",
+        ".pdf"
+      ],
+      "note": "A neural detector on the provider's card instead of tesseract on its processor. This is the one row where a GPU may buy accuracy as well as speed, because the classical engine degrades on skew, noise and low DPI where a neural one holds up. Both numbers are still missing — pages a minute and error rate on the same pages — and faster but no more accurate would be the weaker result."
+    },
     "extract:v1": {
       "name": "Pull the facts out of my documents",
       "price": "0.4",
@@ -195,6 +295,19 @@
         ".md"
       ],
       "note": "Finds the counterparty, date, amount, currency and payment terms in each document and returns them as JSON. A 1.5-billion-parameter model runs entirely on the provider's hardware with no network, which is the point: the documents that most need this are the ones that cannot be sent to someone else's API."
+    },
+    "extract-gpu:v1": {
+      "name": "Pull the facts out of my documents (on the card)",
+      "price": "0.4",
+      "outputs": [
+        "(a -fields.json per document, plus a report)"
+      ],
+      "deadlineEpochs": 120,
+      "inputExtensions": [
+        ".txt",
+        ".md"
+      ],
+      "note": "The same extraction with the model's layers on the card. Token generation is bound by memory bandwidth rather than arithmetic, roughly 400 GB/s on an A4000 against perhaps 50 on a server processor, so expect several times faster and not the twenty people assume on hearing GPU. This image has not been built successfully yet, so no provider can currently take it."
     }
   },
   "policies": [

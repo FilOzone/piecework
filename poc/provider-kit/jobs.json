@@ -218,5 +218,28 @@
       ".txt",
       ".md"
     ]
+  },
+  "image-clean:v1": {
+    "name": "Take the people, or the background, out of my photographs",
+    "dockerImage": "piecework/image-clean:v1",
+    "outputs": "*",
+    "price": "0.4",
+    "inputExtensions": [
+      ".jpg",
+      ".jpeg",
+      ".png"
+    ]
+  },
+  "image-clean-gpu:v1": {
+    "name": "Take the people, or the background, out of my photographs (on the card)",
+    "gpu": true,
+    "dockerImage": "piecework/image-clean-gpu:v1",
+    "outputs": "*",
+    "price": "0.4",
+    "inputExtensions": [
+      ".jpg",
+      ".jpeg",
+      ".png"
+    ]
   }
 }

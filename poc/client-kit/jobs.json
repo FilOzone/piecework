@@ -37,6 +37,18 @@
       ".csv"
     ]
   },
+  "image-clean:v1": {
+    "name": "Take the people, or the background, out of my photographs",
+    "outputs": [
+      "(a -clean.png and -mask.png per file, plus a report)"
+    ],
+    "inputExtensions": [
+      ".jpg",
+      ".jpeg",
+      ".png"
+    ],
+    "deadlineEpochs": 80
+  },
   "term-count-proved:v1": {
     "name": "Count a term, and prove it ran on my data",
     "outputs": [
