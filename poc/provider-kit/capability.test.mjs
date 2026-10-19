@@ -2,7 +2,7 @@
 // (not `node --test provider-kit/` — that sweeps up test-client.mjs, which is a client, not a test)
 import test from "node:test";
 import assert from "node:assert/strict";
-import { parseGpu, whyNotRunnable } from "./capability.mjs";
+import { parseGpu, whyNotRunnable, whyProverMismatched } from "./capability.mjs";
 
 test("reads a real nvidia-smi line", () => {
   assert.deepEqual(parseGpu("NVIDIA RTX A4000, 16376\n"), { name: "NVIDIA RTX A4000", vramGb: 15 });
@@ -54,4 +54,50 @@ test("exactly enough VRAM is enough", () => {
 
 test("minVramGb implies a card is needed even without gpu:true", () => {
   assert.match(whyNotRunnable({ minVramGb: 10 }, null), /needs a GPU/);
+});
+
+// ---------------------------------------------------------------------------------------------------
+// The prover's key against the catalogue's. This is the state a provider actually reported being in:
+// binary built at one commit, catalogue pulled from a later one.
+// ---------------------------------------------------------------------------------------------------
+
+const BOUND = "0x002faeef6f22ecb5f451643ff42c37ec420eb37f4e535ddcf14f72d0c6942d47";
+const OLD = "0x0038c8f3827c1ba3c9396591d54c84aec5c15f8c24a39f7258734a2f8e9ad45e";
+
+test("an unproved job never consults the prover", () => {
+  // Most of the catalogue is not proved, and those jobs must not be blocked by a prover that cannot even
+  // be read -- a provider with no prover built should still serve OCR.
+  assert.equal(whyProverMismatched({ name: "ocr" }, null), null);
+  assert.equal(whyProverMismatched({ name: "ocr" }, OLD), null);
+});
+
+test("a matching key is accepted", () => {
+  assert.equal(whyProverMismatched({ prove: true, vkey: BOUND }, BOUND), null);
+});
+
+test("case does not decide whether a proof is refused", () => {
+  // Keys travel through JSON, logs and a Rust println. A capitalisation difference refusing a job would be
+  // a maddening fault to find.
+  assert.equal(whyProverMismatched({ prove: true, vkey: BOUND.toUpperCase() }, BOUND), null);
+  assert.equal(whyProverMismatched({ prove: true, vkey: BOUND }, BOUND.toUpperCase()), null);
+});
+
+test("a stale prover is declined, naming both keys", () => {
+  const why = whyProverMismatched({ prove: true, vkey: BOUND }, OLD);
+  assert.match(why, new RegExp(BOUND));
+  assert.match(why, new RegExp(OLD));
+  // The provider has to be told what to do, not just that something is wrong.
+  assert.match(why, /rebuild/);
+});
+
+test("an unreadable prover is declined rather than assumed good", () => {
+  // The dangerous default: if the key cannot be read, proving anyway spends ten minutes to be refused.
+  const why = whyProverMismatched({ prove: true, vkey: BOUND }, null);
+  assert.match(why, /could not read/);
+});
+
+test("a proved job with no key in the catalogue is not blocked", () => {
+  // Nothing to compare against, so nothing to contradict -- this guards the check from refusing jobs it
+  // has no opinion about.
+  assert.equal(whyProverMismatched({ prove: true }, OLD), null);
 });

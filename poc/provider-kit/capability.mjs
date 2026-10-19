@@ -44,3 +44,30 @@ export function whyNotRunnable(spec, gpu) {
   }
   return null;
 }
+
+/// Why this provider's prover cannot be trusted to serve a job, as a sentence, or null if it can.
+///
+/// The catalogue says which verification key a proved job carries; the prover binary decides what key the
+/// proof actually gets. Those are two different things and they drift: the binary is built once and the
+/// catalogue is pulled, so a provider who pulls without rebuilding has a prover that proves the old guest
+/// against the new catalogue entry.
+///
+/// Nothing catches that today until the chain does. The proof is produced correctly, takes ten minutes,
+/// and `commitOutputs` answers ProofRejected because the key in the journal is not the key the job named —
+/// which looks exactly like forgery and costs the provider the job. A provider reported precisely this
+/// state: "its prover binary is still the one built at 51fd252, so it doesn't match the keys in the new
+/// catalogue". He was right, and nothing in the kit would have told him.
+export function whyProverMismatched(spec, actualVkey) {
+  if (!spec?.prove || !spec?.vkey) return null;
+  if (!actualVkey) {
+    return "needs a proof, and I could not read my own prover's verification key to check it matches the "
+      + "catalogue. Not taking the job: a proof under the wrong key is refused on chain after ten minutes "
+      + "and looks like a forgery.";
+  }
+  if (actualVkey.toLowerCase() !== spec.vkey.toLowerCase()) {
+    return `is listed under ${spec.vkey} and my prover produces ${actualVkey}. My binary is older than my `
+      + "catalogue — a `git pull` without a rebuild does this. Not taking the job: the proof would be "
+      + "correct, take ten minutes, and be refused on chain for carrying a key this job never named.";
+  }
+  return null;
+}

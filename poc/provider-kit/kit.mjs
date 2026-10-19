@@ -28,7 +28,7 @@ import {
   createPublicClient, createWalletClient, http, fallback, keccak256, toHex, hexToBytes, encodeAbiParameters, encodePacked, decodeEventLog,
   getAddress, formatUnits, concat, hashDomain,
 } from "viem";
-import { parseGpu, whyNotRunnable } from "./capability.mjs";
+import { parseGpu, whyNotRunnable, whyProverMismatched } from "./capability.mjs";
 
 const EIP712_DOMAIN = [{ name: "name", type: "string" }, { name: "version", type: "string" },
   { name: "chainId", type: "uint256" }, { name: "verifyingContract", type: "address" }];
@@ -208,6 +208,13 @@ async function runJob(ev) {
   // because a model that does not fit does not run at all, where "slower" merely misses a deadline.
   const cannotRun = whyNotRunnable(spec, await gpuInfo());
   if (cannotRun) return say(`Job #${jobId}: "${spec.name}" ${cannotRun}`);
+
+  // And does my prover still agree with my catalogue? Asked before the ten minutes, not after.
+  if (spec.prove) {
+    say(`Job #${jobId}: checking my prover's key against the catalogue before starting…`);
+    const mismatch = whyProverMismatched(spec, await proverVkey(spec));
+    if (mismatch) return say(`Job #${jobId}: "${spec.name}" ${mismatch}`);
+  }
 
   // A retry must resume, not start again. Delivery and payment are two transactions, and the second one can
   // fail on its own — a dropped RPC request is enough. The results are already in the client's data set by
@@ -716,6 +723,26 @@ const gpuInfo = () => (gpuProbe ??= execFile("nvidia-smi",
   ["--query-gpu=name,memory.total", "--format=csv,noheader,nounits"])
   .then(({ stdout }) => parseGpu(stdout))
   .catch(() => null));
+
+// What key this provider's prover actually produces, asked of the binary rather than assumed from the
+// catalogue, and remembered per guest because the answer costs a couple of minutes to get.
+//
+// Paid once, when the first proved job of that kind arrives, against ten minutes of proving and a refused
+// payment every time it is wrong. Nothing is mounted but the repository and the circuit cache: --vkey runs
+// the setup and prints, it does not touch a job.
+const proverKeys = new Map();
+const proverVkey = (spec) => {
+  const guest = String(spec.guest ?? "bound");
+  if (!proverKeys.has(guest)) {
+    proverKeys.set(guest, execFile("docker", ["run", "--rm",
+      "-v", `${PROVER_REPO}:/work:ro`, "-v", `${PROVER_CACHE}:/root/.sp1`,
+      "-w", "/work/zk/sp1", spec.proverImage ?? "piecework/sp1:v6",
+      "./target/release/piecework", "--vkey", "--guest", guest], { maxBuffer: 1 << 24 })
+      .then(({ stdout }) => (stdout.match(/0x[0-9a-fA-F]{64}/) ?? [null])[0])
+      .catch(() => null));
+  }
+  return proverKeys.get(guest);
+};
 
 const health = { checkedAt: null, curio: null, gas: null, images: {}, block: null, gpu: null };
 async function checkHealth(verbose) {
