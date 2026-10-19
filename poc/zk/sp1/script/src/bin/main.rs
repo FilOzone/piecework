@@ -46,8 +46,8 @@ struct Cli {
     /// works when the machine cannot hold the wrap.
     #[arg(long, default_value = "groth16")] mode: String,
     /// Which guest: `bound` derives the pieces' Filecoin CIDs and the chain checks them against PDP;
-    /// `attested` hashes the inputs flat, which is eight times cheaper to prove and binds to nothing the
-    /// chain can verify. Different programs, so different verification keys — read each with --vkey.
+    /// `attested` hashes the inputs flat, which measures four times cheaper to prove and binds to nothing
+    /// the chain can verify. Different programs, so different keys — read each with --vkey.
     #[arg(long, default_value = "bound")] guest: String,
     #[arg(long, default_value = "sealing")] term: String,
     /// Where to write the job's output. The provider stores whatever lands here as a piece, and the
@@ -74,11 +74,12 @@ async fn main() -> anyhow::Result<()> {
     // Named rather than numbered, and rejected rather than defaulted: silently proving the wrong guest
     // produces a valid proof under a key no catalogue entry names, which is indistinguishable from forgery
     // at the point it is refused.
-    let elf = match cli.guest.as_str() {
-        "bound" => ELF,
-        "attested" => ELF_FLAT,
+    let attested = match cli.guest.as_str() {
+        "bound" => false,
+        "attested" => true,
         other => anyhow::bail!("--guest must be `bound` or `attested`, not `{other}`"),
     };
+    let elf = if attested { ELF_FLAT } else { ELF };
     if cli.vkey {
         let client = ProverClient::from_env().await;
         println!("{}", client.setup(elf).await?.verifying_key().bytes32());
@@ -90,10 +91,14 @@ async fn main() -> anyhow::Result<()> {
     stdin.write_vec(cli.term.as_bytes().to_vec());
     let mut total = 0usize;
     let mut occurrences = 0u64;
+    let mut digests: Vec<Vec<u8>> = Vec::with_capacity(cli.inputs.len());
     for p in &cli.inputs {
         let b = fs::read(p)?;
         total += b.len();
         occurrences += piecework_lib::count_occurrences(&b, cli.term.as_bytes());
+        // Only the attested report needs these, but computing them always keeps the two branches below
+        // symmetrical, and a flat sha256 of the input is nothing next to proving it.
+        digests.push(piecework_lib::sha256_digest(&b));
         stdin.write_vec(b);
     }
     println!("{} piece(s), {total} bytes, term {:?}", cli.inputs.len(), cli.term);
@@ -104,7 +109,16 @@ async fn main() -> anyhow::Result<()> {
     // and cost another ten minutes.
     if let Some(dir) = &cli.out {
         fs::create_dir_all(dir)?;
-        let body = piecework_lib::report(&cli.term, occurrences, cli.inputs.len());
+        // Must match the guest's choice exactly. These bytes become a piece, the contract derives that
+        // piece's CID as the output commitment, and the guest committed the CID of whatever *it* hashed.
+        // Writing the bound report for an attested run produced a different file, a different CID, and
+        // `ProofRejected` after 499 seconds of correct proving — a failure that reads as a bad proof and
+        // is a one-line disagreement between the host and the guest about which report to write.
+        let body = if attested {
+            piecework_lib::report_attested(&cli.term, occurrences, cli.inputs.len(), &digests)
+        } else {
+            piecework_lib::report(&cli.term, occurrences, cli.inputs.len())
+        };
         let path = dir.join("term-count.txt");
         fs::write(&path, &body)?;
         println!("wrote {} ({} bytes)", path.display(), body.len());
@@ -139,6 +153,23 @@ async fn main() -> anyhow::Result<()> {
         _ => client.prove(&pk, stdin).groth16().await?,
     };
     let pv = proof.public_values.to_vec();
+
+    // The journal's second field is the commitment to the output the guest produced. The provider is about
+    // to deliver the file this host wrote, and the contract will derive that file's CID and compare. If the
+    // two disagree the chain answers ProofRejected, which is indistinguishable from a forged proof and
+    // arrives after the whole proof has been paid for — so it is checked here, where it is free and the
+    // message can say what actually happened.
+    if let Some(dir) = &cli.out {
+        let body = fs::read(dir.join("term-count.txt"))?;
+        let expected = piecework_lib::keccak(&piecework_lib::piece_cid(&body));
+        if pv.len() >= 64 && pv[32..64] != expected {
+            anyhow::bail!(
+                "the output this host wrote does not match what the guest committed to.\n                   journal says : 0x{}\n  the file is  : 0x{}\n                 The guest and the host must produce byte-identical output. Delivering this would cost the \
+                 provider the job for what looks like a bad proof.",
+                hex(&pv[32..64]), hex(&expected));
+        }
+    }
+
     println!("vkey              : {}", pk.verifying_key().bytes32());
     println!("publicValues      : 0x{}", hex(&pv));
     println!("proofBytes        : 0x{}", hex(&proof.bytes()));

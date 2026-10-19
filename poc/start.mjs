@@ -41,8 +41,11 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const CONTRACTS = path.join(HERE, "..", "contracts");
 const ENV_PATH = `${process.env.PATH}:${process.env.HOME}/.foundry/bin:/usr/local/bin:/opt/homebrew/bin`;
 const XENV = { env: { ...process.env, PATH: ENV_PATH } };
-const WEB_PORT = 8080;
-const RPC_PORT = 8545;
+// Overridable so a local demo can run beside a --calibnet --storage-only instance, which is the one
+// arrangement this needs and could not do: both wanted 8080, and the second died with EADDRINUSE from a
+// bare node stack trace rather than saying what was already there.
+const WEB_PORT = Number(process.env.PIECEWORK_WEB_PORT ?? 8080);
+const RPC_PORT = Number(process.env.PIECEWORK_RPC_PORT ?? 8545);
 const ZERO = "0x0000000000000000000000000000000000000000";
 
 // ---------------------------------------------------------------- network
