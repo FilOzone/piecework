@@ -203,7 +203,7 @@
         ".webp",
         ".bmp"
       ],
-      "note": "The same restoration on a provider's GPU, where it takes seconds rather than minutes per photograph. Every output pixel passes through 23 residual blocks, so this is the job in the catalogue that a processor cannot really do at archive scale. Not yet measured on a card."
+      "note": "The same restoration on a provider's GPU. Measured on a storage provider's own T4: 1.2 seconds to restore a 320x320 image to 1280x1280, and 2.7 seconds for the job end to end. Every output pixel passes through 23 residual blocks, so this is the job in the catalogue a processor cannot really do at archive scale — ten thousand photographs is an afternoon on a card and out of the question without one."
     },
     "transcode:v1": {
       "name": "Re-encode my video, smaller",

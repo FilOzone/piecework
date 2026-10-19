@@ -2,12 +2,19 @@
 # Contract unchanged: inputs in /in (read-only), results in /out, run with --network none.
 #   docker build -f Dockerfile.gpu -t piecework/photo-restore-gpu:v1 .
 #
-# This is the row with the widest gap in the catalogue, and it is a gap in kind rather than degree. Every
-# output pixel passes through 23 residual-in-residual blocks, so a four-times upscale is hundreds of
-# gigaflops of convolution per photograph. Measured on a processor: 342 seconds for a 320x320 image, which
-# is a tenth of a megapixel. A real photograph is a hundred times larger and an archive is thousands of
-# them. On a card this is seconds. That is not a faster service, it is the difference between a service and
-# an impossibility.
+# Measured on a storage provider's own T4, on one 320x320 frame upscaled to 1280x1280:
+#
+#   restoring the image      1.2 s
+#   the job end to end       2.7 s   (model load and image I/O are the rest)
+#
+# Against 342 s for the same image on the development laptop's processor, inside a Docker VM. Do not read
+# that ratio as card against processor: it is a card against a laptop, which is the comparison this
+# repository already got wrong once for transcription and had to correct. The honest card-against-server
+# number needs photo-restore:v1 run on the provider's own EPYC box, and is not measured yet.
+#
+# What can be said without that number: every output pixel passes through 23 residual-in-residual blocks,
+# so a four-times upscale is hundreds of gigaflops of convolution per photograph, and 1.2 s a picture is
+# the difference between an archive of ten thousand being an afternoon and being out of the question.
 #
 # No architecture is pinned: nothing is compiled from source here, and the torch CUDA wheels already ship
 # kernels for Volta, Turing, Ampere, Ada and Hopper. That matters on a fleet holding three architectures at

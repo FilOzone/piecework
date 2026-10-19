@@ -35,7 +35,13 @@ ENV LD_LIBRARY_PATH=/usr/local/cuda/lib64/stubs
 # Left unset, the build compiles for every generation nvcc knows, two files at a time: 43 minutes and still
 # going, against under three with this and a parallel build. A provider waiting out the former would
 # reasonably conclude the thing was broken.
-ENV CMAKE_ARGS="-DGGML_CUDA=on -DCMAKE_CUDA_ARCHITECTURES=${CUDA_ARCH:-70;75;86}" CMAKE_BUILD_PARALLEL_LEVEL=32
+# Declared, or the default below is the only value this can ever take: an undeclared variable in a
+# Dockerfile expands to nothing, so ${CUDA_ARCH:-...} always fell through to the default and --build-arg
+# was accepted and ignored. BuildKit warns about it (UndefinedVar) and the build otherwise succeeds, which
+# is the worst combination -- a provider could pass an architecture, see no error, and get an image that
+# does not run on the card they passed it for.
+ARG CUDA_ARCH="70;75;86"
+ENV CMAKE_ARGS="-DGGML_CUDA=on -DCMAKE_CUDA_ARCHITECTURES=${CUDA_ARCH}" CMAKE_BUILD_PARALLEL_LEVEL=32
 RUN pip3 install --no-cache-dir --target=/site llama-cpp-python==0.3.2 huggingface-hub==0.26.2
 ARG REPO=Qwen/Qwen2.5-1.5B-Instruct-GGUF
 ARG FILE=qwen2.5-1.5b-instruct-q4_k_m.gguf
