@@ -164,20 +164,35 @@ async fn main() -> anyhow::Result<()> {
         let expected = piecework_lib::keccak(&piecework_lib::piece_cid(&body));
         if pv.len() >= 64 && pv[32..64] != expected {
             anyhow::bail!(
-                "the output this host wrote does not match what the guest committed to.\n                   journal says : 0x{}\n  the file is  : 0x{}\n                 The guest and the host must produce byte-identical output. Delivering this would cost the \
-                 provider the job for what looks like a bad proof.",
+                "the output this host wrote does not match what the guest committed to.\n  \
+                 journal says : 0x{}\n  the file is  : 0x{}\n  \
+                 The guest and the host must produce byte-identical output; delivering this would cost \
+                 the provider the job for what looks like a bad proof.",
                 hex(&pv[32..64]), hex(&expected));
         }
     }
 
     println!("vkey              : {}", pk.verifying_key().bytes32());
     println!("publicValues      : 0x{}", hex(&pv));
-    println!("proofBytes        : 0x{}", hex(&proof.bytes()));
+    // bytes() is only defined for the proof types a contract can verify, and panics inside the SDK for the
+    // others. --mode offers core and compressed precisely for the case where the machine cannot hold the
+    // wrap, so asking them for on-chain bytes killed the run *after* the proof had been produced: ten
+    // minutes of correct work thrown away at the last line, with a message about on-chain verification
+    // for a mode nobody claimed was on-chain. Both modes now end in a file.
+    let onchain = matches!(cli.mode.as_str(), "groth16" | "plonk");
+    let proof_bytes = onchain.then(|| proof.bytes());
+    match &proof_bytes {
+        Some(b) => println!("proofBytes        : 0x{}", hex(b)),
+        None => println!("proofBytes        : none — a {} proof is not verifiable on chain", cli.mode),
+    }
     if let Some(d) = cli.proof.parent() { if !d.as_os_str().is_empty() { fs::create_dir_all(d)?; } }
     fs::write(&cli.proof, serde_json::to_string_pretty(&serde_json::json!({
         "vkey": pk.verifying_key().bytes32(),
         "publicValues": format!("0x{}", hex(&pv)),
-        "proofBytes": format!("0x{}", hex(&proof.bytes())),
+        "mode": cli.mode,
+        // Null rather than absent, and rather than an empty string that would look like a proof of nothing:
+        // a reader has to be able to tell "this mode produces no on-chain bytes" from "the bytes are here".
+        "proofBytes": proof_bytes.as_ref().map(|b| format!("0x{}", hex(b))),
     }))?)?;
     println!("wrote {}", cli.proof.display());
     Ok(())

@@ -44,6 +44,11 @@ a{color:var(--accent)}
   .mark svg { margin-top: .06em; }
   .mark { flex: 0 0 auto; display: inline-flex; line-height: 0; }
   @media (max-width: 560px) { .mark svg { width: 34px; height: 34px; } .title { gap: 10px; } }
+.shots{display:flex;gap:10px;margin:8px 0 2px;flex-wrap:wrap}
+.shots figure{margin:0;display:flex;flex-direction:column;gap:4px}
+.shots figcaption{color:var(--ink-3);font-size:.72rem;text-transform:uppercase;letter-spacing:.05em}
+/* Bounded on purpose: a four-times upscale is 1280px wide and would otherwise set the table's width. */
+.shot{display:block;max-width:180px;max-height:180px;width:auto;height:auto;border-radius:6px;border:1px solid var(--line);background:var(--surface-2)}
 </style>
 </head>
 <body>

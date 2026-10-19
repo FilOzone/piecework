@@ -70,6 +70,39 @@ $("csaddr").textContent = CFG.computeService;
 
 // ---------------------------------------------------------------- drawing
 
+// Images are shown, not merely named.
+//
+// A restored photograph is the one kind of result where the filename tells the client nothing and the
+// picture tells them everything, and where "before and after, side by side" is the entire product. Nothing
+// else is inlined: a transcript rendered in a table cell would push the rest of the page off the screen.
+//
+// The before image is found by name rather than tracked: photo-restore writes <base>-restored.png and
+// image-clean writes <base>-clean.png, so the input is whatever file in the same data set shares that base.
+// Only within the data set currently open, because that is the only one whose file list this page holds.
+const IMAGE_OUT = /\.(png|jpe?g|webp|gif|bmp)$/i;
+const NAMED_AFTER_ITS_INPUT = /^(.*)-(restored|clean)\.png$/i;
+
+function shot(url, alt) {
+  return `<a href="${esc(url)}" target="_blank" rel="noopener"><img class="shot" loading="lazy" `
+    + `src="${esc(url)}" alt="${esc(alt)}"></a>`;
+}
+
+function outputCell(j, provider, inputsByBase) {
+  return (j.outputs ?? []).map((o) => {
+    const url = PW.fileUrl(j.provider, o.cid);
+    const link = `<a href="${esc(url)}" data-save="${esc(o.name)}" target="_blank" rel="noopener">`
+      + `${esc(o.name)}</a>`;
+    if (!IMAGE_OUT.test(o.name)) return link;
+    const after = `<figure>${shot(url, o.name)}<figcaption>after</figcaption></figure>`;
+    const base = NAMED_AFTER_ITS_INPUT.exec(o.name)?.[1];
+    const source = base && inputsByBase.get(base);
+    const before = source
+      ? `<figure>${shot(PW.fileUrl(provider, source.cid), source.name)}<figcaption>before</figcaption></figure>`
+      : "";
+    return `${link}<div class="shots">${before}${after}</div>`;
+  }).join("<br>");
+}
+
 function render() {
   $("task").innerHTML = busy ? `<div class="task"><b><span class="spin"></span>${esc(busy)}</b>
       <div class="muted">Each step is a real transaction on Filecoin Calibration and waits for a block, about 30 seconds.
@@ -356,6 +389,11 @@ function render() {
   }
 
   // jobs
+  // The client's own files, by name without extension, so a result can find the picture it came from.
+  // Outputs are excluded: a second pass over a restored photograph would otherwise match itself.
+  const inputsByBase = new Map(files
+    .filter(([, f]) => f.kind !== "output")
+    .map(([, f]) => [f.name.replace(/\.[^.]+$/, ""), f]));
   const list = Object.entries(jobs).sort((a, b) => Number(b[0]) - Number(a[0]));
   $("jobscard").hidden = !list.length;
   if (list.length) $("jobscard").innerHTML = `<h2>Your jobs</h2><div class="tw"><table>
@@ -365,7 +403,7 @@ function render() {
       <td><span class="pill ${esc(j.status)}">${esc(jobStatusText(j))}</span>
         ${j.status === "waiting" && blockNow && j.deadline > blockNow ? `<div class="muted">${jobTiming(j)}</div>`
           : j.status === "waiting" && blockNow ? '<div class="muted">deadline passed</div>' : ""}</td>
-      <td>${(j.outputs ?? []).map((o) => `<a href="${esc(PW.fileUrl(j.provider, o.cid))}" data-save="${esc(o.name)}" target="_blank" rel="noopener">${esc(o.name)}</a>`).join("<br>")}</td>
+      <td>${outputCell(j, p?.id, String(j.dataSetId) === String(set?.dataSetId) ? inputsByBase : new Map())}</td>
       <td>${j.tx ? `<a href="${esc(CFG.explorer + j.tx)}" target="_blank" rel="noopener">ordered</a>` : ""}
         ${j.paidTx ? ` · <a href="${esc(CFG.explorer + j.paidTx)}" target="_blank" rel="noopener">paid</a>` : ""}
         ${j.status === "waiting" && blockNow && j.deadline < blockNow ? `<div><button class="b" data-refund="${esc(id)}">Get my money back</button></div>` : ""}</td>
