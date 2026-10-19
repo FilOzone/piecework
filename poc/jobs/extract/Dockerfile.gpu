@@ -23,11 +23,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends python3 python3
 # satisfies the linker; the driver's own library is what gets loaded on the provider.
 RUN ln -s /usr/local/cuda/lib64/stubs/libcuda.so /usr/local/cuda/lib64/stubs/libcuda.so.1
 ENV LD_LIBRARY_PATH=/usr/local/cuda/lib64/stubs
-# CUDA_ARCHITECTURES=86 is Ampere, which covers the A4000 and the 3090 — the cards actually in question.
+# Which cards the compiled kernels will actually run on, and the one place that is easy to get wrong:
+# llama.cpp compiles its CUDA kernels here, so a card whose architecture is not in this list cannot run
+# this image at all, whatever its memory or speed.
+#
+# 70;75;86 is Volta, Turing and Ampere. That is deliberate rather than generous: the provider fleet this
+# was written for is three boxes holding 3x T4 (Turing, sm_75), 1x A4000 (Ampere, sm_86) and 3x V100
+# (Volta, sm_70). Building for 86 alone, as this did, produced an image that ran on exactly one of the
+# seven cards — and the failure is a runtime "no kernel image is available", not a build error, so it
+# would have been found by a provider rather than here.
 # Left unset, the build compiles for every generation nvcc knows, two files at a time: 43 minutes and still
 # going, against under three with this and a parallel build. A provider waiting out the former would
 # reasonably conclude the thing was broken.
-ENV CMAKE_ARGS="-DGGML_CUDA=on -DCMAKE_CUDA_ARCHITECTURES=${CUDA_ARCH:-86}" CMAKE_BUILD_PARALLEL_LEVEL=32
+ENV CMAKE_ARGS="-DGGML_CUDA=on -DCMAKE_CUDA_ARCHITECTURES=${CUDA_ARCH:-70;75;86}" CMAKE_BUILD_PARALLEL_LEVEL=32
 RUN pip3 install --no-cache-dir --target=/site llama-cpp-python==0.3.2 huggingface-hub==0.26.2
 ARG REPO=Qwen/Qwen2.5-1.5B-Instruct-GGUF
 ARG FILE=qwen2.5-1.5b-instruct-q4_k_m.gguf

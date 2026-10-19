@@ -1,0 +1,37 @@
+# PieceWork job: the same video index, on the GPU a sealing or farming rig already owns.
+# Contract unchanged: inputs in /in (read-only), results in /out, run with --network none.
+#   docker build -f Dockerfile.gpu -t piecework/video-index-gpu:v1 .
+#
+# This is the row where a card should matter most, and for a reason transcription did not have. Speech on
+# a 64-thread processor already runs at nine times real time, so the card is worth about 2.4x. Detection is
+# a convolutional forward pass for every frame examined, which a processor does a few times a second and a
+# card does hundreds — an archive that takes days on CPU takes hours.
+#
+# No architecture is pinned here because nothing is compiled from source: the torch CUDA wheels ship kernels
+# for Volta, Turing, Ampere, Ada and Hopper. That matters for a real fleet — three T4s (Turing, sm_75), an
+# A4000 (Ampere, sm_86) and three V100s (Volta, sm_70) are three different architectures, and an image
+# built for one of them fails on the others at runtime with "no kernel image is available", not at build.
+#
+# A T4 is the card this job wants: it was designed for inference, and it has the tensor cores for it at 70
+# watts. Three of them index three videos at once.
+#
+# Known limit, stated rather than discovered: decoding stays on the processor. OpenCV reads frames on the
+# CPU here, so on a fast card decode becomes the bottleneck rather than detection. NVDEC through ffmpeg is
+# the next step and would need the frames handed to torch without a round trip through host memory. The
+# report prints frames a second, so the ceiling will be visible as soon as anyone runs this on a card.
+FROM nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-pip libgl1 libglib2.0-0 \
+ && rm -rf /var/lib/apt/lists/*
+RUN pip3 install --no-cache-dir torch==2.5.1 torchvision==0.20.1 \
+ && pip3 install --no-cache-dir opencv-python-headless==4.10.0.84
+# Weights baked in: the job runs with no network at all.
+ENV TORCH_HOME=/models
+RUN python3 -c "import torchvision as tv; \
+    tv.models.detection.fasterrcnn_mobilenet_v3_large_fpn(\
+      weights=tv.models.detection.FasterRCNN_MobileNet_V3_Large_FPN_Weights.COCO_V1)"
+ENV DEVICE=cuda SAMPLE_FPS=1 SCORE=0.5
+COPY index.py /app/index.py
+LABEL org.piecework.job="video-index-gpu" org.piecework.inputs="/in/*.mp4 /in/*.mov /in/*.mkv" \
+      org.piecework.outputs="/out/*-index.txt /out/video-index-report.txt"
+ENTRYPOINT ["python3", "/app/index.py"]

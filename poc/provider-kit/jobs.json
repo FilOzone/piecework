@@ -242,5 +242,63 @@
       ".jpeg",
       ".png"
     ]
+  },
+  "video-index:v1": {
+    "name": "Index what is in my video",
+    "dockerImage": "piecework/video-index:v1",
+    "outputs": "*",
+    "price": "0.6",
+    "inputExtensions": [
+      ".mp4",
+      ".mov",
+      ".mkv",
+      ".webm",
+      ".avi",
+      ".m4v"
+    ]
+  },
+  "video-index-gpu:v1": {
+    "name": "Index what is in my video (on the card)",
+    "gpu": true,
+    "dockerImage": "piecework/video-index-gpu:v1",
+    "outputs": "*",
+    "price": "0.6",
+    "inputExtensions": [
+      ".mp4",
+      ".mov",
+      ".mkv",
+      ".webm",
+      ".avi",
+      ".m4v"
+    ],
+    "minVramGb": 4
+  },
+  "photo-restore:v1": {
+    "name": "Enlarge and clean up my photographs",
+    "dockerImage": "piecework/photo-restore:v1",
+    "outputs": "*",
+    "price": "0.6",
+    "inputExtensions": [
+      ".jpg",
+      ".jpeg",
+      ".png",
+      ".webp",
+      ".bmp"
+    ]
+  },
+  "photo-restore-gpu:v1": {
+    "name": "Enlarge and clean up my photographs (on the card)",
+    "gpu": true,
+    "dockerImage": "piecework/photo-restore-gpu:v1",
+    "outputs": "*",
+    "price": "0.6",
+    "inputExtensions": [
+      ".jpg",
+      ".jpeg",
+      ".png",
+      ".webp",
+      ".bmp"
+    ],
+    "minVramGb": 4
   }
 }

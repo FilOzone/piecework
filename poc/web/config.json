@@ -139,6 +139,72 @@
       ],
       "note": "The same job and the same models on a provider's GPU. Segmentation is work a card does well, but by how much is unmeasured here, so treat these two rows as the same result at different speeds until there are numbers."
     },
+    "video-index:v1": {
+      "name": "Index what is in my video",
+      "price": "0.6",
+      "outputs": [
+        "(an -index.txt per video, plus a report)"
+      ],
+      "deadlineEpochs": 240,
+      "inputExtensions": [
+        ".mp4",
+        ".mov",
+        ".mkv",
+        ".webm",
+        ".avi",
+        ".m4v"
+      ],
+      "note": "Watches the video once and writes down what is in it and when — a person at 00:04:12, a car at 00:07:30, a shot change just before. The index is small enough to read and search, which is the point: on one test the video was 24.5 MB and the index was 154 bytes, so the answer came back 159,193 times smaller than the question. That is the case where sending your video somewhere to be processed makes least sense. On a processor this runs at about a fifth of real time, so an hour of footage takes five; order the card version for anything larger than a clip."
+    },
+    "video-index-gpu:v1": {
+      "name": "Index what is in my video (on the card)",
+      "price": "0.6",
+      "outputs": [
+        "(an -index.txt per video, plus a report)"
+      ],
+      "deadlineEpochs": 240,
+      "inputExtensions": [
+        ".mp4",
+        ".mov",
+        ".mkv",
+        ".webm",
+        ".avi",
+        ".m4v"
+      ],
+      "note": "The same index on a provider's GPU. Detection is a forward pass for every frame examined, which is the kind of work a card does hundreds of times a second and a processor does a few — so unlike transcription, this is not a job that is merely faster on a card. Not yet measured on one."
+    },
+    "photo-restore:v1": {
+      "name": "Enlarge and clean up my photographs",
+      "price": "0.6",
+      "outputs": [
+        "(a -restored.png per photograph, plus a report)"
+      ],
+      "deadlineEpochs": 240,
+      "inputExtensions": [
+        ".jpg",
+        ".jpeg",
+        ".png",
+        ".webp",
+        ".bmp"
+      ],
+      "note": "Four times the width and height, with detail reconstructed rather than interpolated (Real-ESRGAN). Honest warning: on a processor this took 342 seconds for a 320x320 image, and a normal photograph is a hundred times larger. Order the card version unless your picture is tiny."
+    },
+    "photo-restore-gpu:v1": {
+      "name": "Enlarge and clean up my photographs (on the card)",
+      "price": "0.6",
+      "outputs": [
+        "(a -restored.png per photograph, plus a report)"
+      ],
+      "deadlineEpochs": 240,
+      "inputExtensions": [
+        ".jpg",
+        ".jpeg",
+        ".png",
+        ".webp",
+        ".bmp"
+      ],
+      "note": "The same restoration on a provider's GPU, where it takes seconds rather than minutes per photograph. Every output pixel passes through 23 residual blocks, so this is the job in the catalogue that a processor cannot really do at archive scale. Not yet measured on a card."
+    },
     "transcode:v1": {
       "name": "Re-encode my video, smaller",
       "price": "0.5",

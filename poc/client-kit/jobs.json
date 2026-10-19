@@ -49,6 +49,35 @@
     ],
     "deadlineEpochs": 80
   },
+  "video-index:v1": {
+    "name": "Index what is in my video",
+    "outputs": [
+      "(an -index.txt per video, plus a report)"
+    ],
+    "inputExtensions": [
+      ".mp4",
+      ".mov",
+      ".mkv",
+      ".webm",
+      ".avi",
+      ".m4v"
+    ],
+    "deadlineEpochs": 240
+  },
+  "photo-restore:v1": {
+    "name": "Enlarge and clean up my photographs",
+    "outputs": [
+      "(a -restored.png per photograph, plus a report)"
+    ],
+    "inputExtensions": [
+      ".jpg",
+      ".jpeg",
+      ".png",
+      ".webp",
+      ".bmp"
+    ],
+    "deadlineEpochs": 240
+  },
   "term-count-proved:v1": {
     "name": "Count a term, and prove it ran on my data",
     "outputs": [
