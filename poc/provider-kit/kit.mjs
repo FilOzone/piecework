@@ -28,6 +28,7 @@ import {
   createPublicClient, createWalletClient, http, fallback, keccak256, toHex, hexToBytes, encodeAbiParameters, encodePacked, decodeEventLog,
   getAddress, formatUnits, concat, hashDomain,
 } from "viem";
+import { parseGpu, whyNotRunnable } from "./capability.mjs";
 
 const EIP712_DOMAIN = [{ name: "name", type: "string" }, { name: "version", type: "string" },
   { name: "chainId", type: "uint256" }, { name: "verifyingContract", type: "address" }];
@@ -194,6 +195,19 @@ async function runJob(ev) {
     spec = { name: "a program the client brought", byo: true, seconds: byo.maxSeconds ?? 600,
       cpus: String(byo.cpus ?? 2), memory: String(byo.memory ?? "4g") };
   }
+
+  // Can this machine actually run it? Checked here, before accepting, rather than discovered by failing.
+  //
+  // A job marked gpu:true was accepted by any provider and then died inside `docker run --gpus` with a
+  // daemon error, after the client had already waited; one needing more VRAM than the card has died later
+  // still, somewhere inside the model. Both now cost seconds and say why.
+  //
+  // This is also what makes "only a provider with a card can take this" a real category instead of a label.
+  // Nothing a GPU computes is beyond a CPU -- the difference is always throughput -- so a GPU-only job is
+  // one whose requirement is written down and checked. VRAM is the honest requirement to write down,
+  // because a model that does not fit does not run at all, where "slower" merely misses a deadline.
+  const cannotRun = whyNotRunnable(spec, await gpuInfo());
+  if (cannotRun) return say(`Job #${jobId}: "${spec.name}" ${cannotRun}`);
 
   // A retry must resume, not start again. Delivery and payment are two transactions, and the second one can
   // fail on its own — a dropped RPC request is enough. The results are already in the client's data set by
@@ -687,7 +701,23 @@ async function settle(force = false) {
 
 // ---------------------------------------------------------------- health and dashboard
 
-const health = { checkedAt: null, curio: null, gas: null, images: {}, block: null };
+// What card this provider has, probed once and remembered.
+//
+// nvidia-smi is the only thing that answers this without starting a container, and its absence is the
+// honest signal that there is no usable GPU here: `docker run --gpus` needs the NVIDIA container toolkit,
+// which ships with the driver that provides nvidia-smi. A machine without it cannot run a GPU job however
+// many cards are physically in it.
+//
+// Reported in gigabytes because that is the number job specs are written against, and because VRAM is the
+// one hardware limit around here that is a hard wall rather than a slowdown: a model that does not fit does
+// not run at all. SP1's CUDA prover, for instance, asks for 24 GB before it will produce a core proof.
+let gpuProbe;
+const gpuInfo = () => (gpuProbe ??= execFile("nvidia-smi",
+  ["--query-gpu=name,memory.total", "--format=csv,noheader,nounits"])
+  .then(({ stdout }) => parseGpu(stdout))
+  .catch(() => null));
+
+const health = { checkedAt: null, curio: null, gas: null, images: {}, block: null, gpu: null };
 async function checkHealth(verbose) {
   const ping = await fetch(`${curio}/pdp/ping`).then((r) => r.status).catch(() => "unreachable");
   health.curio = ping === 200 ? "reachable" : `not reachable (${ping})`;
@@ -699,12 +729,22 @@ async function checkHealth(verbose) {
     const image = spec.prove ? (spec.proverImage ?? "piecework/sp1:v6") : spec.dockerImage;
     health.images[name] = { image, ready: await execFile("docker", ["image", "inspect", image]).then(() => true, () => false) };
   }
+  health.gpu = await gpuInfo();
   health.block = Number(await pub.getBlockNumber());
   health.checkedAt = new Date().toISOString();
   if (verbose) {
     say(`Curio PDP API: ${health.curio}.`);
     say(`Gas balance: ${health.gas} ${chain.nativeCurrency.symbol}.`);
-    for (const [name, x] of Object.entries(health.images)) say(`Job type "${name}": image ${x.image} ${x.ready ? "present" : "MISSING (build or pull it first)"}.`);
+    say(health.gpu
+      ? `GPU: ${health.gpu.name}, ${health.gpu.vramGb} GB. I can take the jobs that need one.`
+      : `GPU: none detected (nvidia-smi did not answer). Jobs marked as needing a card will be declined, `
+        + `which is the right outcome: taking one would waste the client's deadline before failing.`);
+    for (const [name, x] of Object.entries(health.images)) {
+      const needs = JOBS[name]?.gpu
+        ? (health.gpu ? "" : " — needs a GPU, which I do not have")
+        : "";
+      say(`Job type "${name}": image ${x.image} ${x.ready ? "present" : "MISSING (build or pull it first)"}${needs}.`);
+    }
   }
 }
 

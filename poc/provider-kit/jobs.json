@@ -119,7 +119,8 @@
       ".mkv",
       ".webm",
       ".m4v"
-    ]
+    ],
+    "minVramGb": 6
   },
   "transcode-gpu:v1": {
     "name": "Re-encode my video, smaller, on the GPU",
