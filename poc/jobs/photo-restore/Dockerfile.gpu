@@ -1,0 +1,32 @@
+# PieceWork job: the same restoration as photo-restore:v1, on the GPU a sealing or farming rig already owns.
+# Contract unchanged: inputs in /in (read-only), results in /out, run with --network none.
+#   docker build -f Dockerfile.gpu -t piecework/photo-restore-gpu:v1 .
+#
+# This is the row with the widest gap in the catalogue, and it is a gap in kind rather than degree. Every
+# output pixel passes through 23 residual-in-residual blocks, so a four-times upscale is hundreds of
+# gigaflops of convolution per photograph. Measured on a processor: 342 seconds for a 320x320 image, which
+# is a tenth of a megapixel. A real photograph is a hundred times larger and an archive is thousands of
+# them. On a card this is seconds. That is not a faster service, it is the difference between a service and
+# an impossibility.
+#
+# No architecture is pinned: nothing is compiled from source here, and the torch CUDA wheels already ship
+# kernels for Volta, Turing, Ampere, Ada and Hopper. That matters on a fleet holding three architectures at
+# once -- V100 (sm_70), T4 (sm_75), A4000 (sm_86) -- where an image built for one fails on the others at
+# runtime with "no kernel image is available" rather than at build time.
+#
+# VRAM is not the constraint: the generator is about 64 MB of weights and TILE bounds the activations, so
+# any 16 GB card holds this many times over. Raise TILE on a card with memory to spare -- fewer, larger
+# tiles mean fewer launches and less edge trimming -- and lower it if anything ever reports out of memory.
+FROM nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-pip curl \
+ && rm -rf /var/lib/apt/lists/*
+RUN pip3 install --no-cache-dir torch==2.5.1 \
+ && pip3 install --no-cache-dir pillow==11.0.0 numpy==2.1.3
+ARG WEIGHTS_URL=https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth
+RUN mkdir -p /models && curl -fsSL "$WEIGHTS_URL" -o /models/RealESRGAN_x4plus.pth
+ENV DEVICE=cuda WEIGHTS=/models/RealESRGAN_x4plus.pth TILE=512 OVERLAP=16
+COPY restore.py /app/restore.py
+LABEL org.piecework.job="photo-restore-gpu" org.piecework.inputs="/in/*.jpg /in/*.png" \
+      org.piecework.outputs="/out/*-restored.png /out/photo-restore-report.txt"
+ENTRYPOINT ["python3", "/app/restore.py"]
