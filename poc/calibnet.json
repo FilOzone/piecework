@@ -76,6 +76,13 @@
     "precompileProbe": {
       "address": "0xbccbe90228b56eebb2f3afa2478a3ea709f85e6b",
       "note": "Throwaway. Settles that FEVM implements modexp, ecAdd, ecMul and ecPairing, which a top-level eth_call cannot tell from a missing precompile — both return nothing."
+    },
+    "sp1UnboundVerifier": {
+      "address": "0x5D45aA3bc76dB362bE5f54B9dcCDe377C52916e3",
+      "tx": "0x5c8965921714bb249ad5b9f65e99305e9ad2de567d4f4db88d96b4a6ef316b25",
+      "block": 4172576,
+      "note": "IComputeProofVerifier adapter for the attested job: verifies the proof and the delivered output commitment, and does NOT check the input commitment against the piece CIDs ComputeService derived. Weaker claim, a quarter of the proving cost, a separate catalogue entry at a lower price.",
+      "checked": "sp1() read back from the deployed contract; contracts/test/RealProof.t.sol runs this adapter and the bound one over the same real proof, one accepting and one refusing (test_U1 against test_R4)."
     }
   },
   "note": "Adds the opt-in verifier: a client may name a verifier contract when posting a job, and the price is released only if that verifier is satisfied as well as the delivery condition. Naming none behaves exactly as the previous deployment did."

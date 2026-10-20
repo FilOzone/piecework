@@ -12,7 +12,7 @@
     "fwss": "0x02925630df557F957f70E112bA06e50965417CA0",
     "view": "0x1B68d64f01bAa42014B9774605867BF4eDC0320f",
     "computeProofVerifier": "0x9e7D951196d20AE23438A4E5420E56Ea0057380B",
-    "computeProofVerifierUnbound": null
+    "computeProofVerifierUnbound": "0x5D45aA3bc76dB362bE5f54B9dcCDe377C52916e3"
   },
   "faucets": {
     "tFIL": "https://faucet.calibnet.chainsafe-fil.io/funds.html",
