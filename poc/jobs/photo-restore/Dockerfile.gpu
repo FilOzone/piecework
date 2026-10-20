@@ -7,14 +7,16 @@
 #   restoring the image      1.2 s
 #   the job end to end       2.7 s   (model load and image I/O are the rest)
 #
-# Against 342 s for the same image on the development laptop's processor, inside a Docker VM. Do not read
-# that ratio as card against processor: it is a card against a laptop, which is the comparison this
-# repository already got wrong once for transcription and had to correct. The honest card-against-server
-# number needs photo-restore:v1 run on the provider's own EPYC box, and is not measured yet.
+# The same image on a development laptop's processor, idle, takes 17.6 s. So the card is worth about 15x
+# here, which is a real difference and not the two-hundred-fold one first reported: that figure came from
+# a CPU run taken while a zkVM prover was using the machine, and was wrong by a factor of twenty.
 #
-# What can be said without that number: every output pixel passes through 23 residual-in-residual blocks,
-# so a four-times upscale is hundreds of gigaflops of convolution per photograph, and 1.2 s a picture is
-# the difference between an archive of ten thousand being an afternoon and being out of the question.
+# Both numbers are still a laptop against a card. The honest card-against-server comparison needs
+# photo-restore:v1 on the provider's own EPYC box and does not exist yet.
+#
+# Scale it rather than trusting the small case: 17.6 s for a tenth of a megapixel is about 35 minutes for a
+# 12-megapixel photograph on a processor, against roughly two and a half on the card. For one picture that
+# is an annoyance; for an archive of ten thousand it is eight months against two and a half weeks.
 #
 # No architecture is pinned: nothing is compiled from source here, and the torch CUDA wheels already ship
 # kernels for Volta, Turing, Ampere, Ada and Hopper. That matters on a fleet holding three architectures at

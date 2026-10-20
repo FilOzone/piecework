@@ -2,10 +2,13 @@
 # Contract: inputs in /in (read-only), results in /out, run with --network none.
 #   docker build -t piecework/photo-restore:v1 .
 #
-# The CPU baseline, and this is the row where it is least adequate. Every output pixel passes through 23
-# residual-in-residual blocks, so one four-times upscale is hundreds of gigaflops of convolution — minutes
-# per photograph on a processor against about a second on a card. For an archive that is the difference
-# between a service and an impossibility, not the 2.4x a card is worth on speech.
+# The CPU baseline. Every output pixel passes through 23 residual-in-residual blocks, so one four-times
+# upscale is hundreds of gigaflops of convolution: 17.6 s for a 320x320 image here, which scales to about
+# 35 minutes for a 12-megapixel photograph. A card does the same work about fifteen times faster.
+#
+# An earlier version of this comment said 342 s and called the card's advantage two-hundred-fold. That CPU
+# run was taken while a zkVM prover had the machine, so it measured contention rather than convolution.
+# Measure on a quiet machine or do not measure.
 #
 # Real-ESRGAN's published weights, baked in so the job needs no network. The architecture is written out in
 # restore.py rather than imported: the usual package pulls basicsr, which imports a torchvision module

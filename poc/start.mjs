@@ -123,6 +123,9 @@ const PARAMS = {
       verifier: "computeProofVerifierUnbound",
       desc: "The same count and the same Groth16 proof, checked by the chain the same way — but the proof commits to a sha256 of each input rather than to its Filecoin piece CID, so the chain cannot tell whether the bytes counted were the pieces you pay to store. The digests are recorded in the delivering transaction and written into the result, so you can retrieve a piece and check it yourself afterwards. A quarter of the price because it is a quarter of the proving cost: 24 cycles a byte against 99. The difference between the two jobs is one comparison in one contract.",
       reads: "the .txt files you pick", writes: "term-count.txt" },
+    restore: { name: "Enlarge and clean up my photographs", image: "photo-restore:v1", price: U("0.6"), deadline: NET.deadlines.proved,
+      desc: "Four times the width and height, with the detail reconstructed rather than simply scaled up. Real-ESRGAN, running on the provider's machine next to the pictures. Every output pixel passes through 23 residual blocks, so a graphics card is worth about fifteen times a processor here: 17.6 seconds for a small image on this machine, 1.2 seconds for the same image on a provider's T4.",
+      reads: "the .jpg and .png files you pick", writes: "a -restored.png for each, plus a report" },
     late: { name: "Build a search index: see what happens if the provider misses the deadline", image: "indexer-slow:v1", price: U("0.5"), deadline: NET.deadlines.late,
       desc: "Same program as the search index, but the provider deliberately misses the deadline, to show what happens then: nobody is paid, and a \"Get my money back\" button appears.", reads: "your .txt files", writes: "nothing (late)" },
   },
@@ -190,6 +193,14 @@ JOB_SCRIPTS["term-count-attested:v1"] = {
   vkey: "0x0019f78dfa23d6ecc3140563c3746ba611461e81f5c70d9de052c22841d69cc0",
   output: "term-count.txt",
   inputs: (name) => /\.(txt|bin)$/.test(name) && !/^term-count/.test(name),
+};
+
+// Photographs, enlarged four times. The outputs are named after the inputs, so they are collected by
+// pattern rather than listed: see `outputs: "*"` where results are copied out.
+JOB_SCRIPTS["photo-restore:v1"] = {
+  dockerImage: "piecework/photo-restore:v1",
+  outputs: "*",
+  inputs: (name) => /\.(jpe?g|png)$/i.test(name) && !/-(restored|clean|mask)\.png$/i.test(name),
 };
 
 // ---------------------------------------------------------------- helpers
@@ -609,7 +620,14 @@ async function runJob(jobId, client, spec, inputPieceIds, deadline) {
     "alpine:3.20", "sh", "-c", spec.script], XENV);
   plog(`Job #${jobId}: the program finished in ${((Date.now() - t0) / 1000).toFixed(1)} s.`);
   const names = [];
-  for (const o of spec.outputs ?? [spec.output]) { // unique names in the data set
+  // Jobs whose outputs are named after their inputs cannot list them in advance: photo-restore writes
+  // <name>-restored.png and video-index writes <name>-index.txt, one per file the client picked. `outputs:
+  // "*"` means take whatever landed in /out, which is what the provider kit has always done. Without it
+  // this copied a fixed list and died on the first image job with ENOENT for a name nothing produced.
+  const produced = spec.outputs === "*"
+    ? fs.readdirSync(path.join(dir, "out")).sort()
+    : (spec.outputs ?? [spec.output]);
+  for (const o of produced) { // unique names in the data set
     let out = o, k = 2;
     while (fs.existsSync(path.join(clientDir(client), out))) out = o.replace(/(\.[^.]+)$/, ` (${k++})$1`);
     fs.copyFileSync(path.join(dir, "out", o), path.join(clientDir(client), out));
@@ -662,7 +680,9 @@ function onKitJobPaid({ jobId, outputPieceIds }) {
   const J = jobInfo[jobId];
   if (!J) return;
   const c = cl(J.client), spec = JOB_SCRIPTS[J.image];
-  const names = spec?.outputs ?? [spec?.output];
+  // A "*" job's output names are decided by the job, not the catalogue, so there is nothing to rename the
+  // kit's pieces to. Leave them as they are rather than renaming them to the string "*".
+  const names = spec?.outputs === "*" ? [] : (spec?.outputs ?? [spec?.output]);
   J.outputs = outputPieceIds.map((id, i) => {
     const p = c?.pieces[Number(id)];
     if (p && names[i] && p.name.startsWith("piece-")) {
@@ -1023,7 +1043,12 @@ function serve() {
         const owner = CAL ? url.searchParams.get("client") : current;
         const name = owner ? cl(owner)?.pieces[Number(url.pathname.split("/").pop())]?.name : undefined;
         if (!name || !fs.existsSync(path.join(clientDir(owner), name))) { res.writeHead(404); return res.end("unknown piece"); }
-        res.writeHead(200, { "content-type": "text/plain; charset=utf-8" });
+        // Typed by extension rather than always text/plain. Every result used to be a transcript or a
+        // report, and a photograph served as text/plain does not render in an <img> — the page would show
+        // a filename where the whole point of the job is the picture.
+        const kind = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+          ".webp": "image/webp", ".gif": "image/gif", ".bmp": "image/bmp" }[path.extname(name).toLowerCase()];
+        res.writeHead(200, { "content-type": kind ?? "text/plain; charset=utf-8" });
         return res.end(fs.readFileSync(path.join(clientDir(owner), name)));
       }
       if (req.method === "POST" && url.pathname.startsWith("/api/")) {

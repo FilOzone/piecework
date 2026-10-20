@@ -154,7 +154,7 @@
         ".avi",
         ".m4v"
       ],
-      "note": "Watches the video once and writes down what is in it and when — a person at 00:04:12, a car at 00:07:30, a shot change just before. The index is small enough to read and search, which is the point: on one test the video was 24.5 MB and the index was 154 bytes, so the answer came back 159,193 times smaller than the question. That is the case where sending your video somewhere to be processed makes least sense. On a processor this runs at about a fifth of real time, so an hour of footage takes five; order the card version for anything larger than a clip."
+      "note": "Watches the video once and writes down what is in it and when — a person at 00:04:12, a car at 00:07:30, a shot change just before. The index is small enough to read and search, which is the point: on one test the video was 24.5 MB and the index was 154 bytes, so the answer came back 159,193 times smaller than the question. That is the case where sending your video somewhere to be processed makes least sense. On a processor it runs at about 2.7 times real time, so an hour of footage is roughly 22 minutes of work."
     },
     "video-index-gpu:v1": {
       "name": "Index what is in my video (on the card)",
@@ -171,7 +171,7 @@
         ".avi",
         ".m4v"
       ],
-      "note": "The same index on a provider's GPU. Detection is a forward pass for every frame examined, which is the kind of work a card does hundreds of times a second and a processor does a few — so unlike transcription, this is not a job that is merely faster on a card. Not yet measured on one."
+      "note": "The same index on a provider’s GPU. Detection is a forward pass for every frame examined, which is work a card does well — but nobody has run this one on a card yet, so there is no number here and the processor version is the only measured option."
     },
     "photo-restore:v1": {
       "name": "Enlarge and clean up my photographs",
@@ -187,7 +187,7 @@
         ".webp",
         ".bmp"
       ],
-      "note": "Four times the width and height, with detail reconstructed rather than interpolated (Real-ESRGAN). Honest warning: on a processor this took 342 seconds for a 320x320 image, and a normal photograph is a hundred times larger. Order the card version unless your picture is tiny."
+      "note": "Four times the width and height, with detail reconstructed rather than interpolated (Real-ESRGAN). On a processor this took 17.6 seconds for a 320x320 image, which scales to roughly 35 minutes for a normal 12-megapixel photograph — so order the card version for anything bigger than a thumbnail, or for more than a handful."
     },
     "photo-restore-gpu:v1": {
       "name": "Enlarge and clean up my photographs (on the card)",
@@ -203,7 +203,7 @@
         ".webp",
         ".bmp"
       ],
-      "note": "The same restoration on a provider's GPU. Measured on a storage provider's own T4: 1.2 seconds to restore a 320x320 image to 1280x1280, and 2.7 seconds for the job end to end. Every output pixel passes through 23 residual blocks, so this is the job in the catalogue a processor cannot really do at archive scale — ten thousand photographs is an afternoon on a card and out of the question without one."
+      "note": "The same restoration on a provider’s GPU. Measured on a storage provider’s own T4: 1.2 seconds to take a 320x320 image to 1280x1280, and 2.7 seconds for the job end to end, against 17.6 seconds for the same image on a processor. About fifteen times, which over an archive is the difference between weeks and months."
     },
     "transcode:v1": {
       "name": "Re-encode my video, smaller",

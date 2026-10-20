@@ -171,6 +171,11 @@ table.ds td.mono{font:500 .78rem var(--mono);color:var(--ink-3);word-break:break
 .ds-wrap{overflow-x:auto}
 .jobcard{border:1px solid var(--line);border-radius:10px;padding:10px 14px;background:var(--surface-2);font-size:.95rem}
 body.down .offline{display:block}
+.shots{display:flex;gap:10px;margin:8px 0 2px;flex-wrap:wrap}
+.shots figure{margin:0;display:flex;flex-direction:column;gap:4px}
+.shots figcaption{opacity:.6;font-size:.72rem;text-transform:uppercase;letter-spacing:.05em}
+/* Bounded: a four-times upscale is 1280px wide and would otherwise set the width of the page. */
+.shot{display:block;max-width:180px;max-height:180px;width:auto;height:auto;border-radius:6px}
 </style>
 <body>
 <div class="wrap">
@@ -235,6 +240,32 @@ const EIP712Types = {
 
 let CFG, chain, pub, wal, me = null, usingDemo = false;
 let S = null, busy = false, tab = null, message = null, answers = null, lastQ = "", pick = "index";
+// An image result is shown, not named. For a restoration the filename says nothing and the picture says
+// everything, and before-and-after side by side is the whole point of the job. Text results stay links:
+// a transcript inlined here would push the page off the screen.
+//
+// The "before" is found by name rather than tracked, because it already is: photo-restore writes
+// <base>-restored.png and image-clean writes <base>-clean.png, so the input is whichever of the client's
+// own files shares that base. Outputs are excluded from the lookup so a second pass cannot match itself.
+const IMAGE_RESULT = /\.(png|jpe?g|webp|gif|bmp)$/i;
+const NAMED_AFTER_INPUT = /^(.*)-(restored|clean)\.png$/i;
+const pieceUrl = (id) => `/api/file/${id}?client=${me}`;
+
+function shots(j) {
+  const images = (j.outputs ?? []).filter((o) => IMAGE_RESULT.test(o.name));
+  if (!images.length) return "";
+  const inputs = new Map((S.files ?? [])
+    .filter((f) => f.kind !== "output")
+    .map((f) => [f.name.replace(/\.[^.]+$/, ""), f]));
+  return `<div class="shots">` + images.map((o) => {
+    const base = NAMED_AFTER_INPUT.exec(o.name)?.[1];
+    const src = base && inputs.get(base);
+    const before = src
+      ? `<figure><a href="${pieceUrl(src.pieceId)}" target="_blank" rel="noopener"><img class="shot" src="${pieceUrl(src.pieceId)}" alt="${esc(src.name)}"></a><figcaption>before</figcaption></figure>`
+      : "";
+    return before + `<figure><a href="${pieceUrl(o.pieceId)}" target="_blank" rel="noopener"><img class="shot" src="${pieceUrl(o.pieceId)}" alt="${esc(o.name)}"></a><figcaption>after</figcaption></figure>`;
+  }).join("") + `</div>`;
+}
 const accessSigs = {}; // session id -> signature proving the session is yours
 const startingSince = {}; // session id -> when the page first saw it starting
 
@@ -651,7 +682,7 @@ function jobPanel() {
     return `<div class="job"><div class="h"><b>#${j.id} · ${esc(j.name ?? "")}</b><span class="pill ${stage[0]}">${stage[1]}</span></div>
       ${j.status === "waiting" && j.stage !== "late" && j.stage !== "blocked" ? jobSteps(j.stage) : ""}
       <div class="muted">Price ${m(j.price)} ${CFG.token} · deadline block ${j.deadline}${j.status === "waiting" ? (left >= 0 ? ` (${dur(secs(left))} left)` : " (passed)") : ""}</div>
-      ${j.outputs?.length ? `<div>Result${j.outputs.length > 1 ? "s" : ""}: ${j.outputs.map((o) => `<a data-file="${o.pieceId}" style="cursor:pointer">${esc(o.name)}</a> <span class="muted">piece #${o.pieceId}</span>`).join(" · ")} <span class="muted">in your data set</span></div>` : ""}
+      ${j.outputs?.length ? `<div>Result${j.outputs.length > 1 ? "s" : ""}: ${j.outputs.map((o) => `<a data-file="${o.pieceId}" style="cursor:pointer">${esc(o.name)}</a> <span class="muted">piece #${o.pieceId}</span>`).join(" · ")} <span class="muted">in your data set</span></div>${shots(j)}` : ""}
       ${canExpire ? `<div><button class="b primary" data-act="expire" data-id="${j.id}" ${busy ? "disabled" : ""}>Get my money back</button></div>` : ""}</div>`;
   }).join("");
   const opts = Object.entries(J).map(([k, j]) => `<option value="${k}" ${k === pick ? "selected" : ""}>${esc(j.name)} — ${m(j.price)} ${CFG.token}, deadline ${dur(secs(j.deadline))}</option>`).join("");
@@ -709,6 +740,7 @@ async function refresh() {
   catch { document.body.classList.add("down"); }
   render();
 }
+
 
 document.addEventListener("click", async (e) => {
   const t = e.target.closest("[data-act],[data-file],#connect,#usedemo,#copyaddr,#tab-time,#tab-job");

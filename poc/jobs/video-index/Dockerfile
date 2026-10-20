@@ -2,10 +2,12 @@
 # Contract: inputs in /in (read-only), results in /out, run with --network none.
 #   docker build -t piecework/video-index:v1 .
 #
-# The CPU baseline, and the number the GPU variant has to beat. Detection is a convolutional forward pass
-# per frame, which is the shape of work where a card is tens of times faster rather than the two or three
-# it manages on speech — so unlike transcription, this is a row where the processor is genuinely the wrong
-# tool for an archive, not merely the slower one.
+# The CPU baseline, and the number the GPU variant has to beat: 2.7 frames a second here, which is 2.7
+# times real time at one frame sampled a second. An hour of video is about 22 minutes of work.
+#
+# An earlier version of this comment said 0.2 frames a second and concluded a processor could not do this
+# at all. That run shared the machine with a zkVM prover and was wrong by more than ten times. What the
+# card is worth here is still unmeasured.
 #
 # This is also the clearest case for running compute where the data already is: the input is a video and
 # the output is a few kilobytes of timeline. The report prints that ratio rather than asserting it.

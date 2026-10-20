@@ -2,10 +2,10 @@
 # Contract unchanged: inputs in /in (read-only), results in /out, run with --network none.
 #   docker build -f Dockerfile.gpu -t piecework/video-index-gpu:v1 .
 #
-# This is the row where a card should matter most, and for a reason transcription did not have. Speech on
-# a 64-thread processor already runs at nine times real time, so the card is worth about 2.4x. Detection is
-# a convolutional forward pass for every frame examined, which a processor does a few times a second and a
-# card does hundreds — an archive that takes days on CPU takes hours.
+# Detection is a convolutional forward pass for every frame examined, which is the shape of work a card
+# does well. How much better is not yet known: nobody has run this one on a card. The processor baseline,
+# measured on a quiet machine, is 2.7 frames a second — and an earlier claim of 0.2 came from a run that
+# shared the machine with a zkVM prover, so do not compare against that number if you find it quoted.
 #
 # No architecture is pinned here because nothing is compiled from source: the torch CUDA wheels ship kernels
 # for Volta, Turing, Ampere, Ada and Hopper. That matters for a real fleet — three T4s (Turing, sm_75), an
