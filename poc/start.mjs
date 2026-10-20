@@ -203,6 +203,27 @@ JOB_SCRIPTS["photo-restore:v1"] = {
   inputs: (name) => /\.(jpe?g|png)$/i.test(name) && !/-(restored|clean|mask)\.png$/i.test(name),
 };
 
+
+// What a piece is, asked of its own bytes.
+//
+// A piece uploaded through the Curio API arrives with no filename, so this machine invents one. Calling
+// every one of them .txt was harmless while every job read text, and silently wrong the moment a job
+// filtered on extension: a photograph uploaded from the browser client landed as piece-21.txt, and the
+// restoration job correctly reported that none of the pieces it was given were files it could read. The
+// bytes are in hand at the moment the name is chosen, so there is no reason to guess.
+function extensionFor(bytes) {
+  const b = Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes ?? []);
+  const at = (i, n) => b.subarray(i, i + n).toString("latin1");
+  if (b.length >= 8 && at(0, 8) === "\x89PNG\r\n\x1a\n") return ".png";
+  if (b.length >= 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return ".jpg";
+  if (b.length >= 12 && at(0, 4) === "RIFF" && at(8, 4) === "WEBP") return ".webp";
+  if (b.length >= 6 && /^GIF8[79]a$/.test(at(0, 6))) return ".gif";
+  if (b.length >= 2 && at(0, 2) === "BM") return ".bmp";
+  if (b.length >= 12 && at(4, 4) === "ftyp") return ".mp4";
+  if (b.length >= 4 && at(0, 4) === "%PDF") return ".pdf";
+  return ".txt";
+}
+
 // ---------------------------------------------------------------- helpers
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -786,8 +807,9 @@ async function curioApi(req, res, url) {
         [{ type: "address" }, { type: "uint256" }, { type: "string[]" }, { type: "string[]" }, { type: "bytes" }], createPayload);
       extraSets[dataSetId] = { payer, pieces: {} };
       ids.forEach((id, i) => {
-        const name = `piece-${id}.txt`;
-        fs.writeFileSync(path.join(clientDir(payer), `set${dataSetId}-${name}`), parked.get(cids[i]) ?? pieceBytes(cids[i]));
+        const bytes = parked.get(cids[i]) ?? pieceBytes(cids[i]);
+        const name = `piece-${id}${extensionFor(bytes)}`;
+        fs.writeFileSync(path.join(clientDir(payer), `set${dataSetId}-${name}`), bytes);
         extraSets[dataSetId].pieces[id] = { name, cid: cids[i], file: `set${dataSetId}-${name}` };
         parked.delete(cids[i]);
       });
@@ -828,9 +850,10 @@ async function curioApi(req, res, url) {
       const extra = extraSets[dataSetId];
       const c = extra ?? ST.clients[owner];
       ids.forEach((id, i) => {
-        const name = `piece-${id}.txt`;
+        const bytes = parked.get(cids[i]) ?? pieceBytes(cids[i]);
+        const name = `piece-${id}${extensionFor(bytes)}`;
         const file = extra ? `set${dataSetId}-${name}` : name;
-        fs.writeFileSync(path.join(clientDir(owner), file), parked.get(cids[i]) ?? pieceBytes(cids[i]));
+        fs.writeFileSync(path.join(clientDir(owner), file), bytes);
         c.pieces[id] = extra ? { name, cid: cids[i], file } : { name, cid: cids[i], kind: "output", tx: hash };
         parked.delete(cids[i]);
       });
