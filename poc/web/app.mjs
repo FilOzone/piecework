@@ -9,6 +9,18 @@ import {
 import { CID } from "https://cdn.jsdelivr.net/npm/multiformats@13.3.6/+esm";
 import { sp as SP, piece as Piece, chains as Chains } from "https://cdn.jsdelivr.net/npm/@filoz/synapse-core@0.9.1/+esm";
 
+// A job's `outputs` in the catalogue is a description for a person to read -- "(a -restored.png per
+// photograph, plus a report)" -- not a list of filenames. Using it as one gave a 417-byte report saved
+// under a sentence, and the 866 KB image beside it saved as "result-2" with no extension, which macOS
+// will not open at all.
+//
+// The page cannot know the real names: the provider assigns them when it stores the results, and nothing
+// sends them back. So the honest answer is to use no name rather than a wrong one, and let the save path
+// take the extension from the bytes' own content type.
+const looksLikeAFilename = (s) => typeof s === "string" && /^[^\s(]+\.[A-Za-z0-9]{1,5}$/.test(s);
+const outputName = (names, i) => (looksLikeAFilename(names?.[i]) ? names[i] : `result-${i + 1}`);
+
+
 const V = new URL(import.meta.url).searchParams.get("v") ?? "";
 const q = V ? `?v=${V}` : "";
 export const CFG = await fetch(`config.json${q}`).then((r) => r.json());
@@ -474,7 +486,7 @@ async function jobOutputs(jobId, dataSetId, type) {
   const outputs = [];
   for (const [i, pid] of (paid[0].args.outputPieceIds ?? []).entries()) {
     const raw = await pub.readContract({ address: C.pdp, abi: ABI.PDPVerifier, functionName: "getPieceCid", args: [BigInt(dataSetId), pid] });
-    outputs.push({ pieceId: String(pid), name: names[i] ?? `result-${i + 1}`, cid: CID.decode(hexToBytes(raw.data)).toString() });
+    outputs.push({ pieceId: String(pid), name: outputName(names, i), cid: CID.decode(hexToBytes(raw.data)).toString() });
   }
   return { outputs, paidTx: paid[0].transactionHash };
 }
@@ -686,7 +698,7 @@ export async function jobStatus(jobId, fromBlock, type) {
   const names = CFG.jobs[type]?.outputs ?? [];
   for (const [i, pid] of (paid[0]?.args.outputPieceIds ?? []).entries()) {
     const raw = await pub.readContract({ address: C.pdp, abi: ABI.PDPVerifier, functionName: "getPieceCid", args: [BigInt(out.dataSetId), pid] });
-    out.outputs.push({ pieceId: String(pid), name: names[i] ?? `result-${i + 1}`, cid: CID.decode(hexToBytes(raw.data)).toString() });
+    out.outputs.push({ pieceId: String(pid), name: outputName(names, i), cid: CID.decode(hexToBytes(raw.data)).toString() });
   }
   out.paidTx = paid[0]?.transactionHash;
   return out;
