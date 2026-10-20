@@ -126,3 +126,33 @@ Two build notes that cost an hour each:
   (`gnark-ignition-verifier`'s pseudo-version resolves to a git fetch that 404s). Without the feature, SP1
   uses its own prebuilt artifacts and the build succeeds.
 - `sp1-prover` 6.9.0 needs a newer `tempfile` than resolves by default: `cargo update -p tempfile`.
+
+## "couldn't read sp1-core-executor-runner-binary"
+
+The host build fails with:
+
+```
+couldn't read /usr/local/cargo/registry/src/index.crates.io-.../sp1-core-executor-runner-6.9.0/
+  target/sp1-native-bins/release/sp1-core-executor-runner-binary: No such file or directory
+```
+
+and it fails again on every retry, including after a `git pull`. Clean this one package and it builds:
+
+```bash
+docker run --rm -v "$PWD/poc:/work" -v piecework-cargo:/usr/local/cargo/registry \
+  -w /work/zk/sp1 piecework/sp1:v6 cargo clean --release -p sp1-core-executor-runner
+```
+
+Why it happens, because the error says none of it. `sp1-core-executor-runner` builds a helper binary
+*inside the cargo registry's own source directory* and reads it back. If an earlier build ran without the
+`piecework-cargo` volume mounted, it wrote that helper into a registry that vanished with the container —
+but left its build-script result cached in `poc/zk/sp1/target`, still pointing at the path where the helper
+used to be.
+
+Cargo would normally notice and rerun the build script. It cannot here: files unpacked from the registry
+carry a fixed 2006 timestamp, so the fingerprint never looks stale, and cargo reuses a cached result that
+refers to a file no longer on disk. Nothing about the error suggests a stale cache, which is why it reads
+as a broken dependency and survives a pull.
+
+Any machine with a target directory from a build that did not mount the volume will hit this. Diagnosed by
+the provider, on his machine, after it cost him two failed builds.

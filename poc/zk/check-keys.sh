@@ -45,7 +45,14 @@ echo "Reading the keys out of the committed guests…"
 keys=$(run './target/release/piecework --vkey --guest bound 2>/dev/null
             ./target/release/piecework --vkey --guest attested 2>/dev/null')
 bound=$(echo "$keys" | sed -n 1p); attested=$(echo "$keys" | sed -n 2p)
-case "$bound$attested" in 0x*0x*) ;; *) echo "FAIL could not read both keys (host build broken?)"; exit 1;; esac
+case "$bound$attested" in 0x*0x*) ;; *)
+  echo "FAIL could not read both keys — the host binary is missing or will not build."
+  echo "     If the build failed with \"couldn't read ...sp1-core-executor-runner-binary\", a stale"
+  echo "     build-script result is pointing at a helper that no longer exists, and cargo cannot see that"
+  echo "     it is stale because registry files carry a fixed 2006 timestamp. Clean that one package:"
+  echo "       docker run --rm -v \"\$PWD/poc:/work\" -v piecework-cargo:/usr/local/cargo/registry \\"
+  echo "         -w /work/zk/sp1 $IMAGE cargo clean --release -p sp1-core-executor-runner"
+  exit 1;; esac
 echo "  bound    $bound"
 echo "  attested $attested"
 

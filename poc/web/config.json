@@ -25,15 +25,29 @@
       "name": "@TippyFlits (ezpdpz-calib)",
       "address": "0xa3971A7234a3379A1813d9867B531e7EeB20ae07",
       "curioUrl": "https://calib.ezpdpz.net",
-      "note": "A PDP storage provider running Curio, in the UK. Registry id 9 on Calibration; it also runs the PieceWork provider kit, which is what lets it sell compute. Runs the six jobs it has images for; the newer ones are listed but greyed out until it has them.",
+      "note": "A PDP storage provider running Curio, in the UK. Registry id 9 on Calibration; it also runs the PieceWork provider kit, which is what lets it sell compute. Has every job image built, and runs the GPU ones on an NVIDIA T4, one at a time. The CPU-only video-index and photo-restore are deliberately not listed here: with a card on the machine there is no reason to offer the slow one.",
       "offers": [
         "pii-redact:v1",
         "embed:v1",
+        "embed-gpu:v1",
         "indexer:v1",
         "query:v1",
+        "image-clean:v1",
+        "image-clean-gpu:v1",
+        "video-index-gpu:v1",
+        "photo-restore-gpu:v1",
         "transcode:v1",
-        "transcribe:v1"
-      ]
+        "transcode-gpu:v1",
+        "transcribe:v1",
+        "transcribe-gpu:v1",
+        "term-count-proved:v1",
+        "term-count-attested:v1",
+        "ocr:v1",
+        "ocr-gpu:v1",
+        "extract:v1",
+        "extract-gpu:v1"
+      ],
+      "proving": true
     }
   ],
   "jobs": {
