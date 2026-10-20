@@ -32,8 +32,12 @@ cfg["providers"] = cfg.get("providers", []) + [{
     # This machine does run a prover, which is what makes the proof-backed job appear in the list for it.
     # James's node has no prover, so the same job stays hidden when he is selected.
     "proving": True,
+    # Only what this machine has images for. The image jobs were added on 20 October: photo-restore and
+    # video-index are the two whose argument is that a card helps, and they are tried here first precisely
+    # because nobody else has built them yet.
     "offers": ["pii-redact:v1", "embed:v1", "indexer:v1", "query:v1", "transcode:v1", "transcribe:v1",
-               "ocr:v1", "extract:v1", "term-count-proved:v1"],
+               "ocr:v1", "extract:v1", "term-count-proved:v1", "term-count-attested:v1",
+               "image-clean:v1", "photo-restore:v1", "video-index:v1"],
 }]
 # everything the local kit can run, including the two the public page does not offer
 for name, job in {
