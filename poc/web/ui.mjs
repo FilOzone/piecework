@@ -536,8 +536,17 @@ async function saveWithItsName(e) {
   try {
     const res = await fetch(a.href);
     if (!res.ok) throw new Error(`the provider answered ${res.status}`);
-    const url = URL.createObjectURL(await res.blob());
-    const tmp = Object.assign(document.createElement("a"), { href: url, download: name });
+    const blob = await res.blob();
+    // A result the page could not name is saved as "result-2" with no extension, and a file with no
+    // extension does not open: macOS offers no application for it and the client is left with a correct
+    // 1024x1024 PNG it cannot look at. The job catalogue describes its outputs in prose rather than naming
+    // them, so the page genuinely does not know -- but the bytes arrive with a content type, so ask them.
+    const EXT = { "image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp", "image/gif": ".gif",
+      "text/plain": ".txt", "application/json": ".json", "application/pdf": ".pdf", "video/mp4": ".mp4" };
+    const guessed = EXT[(blob.type || "").split(";")[0].trim()];
+    const saveAs = /\.[A-Za-z0-9]{1,5}$/.test(name) || !guessed ? name : name + guessed;
+    const url = URL.createObjectURL(blob);
+    const tmp = Object.assign(document.createElement("a"), { href: url, download: saveAs });
     document.body.append(tmp); tmp.click(); tmp.remove();
     setTimeout(() => URL.revokeObjectURL(url), 30_000);
   } catch {

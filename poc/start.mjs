@@ -927,6 +927,28 @@ async function recoverFromChain() {
     const outs = Object.entries(cl(j[0])?.pieces ?? {}).filter(([, p]) => p.jobId === id && !/first contract/.test(p.jobLabel ?? ""));
     const stage = { 1: "received", 2: "paid", 3: "refunded" }[Number(j[8])];
     jobInfo[id] = { client: j[0], name, image, stage, outputs: outs.map(([pid, p]) => ({ name: p.name, pieceId: Number(pid), cid: p.cid })) };
+    // Still posted, still inside its deadline, and nothing delivered: this process restarted while the job
+    // was open and nobody is going to run it. Recording the job and not running it is what happened to two
+    // real orders -- the client's page showed "running at the provider" for ninety minutes because the page
+    // only sees chain state, and the deadline passed with the money coming back and no explanation.
+    //
+    // Re-posting it to the same handler is safe: a job already delivered is Paid rather than Posted and
+    // does not reach here, and one this provider refuses will refuse again in seconds for the same reason.
+    if (Number(j[8]) === 1 && j[4] > latest) {
+      plog(`Job #${id}: open and undelivered when I restarted, ${j[4] - latest} blocks before its deadline. Picking it up again.`);
+      // Which pieces the job named exists only in the event: the contract stores them to derive the input
+      // commitment and keeps no getter. Scanned in windows because public nodes refuse a wide range.
+      let args = null;
+      for (let to = latest, n = 0; n < 45 && to > 0n && !args; to -= 300n, n++) {
+        const logs = await pub.getContractEvents({ address: C.cs, abi: ABI.ComputeService,
+          eventName: "JobPosted", args: { jobId: BigInt(id) },
+          fromBlock: to - 299n > 0n ? to - 299n : 0n, toBlock: to }).catch(() => []);
+        if (logs.length) args = logs[0].args;
+      }
+      if (args) onJobPosted(args);
+      else plog(`Job #${id}: open, but I could not find the order that created it, so I cannot tell which `
+        + `pieces it named. Leaving it; you can take the price back at the deadline.`);
+    }
   }
 }
 
