@@ -27,6 +27,9 @@ cfg["providers"] = cfg.get("providers", []) + [{
     "note": "The provider running on your own laptop.",
     "proving": True,
     "offers": ["video-gen:v1"],
+    # This stand-in serves /play/<cid>: a browser-playable rendering of a take, beside the exact bytes at
+    # /piece/<cid>. Real Curio does not, so only this entry claims it.
+    "playRoute": True,
 }]
 (out / "config.json").write_text(json.dumps(cfg, indent=2) + "\n")
 job = cfg["jobs"].get("video-gen:v1")

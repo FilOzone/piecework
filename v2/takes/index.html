@@ -38,8 +38,16 @@ input[type=number]{width:110px}
 textarea:focus,input:focus,select:focus{outline:none;border-color:var(--accent)}
 .drop{border:1.5px dashed var(--line);border-radius:11px;padding:22px;text-align:center;color:var(--ink-3)}
 .drop.over{border-color:var(--accent);color:var(--accent)}
-.thumbs{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
-.thumbs img{width:62px;height:62px;object-fit:cover;border-radius:7px;border:1px solid var(--line)}
+.thumbs{margin-top:12px}
+/* What is staged but not yet uploaded, listed rather than only shown: a thumbnail grid cannot tell you
+   that a file you dropped never arrived. */
+.staged{background:var(--surface-2);border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+.staged table{width:100%;border-collapse:collapse;margin-top:8px;font-size:.9rem}
+.staged td{padding:5px 8px 5px 0;border-top:1px solid var(--line);vertical-align:middle}
+.staged tr:first-child td{border-top:none}
+.staged .tn{width:40px;height:40px;object-fit:cover;border-radius:6px;display:block}
+.staged a{color:var(--accent)}
+.pill.bad{background:var(--bad-soft);color:var(--bad)}
 /* Balances: the three numbers that decide whether anything can happen at all. */
 .balances{display:flex;gap:10px;flex-wrap:wrap}
 .bal{flex:1 1 170px;background:var(--surface-2);border:1px solid var(--line);border-radius:10px;padding:11px 13px}
@@ -54,14 +62,28 @@ textarea:focus,input:focus,select:focus{outline:none;border-color:var(--accent)}
 .take:first-child{border-top:none}
 .take video{width:260px;border-radius:9px;background:#000;display:block}
 .take h3{margin:0 0 6px;font-size:1rem}
+/* Stands where the player would, at the player's size, so a take that a browser cannot decode does not
+   turn the card into a paragraph of explanation. */
+.noplay{width:260px;height:146px;border-radius:9px;background:var(--surface-2);border:1px dashed var(--line);
+  display:flex;align-items:center;justify-content:center;text-align:center;padding:10px;
+  color:var(--ink-3);font-size:.8rem;line-height:1.4}
 .lineage{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--ink-3);
   background:var(--surface-2);border:1px solid var(--line);border-radius:8px;padding:9px 11px;margin-top:9px;
   overflow-x:auto;white-space:pre}
 .parent{color:var(--accent)}
 .ok{color:var(--money)} .bad{color:var(--bad)}
 .steps{margin-top:10px;color:var(--ink-3);font-size:.88rem;min-height:1.2em}
+/* What is happening right now, where it cannot be missed: every step here is a real transaction that waits
+   for a block, and a page that looks idle while it waits is indistinguishable from one that has hung. */
+.task{border-left:4px solid var(--accent);background:var(--accent-soft);border-radius:0 10px 10px 0;padding:12px 16px;margin-bottom:16px}
+.task.err{border-color:var(--bad);background:var(--bad-soft)}
+.task.done{border-color:var(--money);background:var(--money-soft)}
+.spin{display:inline-block;width:12px;height:12px;border:2px solid var(--line);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite;vertical-align:-1px;margin-right:6px}
+@keyframes spin{to{transform:rotate(360deg)}}
+.jobrow{display:flex;gap:10px;align-items:baseline;padding:6px 0;border-top:1px solid var(--line);font-size:.9rem}
+.jobrow:first-child{border-top:none}
 a{color:var(--accent)}
-@media(max-width:620px){.take{grid-template-columns:1fr}.take video{width:100%}}
+@media(max-width:620px){.take{grid-template-columns:1fr}.take video,.noplay{width:100%}}
 </style>
 
 <div class="wrap">
@@ -105,6 +127,9 @@ a{color:var(--accent)}
     each input by its hash, the prompt you gave, and the take it was built on. You can check that yourself
     without trusting anyone.</p>
 
+  <div id="task"></div>
+  <div id="jobs"></div>
+
   <div class="card" id="connectcard">
     <h2>Start</h2>
     <p class="muted">Your wallet pays for storage and for each take. Filecoin Calibration, test tokens only.</p>
@@ -127,14 +152,16 @@ a{color:var(--accent)}
     <h2>Where your pictures live</h2>
     <div class="row" id="setpick"></div>
     <p class="muted" id="setnote" style="margin-top:10px"></p>
+    <div id="pieces"></div>
   </div>
 
   <div class="card" id="setupcard" hidden>
     <h2>Your pictures</h2>
-    <div class="drop" id="drop">Drop pictures here, or <label style="color:var(--accent);cursor:pointer">choose them<input type="file" id="picker" accept="image/*" multiple hidden></label></div>
-    <div class="thumbs" id="thumbs"></div>
+    <div class="drop" id="drop">Drop pictures here, or <label style="color:var(--accent);cursor:pointer">choose them<input type="file" id="picker" multiple hidden></label></div>
+    <div id="waiting"></div>
+    <p class="muted" id="uphint" style="margin-top:8px"></p>
     <h2 style="margin-top:18px">The prompt</h2>
-    <textarea id="prompt" rows="2" placeholder="a slow drift across the hills at dusk"></textarea>
+    <textarea id="prompt" rows="2"></textarea>
     <div class="row" style="margin-top:12px">
       <button class="b primary" id="make">Make a take</button>
       <span class="muted" id="cost"></span>
@@ -152,4 +179,6 @@ a{color:var(--accent)}
     <div class="steps" id="takesteps"></div>
   </div>
 </div>
-<script type="module" src="takes.mjs"></script>
+<!-- Loaded through the build's version, or the browser keeps serving the module it cached: the page
+     says it was rebuilt while the code running in it is yesterday's. -->
+<script type="module">import("./takes.mjs?v=" + V);</script>
