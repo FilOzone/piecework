@@ -31,6 +31,8 @@ do share most of their content.
 import hashlib
 import json
 import os
+import shutil
+import subprocess
 import sys
 import time
 
@@ -83,6 +85,48 @@ def next_version():
     return highest + 1
 
 
+class Encoder:
+    """H.264 in MP4, because that is the only thing a browser will actually play.
+
+    OpenCV's bundled ffmpeg carries no H.264 encoder -- avc1 and H264 both fail to open, leaving mp4v,
+    which is MPEG-4 Part 2. That produces a valid .mp4 that QuickTime opens and no browser can decode, so
+    the take arrived in the page as a player that never started and a download that would not open. ffmpeg
+    with libx264 is in the image for exactly this; if it is ever missing, fall back rather than fail, and
+    the video is still correct even where it is less playable.
+    """
+
+    def __init__(self, path, w, h, fps):
+        self.proc = None
+        self.writer = None
+        if shutil.which("ffmpeg"):
+            self.proc = subprocess.Popen(
+                ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+                 "-f", "rawvideo", "-pix_fmt", "bgr24", "-s", f"{w}x{h}", "-r", str(fps), "-i", "-",
+                 # yuv420p and faststart are what make it play in a browser rather than merely exist;
+                 # one thread keeps the bytes the same from one run to the next.
+                 "-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p",
+                 "-threads", "1", "-movflags", "+faststart", path],
+                stdin=subprocess.PIPE)
+        else:
+            print("no ffmpeg in this image: falling back to mp4v, which browsers cannot play", file=sys.stderr)
+            import cv2
+            self.writer = cv2.VideoWriter(path, cv2.VideoWriter_fourcc(*"mp4v"), fps, (w, h))
+
+    def write(self, frame):
+        if self.proc is not None:
+            self.proc.stdin.write(frame.tobytes())
+        else:
+            self.writer.write(frame)
+
+    def release(self):
+        if self.proc is not None:
+            self.proc.stdin.close()
+            if self.proc.wait() != 0:
+                raise RuntimeError("ffmpeg failed to encode the video")
+        else:
+            self.writer.release()
+
+
 def main():
     import cv2
     import numpy as np
@@ -128,13 +172,14 @@ def main():
     h, w = h - h % 2, w - w % 2
 
     out_path = os.path.join(OUT, f"version-{version}.mp4")
-    writer = cv2.VideoWriter(out_path, cv2.VideoWriter_fourcc(*"mp4v"), fps, (w, h))
+    writer = Encoder(out_path, w, h, fps)
     for frame in carried:
         writer.write(frame)
 
     # The new material: a slow move across each image in turn, seeded so the same inputs and the same
     # prompt give the same video. A client re-ordering the same job should not get a different answer.
-    rng = np.random.default_rng(int(s["seed"]) ^ (hash(s["prompt"]) & 0xFFFF))
+    prompt_seed = int.from_bytes(hashlib.sha256(str(s["prompt"]).encode()).digest()[:2], "big")
+    rng = np.random.default_rng(int(s["seed"]) ^ prompt_seed)
     per_image = max(1, int(round(fps * seconds / len(images))))
     for name in images:
         img = cv2.imread(os.path.join(IN, name))

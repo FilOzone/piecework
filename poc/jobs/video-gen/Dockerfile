@@ -9,7 +9,9 @@
 #
 # Small by design: opencv and numpy, no model weights, no network at run time.
 FROM python:3.12-slim
-RUN apt-get update && apt-get install -y --no-install-recommends libgl1 libglib2.0-0 \
+# ffmpeg is here for one reason: libx264. opencv-python-headless ships ffmpeg without an H.264 encoder,
+# so its only working MP4 codec is mp4v -- a valid file that no browser will play.
+RUN apt-get update && apt-get install -y --no-install-recommends libgl1 libglib2.0-0 ffmpeg \
  && rm -rf /var/lib/apt/lists/*
 RUN pip install --no-cache-dir opencv-python-headless==4.10.0.84 numpy==2.1.3
 ENV GENERATOR=motion DEVICE=cpu
