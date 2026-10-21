@@ -214,6 +214,30 @@ JOB_SCRIPTS["photo-restore:v1"] = {
 // filtered on extension: a photograph uploaded from the browser client landed as piece-21.txt, and the
 // restoration job correctly reported that none of the pieces it was given were files it could read. The
 // bytes are in hand at the moment the name is chosen, so there is no reason to guess.
+// The names the client signed into extraData, which is exactly where the chain reads them from. The HTTP
+// body does not carry them, so a piece used to be stored as piece-<id>.<sniffed type>: the data set showed
+// the right names on chain while this provider knew none of them. A job then never found a file called
+// prompt.json, ran with an empty prompt, and wrote a record naming "piece-0.jpg" as its source.
+function namesFromAddPayload(addPayload) {
+  try {
+    const [, keys, values] = decodeAbiParameters(
+      [{ type: "uint256" }, { type: "string[][]" }, { type: "string[][]" }, { type: "bytes" }], addPayload);
+    return keys.map((ks, i) => {
+      const at = ks.indexOf("name");
+      return at >= 0 ? values[i][at] : null;
+    });
+  } catch { return []; }
+}
+
+// The name the client sent with the piece, if it sent one. Only the basename is kept, so a name out of a
+// request can never point anywhere but this client's own directory.
+function givenName(piece) {
+  const n = String(piece?.metadata?.name ?? "").trim();
+  if (!n || n.includes("\0")) return null;
+  const base = n.split(/[\\/]/).pop();
+  return base && base !== "." && base !== ".." ? base : null;
+}
+
 function extensionFor(bytes) {
   const b = Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes ?? []);
   const at = (i, n) => b.subarray(i, i + n).toString("latin1");
@@ -224,6 +248,7 @@ function extensionFor(bytes) {
   if (b.length >= 2 && at(0, 2) === "BM") return ".bmp";
   if (b.length >= 12 && at(4, 4) === "ftyp") return ".mp4";
   if (b.length >= 4 && at(0, 4) === "%PDF") return ".pdf";
+  try { const t = b.toString("utf8").trim(); if (/^[{[]/.test(t)) { JSON.parse(t); return ".json"; } } catch { /* not json */ }
   return ".txt";
 }
 
@@ -455,10 +480,9 @@ async function prepareLocalClient() {
 
 // Add a job output (a file in the provider's storage) to the client's data set, signed by the provider:
 // FWSS accepts it only through ComputeService's authorizer, while the client has a job open with this provider.
-async function addOutputPieces(client, names, jobId) {
-  const c = cl(client);
+async function addOutputPieces(client, names, jobId, c = cl(client), onDisk = (n) => n) {
   const cids = [];
-  for (const n of names) cids.push(await FOC.pieceCid(fs.readFileSync(path.join(clientDir(client), n))));
+  for (const n of names) cids.push(await FOC.pieceCid(fs.readFileSync(path.join(clientDir(client), onDisk(n)))));
   const nonce = FOC.randomNonce();
   const signer = CAL ? providerAcct : { signTypedData: (args) => wallet.signTypedData({ account: A.provider, ...args }) };
   const sig = await FOC.signAddPieces(signer, { chainId: NET.chain.id, fwss: C.fwss, clientDataSetId: BigInt(c.clientDataSetId), nonce, cids: cids.map((x) => x.hex), names });
@@ -466,7 +490,8 @@ async function addOutputPieces(client, names, jobId) {
   const r = await send(providerAcct, C.pdp, ABI.PDPVerifier, "addPieces",
     [BigInt(c.dataSetId), ZERO, cids.map((x) => ({ data: x.hex })), FOC.addPiecesExtraData(nonce, sig, names)], `add ${names.join(", ")}`);
   const pieces = names.map((name, i) => {
-    c.pieces[first + i] = { name, cid: cids[i].text, kind: "output", tx: r.tx, jobId: Number(jobId) };
+    c.pieces[first + i] = { name, cid: cids[i].text, kind: "output", tx: r.tx, jobId: Number(jobId),
+                            file: onDisk(name) };
     return { name, pieceId: first + i, cid: cids[i].text };
   });
   saveState();
@@ -585,7 +610,24 @@ async function ask(sessionId, question, signature) {
 // ---------------------------------------------------------------- provider: jobs
 
 const jobInfo = {}; // id -> { client, name, image, stage, output }
-function onJobPosted({ jobId, client, provider, imageDigest, inputPieceIds, price, deadline }) {
+
+// The record for whichever data set a job names: the provider's own, or one a client created through the
+// Curio API. The second kind is missing the two ids needed to add pieces to it, which Warm Storage knows.
+async function setRecord(client, dataSetId) {
+  const id = Number(dataSetId);
+  const extra = extraSets[id];
+  if (!extra) return cl(client);
+  // Kept as a decimal string, never a Number: it is a 256-bit value and Number() silently rounds it to
+  // about seventeen digits, which signs the wrong EIP-712 digest and Warm Storage answers Unauthorized.
+  if (typeof extra.clientDataSetId !== "string" || extra.dataSetId === undefined) {
+    const d = await read(C.view, ABI.FilecoinWarmStorageServiceStateView, "getDataSet", [BigInt(id)]);
+    extra.clientDataSetId = d.clientDataSetId.toString();
+    extra.dataSetId = id;
+    saveState();
+  }
+  return extra;
+}
+function onJobPosted({ jobId, client, provider, imageDigest, dataSetId, inputPieceIds, price, deadline }) {
   if (provider !== A.provider) return;
   const image = IMAGE_BY_DIGEST[imageDigest];
   const spec = JOB_SCRIPTS[image];
@@ -594,13 +636,18 @@ function onJobPosted({ jobId, client, provider, imageDigest, inputPieceIds, pric
   plog(`New job #${jobId}: "${name}" for ${fmt(price)} ${NET.token}, deadline block ${deadline}.`);
   if (!spec) return plog(`I don't run ${image}; ignoring job #${jobId}.`);
   if (EXTERNAL_KIT) return plog(`Job #${jobId}: handed to the provider kit, which runs it and stores the results through the Curio API.`);
-  runJob(jobId, client, spec, inputPieceIds, deadline).catch((e) => plog(`Job #${jobId} failed: ${reason(e)}`));
+  runJob(jobId, client, spec, inputPieceIds, deadline, dataSetId).catch((e) => plog(`Job #${jobId} failed: ${reason(e)}`));
 }
 
-async function runJob(jobId, client, spec, inputPieceIds, deadline) {
+async function runJob(jobId, client, spec, inputPieceIds, deadline, dataSetId) {
   const J = jobInfo[jobId];
-  const c = cl(client);
-  if (!c) return plog(`Job #${jobId}: I don't hold a data set for this client.`);
+  const c = await setRecord(client, dataSetId);
+  if (!c) return plog(`Job #${jobId}: I don't hold data set #${dataSetId} for this client.`);
+  // Pieces of a data set created through the Curio API are stored under a per-set prefix, so that two data
+  // sets of the same client can both hold a file called prompt.json. Outputs additionally carry the job
+  // that produced them, which is what makes re-running a job idempotent on disk.
+  const isExtra = !!extraSets[Number(dataSetId)];
+  const outDisk = (n) => (isExtra ? `set${Number(dataSetId)}-job${jobId}-${n}` : n);
   const dir = path.join(RUN, `job-${jobId}`);
   fs.rmSync(dir, { recursive: true, force: true });
   fs.mkdirSync(path.join(dir, "in"), { recursive: true });
@@ -613,7 +660,8 @@ async function runJob(jobId, client, spec, inputPieceIds, deadline) {
     const name = c.pieces[Number(id)]?.name;
     if (!name) { missing.push(`#${id}`); continue; }
     if (!spec.inputs(name)) continue;
-    const src = path.join(clientDir(client), name);
+    const src = path.join(clientDir(client), c.pieces[Number(id)]?.file ?? name);
+    // The name the job sees is the client's; where it is read from is this provider's business.
     // A data set's pieces are on chain; their bytes are on whichever provider stored them. This provider
     // can only compute over what it physically holds, and saying so now beats an ENOENT from the middle of
     // a run — or, for a proved job, eight minutes of proving before anything notices.
@@ -662,15 +710,17 @@ async function runJob(jobId, client, spec, inputPieceIds, deadline) {
   const produced = spec.outputs === "*"
     ? fs.readdirSync(path.join(dir, "out")).sort()
     : (spec.outputs ?? [spec.output]);
-  for (const o of produced) { // unique names in the data set
-    let out = o, k = 2;
-    while (fs.existsSync(path.join(clientDir(client), out))) out = o.replace(/(\.[^.]+)$/, ` (${k++})$1`);
-    fs.copyFileSync(path.join(dir, "out", o), path.join(clientDir(client), out));
+  for (const o of produced) {
+    let out = o;
+    // Only the provider's own data set needs a unique name on disk, because there the file name is the only
+    // thing identifying the piece. Elsewhere the path already carries the set and the job.
+    if (!isExtra) { let k = 2; while (fs.existsSync(path.join(clientDir(client), out))) out = o.replace(/(\.[^.]+)$/, ` (${k++})$1`); }
+    fs.copyFileSync(path.join(dir, "out", o), path.join(clientDir(client), outDisk(out)));
     names.push(out);
   }
   J.stage = "storing";
   let p;
-  try { p = await addOutputPieces(client, names, jobId); }
+  try { p = await addOutputPieces(client, names, jobId, c, outDisk); }
   catch (e) {
     J.stage = "blocked";
     return plog(`Job #${jobId}: FWSS refused to add the result to your data set (${reason(e)}). Did you let providers deliver results into your data set? (step 1)`);
@@ -742,6 +792,25 @@ const adds = new Map(); // txHash -> status for GET .../pieces/added/<txHash>
 const creates = new Map(); // txHash -> status for GET /pdp/data-sets/created/<txHash>
 let extraSets = {}; // data sets this provider holds beyond the demo one (created through the Curio-style API)
 
+// A piece is addressed by its CID, so that is all the URL carries, and everything was served as
+// application/octet-stream: the browser will not play an mp4 it is handed as "data", and QuickTime refuses
+// the downloaded file outright. The name the client signed into the data set says what it is, so say so.
+const TYPE_BY_EXT = { ".mp4": "video/mp4", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+  ".webp": "image/webp", ".gif": "image/gif", ".bmp": "image/bmp", ".json": "application/json",
+  ".txt": "text/plain; charset=utf-8", ".pdf": "application/pdf" };
+function pieceName(cid) {
+  for (const set of Object.values(extraSets))
+    for (const p of Object.values(set.pieces)) if (p.cid === cid) return p.name;
+  for (const c of Object.values(ST.clients))
+    for (const p of Object.values(c.pieces ?? {})) if (p.cid === cid) return p.name;
+  return null;
+}
+const pieceType = (cid) => {
+  const n = pieceName(cid) ?? "";
+  const at = n.lastIndexOf(".");
+  return (at >= 0 && TYPE_BY_EXT[n.slice(at).toLowerCase()]) || "application/octet-stream";
+};
+
 function pieceBytes(cid) {
   if (parked.has(cid)) return parked.get(cid);
   for (const set of Object.values(extraSets))
@@ -773,10 +842,52 @@ async function curioApi(req, res, url) {
   const body = async () => { const chunks = []; for await (const ch of req) chunks.push(ch); return Buffer.concat(chunks); };
   let m;
   if (req.method === "GET" && url.pathname === "/pdp/ping") return reply(200);
+  // Playback, which is not the same thing as the piece. /piece/<cid> must always be the exact bytes that
+  // hash to that CID -- a client is told it can check that, and transcoding there would quietly make it
+  // false. So a browser-playable rendering lives at its own address, and the page uses it only for the
+  // <video> element while every link that saves a file still points at /piece/.
+  //
+  // Only takes made before the job encoded H.264 need this: mp4v is a valid MP4 that no browser decodes.
+  if (req.method === "GET" && (m = url.pathname.match(/^\/play\/([a-z0-9]+)$/))) {
+    const cid = m[1];
+    const b = pieceBytes(cid);
+    if (!b) return reply(404, { error: "piece not found" });
+    if (pieceType(cid) !== "video/mp4") {
+      res.writeHead(200, { "content-type": pieceType(cid), ...cors }); return res.end(b);
+    }
+    const cache = path.join(RUN, "play");
+    fs.mkdirSync(cache, { recursive: true });
+    const out = path.join(cache, `${cid}.mp4`);
+    if (!fs.existsSync(out)) {
+      // Already H.264? Then there is nothing to do and the original is served as it is.
+      const head = Buffer.from(b).subarray(0, 8192);
+      if (head.includes(Buffer.from("avc1"))) {
+        res.writeHead(200, { "content-type": "video/mp4", ...cors }); return res.end(b);
+      }
+      const tmp = path.join(cache, `${cid}.src.mp4`);
+      fs.writeFileSync(tmp, b);
+      try {
+        await execFile("docker", ["run", "--rm", "--network", "none", "-v", `${cache}:/c`,
+          "--entrypoint", "ffmpeg", "piecework/video-gen:v1",
+          "-hide_banner", "-loglevel", "error", "-y", "-i", `/c/${cid}.src.mp4`,
+          "-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p",
+          "-movflags", "+faststart", `/c/${cid}.mp4`], XENV);
+      } catch (e) {
+        say("play: could not transcode", reason(e));
+        res.writeHead(200, { "content-type": "video/mp4", ...cors }); return res.end(b);
+      } finally { fs.rmSync(tmp, { force: true }); }
+    }
+    res.writeHead(200, { "content-type": "video/mp4", ...cors });
+    return res.end(fs.readFileSync(out));
+  }
+
   if (req.method === "GET" && (m = url.pathname.match(/^\/piece\/([a-z0-9]+)$/))) {
     const b = pieceBytes(m[1]);
     if (!b) return reply(404, { error: "piece not found" });
-    res.writeHead(200, { "content-type": "application/octet-stream", ...cors }); return res.end(b);
+    const name = pieceName(m[1]);
+    res.writeHead(200, { "content-type": pieceType(m[1]), ...cors,
+      ...(name ? { "content-disposition": `inline; filename="${name.replace(/["\\]/g, "")}"` } : {}) });
+    return res.end(b);
   }
   if (req.method === "POST" && url.pathname === "/pdp/piece") {
     const { pieceCid } = JSON.parse(await body());
@@ -816,15 +927,17 @@ async function curioApi(req, res, url) {
         } catch { /* other contracts' events */ }
       }
       // create-and-add extraData is abi.encode(createPayload, addPayload); the create payload starts with the payer
-      const [createPayload] = decodeAbiParameters([{ type: "bytes" }, { type: "bytes" }], extraData);
+      const [createPayload, addPayload] = decodeAbiParameters([{ type: "bytes" }, { type: "bytes" }], extraData);
+      const signedNames = namesFromAddPayload(addPayload);
       const [payer] = decodeAbiParameters(
         [{ type: "address" }, { type: "uint256" }, { type: "string[]" }, { type: "string[]" }, { type: "bytes" }], createPayload);
       extraSets[dataSetId] = { payer, pieces: {} };
       ids.forEach((id, i) => {
         const bytes = parked.get(cids[i]) ?? pieceBytes(cids[i]);
-        const name = `piece-${id}${extensionFor(bytes)}`;
-        fs.writeFileSync(path.join(clientDir(payer), `set${dataSetId}-${name}`), bytes);
-        extraSets[dataSetId].pieces[id] = { name, cid: cids[i], file: `set${dataSetId}-${name}` };
+        const name = signedNames[i] || givenName(pieces[i]) || `piece-${id}${extensionFor(bytes)}`;
+        const file = `set${dataSetId}-p${id}-${name}`;
+        fs.writeFileSync(path.join(clientDir(payer), file), bytes);
+        extraSets[dataSetId].pieces[id] = { name, cid: cids[i], file };
         parked.delete(cids[i]);
       });
       saveState();
@@ -842,9 +955,11 @@ async function curioApi(req, res, url) {
     const owner = Object.keys(ST.clients).find((a) => ST.clients[a].dataSetId === dataSetId) ?? extraSets[dataSetId]?.payer;
     if (!owner) return reply(404, { error: "data set not held here" });
     const { pieces, extraData } = JSON.parse(await body());
+    const signedNames = namesFromAddPayload(extraData);
     const cids = pieces.map((p) => p.pieceCid);
     if (cids.some((c) => !pieceBytes(c))) return reply(400, { error: "piece not uploaded" });
     const args = [BigInt(dataSetId), ZERO, cids.map((c) => ({ data: toHex(CID.parse(c).bytes) })), extraData];
+    const firstId = Number(await read(C.pdp, ABI.PDPVerifier, "getNextPieceId", [BigInt(dataSetId)]));
     const { request } = await pub.simulateContract({ account: providerAcct, address: C.pdp, abi: ABI.PDPVerifier, functionName: "addPieces", args });
     const gas = (await pub.estimateContractGas({ account: providerAcct, address: C.pdp, abi: ABI.PDPVerifier, functionName: "addPieces", args })) * 3n / 2n;
     const hash = await wallet.writeContract({ ...request, gas });
@@ -861,12 +976,23 @@ async function curioApi(req, res, url) {
           if (ev.eventName === "PiecesAddedV2") cids.forEach((_, i) => ids.push(Number(ev.args.firstPieceId) + i));
         } catch { /* other contracts' events */ }
       }
+      if (!ids.length) {
+        // The chain accepted them, so they exist and are numbered from where the counter stood.
+        cids.forEach((_, i) => ids.push(firstId + i));
+        say(`curio api: addPieces ${hash.slice(0, 10)}… emitted no event this build understands; ` +
+            `recording pieces #${ids.join(", #")} from the piece counter instead.`);
+      }
       const extra = extraSets[dataSetId];
       const c = extra ?? ST.clients[owner];
       ids.forEach((id, i) => {
         const bytes = parked.get(cids[i]) ?? pieceBytes(cids[i]);
-        const name = `piece-${id}${extensionFor(bytes)}`;
-        const file = extra ? `set${dataSetId}-${name}` : name;
+        if (!bytes) {
+          say(`curio api: piece #${id} (${cids[i].slice(0, 16)}…) is in data set ${dataSetId} on chain but ` +
+              `its bytes were never received here; jobs naming it will be refused.`);
+          return;
+        }
+        const name = signedNames[i] || givenName(pieces[i]) || `piece-${id}${extensionFor(bytes)}`;
+        const file = extra ? `set${dataSetId}-p${id}-${name}` : name;
         fs.writeFileSync(path.join(clientDir(owner), file), bytes);
         c.pieces[id] = extra ? { name, cid: cids[i], file } : { name, cid: cids[i], kind: "output", tx: hash };
         parked.delete(cids[i]);
@@ -1091,9 +1217,9 @@ function serve() {
       // Only this machine may use the stand-in Curio API and the client console: requests through the public tunnel
       // carry Cloudflare's headers and are refused here.
       const local = !req.headers["cf-connecting-ip"] && !req.headers["cf-ray"];
-      const privatePath = /^\/(pdp|piece)\//.test(url.pathname) || url.pathname.startsWith("/api/pilot/") || url.pathname === "/client.html";
+      const privatePath = /^\/(pdp|piece|play)\//.test(url.pathname) || url.pathname.startsWith("/api/pilot/") || url.pathname === "/client.html";
       if (privatePath && !local) { res.writeHead(403); return res.end("only available on the provider's own machine"); }
-      if (url.pathname.startsWith("/pdp/") || url.pathname.startsWith("/piece/")) { if ((await curioApi(req, res, url)) !== false) return; }
+      if (url.pathname.startsWith("/pdp/") || url.pathname.startsWith("/piece/") || url.pathname.startsWith("/play/")) { if ((await curioApi(req, res, url)) !== false) return; }
       if (url.pathname.startsWith("/api/pilot/")) return await pilotApi(req, res, url, json);
       if (req.method === "GET" && url.pathname === "/api/config") return json(200, await config());
       if (req.method === "GET" && url.pathname === "/api/state") return json(200, await state(url.searchParams.get("client")));
