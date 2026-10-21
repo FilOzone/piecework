@@ -1,0 +1,99 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Takes</title>
+<link rel="icon" href="foc-logo-icon.svg">
+<script>const V = "takes-0";</script>
+<style>
+:root{
+  --bg:#0d0f14; --surface:#151922; --surface-2:#1d222d; --line:#2a3040;
+  --ink:#eef1f6; --ink-2:#b4bdcc; --ink-3:#7c889c;
+  --accent:#7aa2ff; --accent-soft:#1b2540; --money:#4ade80; --money-soft:#14301f;
+  --bad:#f87171; --bad-soft:#331a1a; --warn:#fbbf24; --warn-soft:#332814;
+  --body:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.55 var(--body)}
+.wrap{max-width:880px;margin:0 auto;padding:28px 16px 80px}
+header{display:flex;align-items:center;gap:12px;margin-bottom:6px}
+header img{width:34px;height:34px}
+h1{font-size:1.7rem;margin:0;letter-spacing:-.02em}
+.sub{color:var(--ink-3);font-size:.82rem;text-transform:uppercase;letter-spacing:.08em}
+.lede{color:var(--ink-2);max-width:62ch;margin:14px 0 0}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:18px;margin-top:18px}
+h2{font-size:1.02rem;margin:0 0 12px;letter-spacing:-.01em}
+.muted{color:var(--ink-3);font-size:.88rem}
+.b{appearance:none;border:1px solid var(--line);background:var(--surface-2);color:var(--ink);
+   border-radius:9px;padding:9px 15px;font:600 .9rem var(--body);cursor:pointer}
+.b:hover:not(:disabled){border-color:var(--accent)}
+.b:disabled{opacity:.45;cursor:not-allowed}
+.b.primary{background:var(--accent);border-color:var(--accent);color:#0b1020}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+textarea,input[type=text]{width:100%;background:var(--surface-2);border:1px solid var(--line);color:var(--ink);
+  border-radius:9px;padding:10px 12px;font:inherit;resize:vertical}
+textarea:focus,input:focus{outline:none;border-color:var(--accent)}
+.drop{border:1.5px dashed var(--line);border-radius:11px;padding:22px;text-align:center;color:var(--ink-3)}
+.drop.over{border-color:var(--accent);color:var(--accent)}
+.thumbs{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.thumbs img{width:62px;height:62px;object-fit:cover;border-radius:7px;border:1px solid var(--line)}
+.pill{display:inline-block;font:600 .7rem var(--body);letter-spacing:.05em;text-transform:uppercase;
+  padding:3px 9px;border-radius:99px;background:var(--accent-soft);color:var(--accent)}
+.pill.ok{background:var(--money-soft);color:var(--money)}
+.pill.bad{background:var(--bad-soft);color:var(--bad)}
+.pill.wait{background:var(--warn-soft);color:var(--warn)}
+/* The chain of takes: each one shows what it was built on, which is the whole argument. */
+.take{display:grid;grid-template-columns:260px 1fr;gap:16px;padding:16px 0;border-top:1px solid var(--line)}
+.take:first-child{border-top:none}
+.take video{width:260px;border-radius:9px;background:#000;display:block}
+.take h3{margin:0 0 6px;font-size:1rem}
+.lineage{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--ink-3);
+  background:var(--surface-2);border:1px solid var(--line);border-radius:8px;padding:9px 11px;margin-top:9px;
+  overflow-x:auto;white-space:pre}
+.parent{color:var(--accent)}
+.steps{margin-top:10px;color:var(--ink-3);font-size:.88rem}
+a{color:var(--accent)}
+@media(max-width:620px){.take{grid-template-columns:1fr}.take video{width:100%}}
+</style>
+
+<div class="wrap">
+  <header>
+    <img src="foc-logo-icon.svg" alt="">
+    <div>
+      <div class="sub">Filecoin Onchain Cloud</div>
+      <h1>Takes</h1>
+    </div>
+  </header>
+  <p class="lede">Make a video from your pictures, look at it, then make the next take on top of it.
+    Every take is stored where your pictures already live, and records exactly what it was made from:
+    each input by its hash, the prompt you gave, and the take it was built on. You can check that yourself
+    without trusting anyone.</p>
+
+  <div class="card" id="connectcard">
+    <h2>Start</h2>
+    <p class="muted" id="connectnote">Your wallet pays for storage and for each take. Filecoin Calibration, test tokens only.</p>
+    <div class="row"><button class="b primary" id="connect">Connect wallet</button></div>
+  </div>
+
+  <div class="card" id="setupcard" hidden>
+    <h2>Your pictures</h2>
+    <div class="drop" id="drop">Drop pictures here, or <label style="color:var(--accent);cursor:pointer">choose them<input type="file" id="picker" accept="image/*" multiple hidden></label></div>
+    <div class="thumbs" id="thumbs"></div>
+    <h2 style="margin-top:18px">The prompt</h2>
+    <textarea id="prompt" rows="2" placeholder="a slow drift across the hills at dusk"></textarea>
+    <div class="row" style="margin-top:12px">
+      <button class="b primary" id="make">Make the first take</button>
+      <span class="muted" id="cost"></span>
+    </div>
+    <div class="steps" id="steps"></div>
+  </div>
+
+  <div class="card" id="takescard" hidden>
+    <h2>Your takes</h2>
+    <div id="takes"></div>
+    <div class="row" style="margin-top:16px">
+      <button class="b primary" id="again">Make the next take on top</button>
+      <span class="muted">builds on the newest take above</span>
+    </div>
+  </div>
+</div>
+<script type="module" src="takes.mjs"></script>
