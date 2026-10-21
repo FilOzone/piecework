@@ -1,0 +1,190 @@
+"""A video built from the client's images, and a record of what it was built from.
+
+Job contract (same for every PieceWork job): read the client's files from /in (read-only), write results to
+/out, no network. Inputs:
+  <images>        the pictures to build from
+  prompt.json     {"prompt": "...", "seconds": 4, "fps": 12, "seed": 0}  -- all optional
+  <a video>       optional: the previous version, to build on top of
+
+Outputs:
+  version-<n>.mp4     the video
+  version-<n>.json    what it was made from: every input by sha256, the prompt, the parent, the generator
+  video-gen-report.txt
+
+Why the manifest is the point of this job. Generating video is something a hundred services do. What none
+of them can do is tell you, afterwards and provably, which images and which prompt produced version 7 and
+that version 7 was built on version 6 -- because the inputs, the outputs and the money are all in one data
+set on one chain. The manifest names every input by its sha256, so anyone holding the pieces can check the
+claim without trusting the provider or us.
+
+Why the first generator is not a model. The loop is the product, not the picture: a week spent on model
+quality would leave nothing to show. GENERATOR=motion renders real video from the client's own images in
+seconds on a processor, which means the whole cycle -- order, generate, store, build on it again -- can be
+run end to end before any GPU is free. A real model goes in behind the same interface later; if that proves
+awkward, the interface was wrong and it is cheaper to learn that now.
+
+A deliberate property of the motion generator: version n contains version n-1's frames followed by the new
+ones. That makes "built on top of" visible in the output rather than only in the manifest, and it produces
+exactly the kind of data the storage-deduplication question needs measured -- successive videos that really
+do share most of their content.
+"""
+import hashlib
+import json
+import os
+import sys
+import time
+
+IN, OUT = "/in", "/out"
+GENERATOR = os.environ.get("GENERATOR", "motion")
+DEVICE = os.environ.get("DEVICE", "cpu")
+IMAGES = (".jpg", ".jpeg", ".png", ".webp", ".bmp")
+VIDEOS = (".mp4", ".mov", ".mkv", ".webm")
+DEFAULTS = {"prompt": "", "seconds": 4.0, "fps": 12, "seed": 0}
+
+
+def sha256(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for block in iter(lambda: f.read(1 << 20), b""):
+            h.update(block)
+    return h.hexdigest()
+
+
+def read_settings():
+    """The prompt and the knobs, from prompt.json if the client supplied one."""
+    settings = dict(DEFAULTS)
+    for name in ("prompt.json", "prompt.txt"):
+        path = os.path.join(IN, name)
+        if not os.path.exists(path):
+            continue
+        raw = open(path, encoding="utf-8", errors="replace").read()
+        if name.endswith(".json"):
+            try:
+                settings.update({k: v for k, v in json.loads(raw).items() if k in DEFAULTS})
+            except json.JSONDecodeError:
+                # A malformed prompt file is the client's typo, not a reason to fail a paid job: the prompt
+                # is recorded verbatim either way, so the manifest still says what was asked for.
+                settings["prompt"] = raw.strip()
+        else:
+            settings["prompt"] = raw.strip()
+        break
+    return settings
+
+
+def next_version():
+    """Version numbers come from what is already in the data set, so the client need not track them."""
+    highest = 0
+    for f in os.listdir(IN):
+        if f.startswith("version-") and f.endswith(".mp4"):
+            try:
+                highest = max(highest, int(f[len("version-"):-len(".mp4")]))
+            except ValueError:
+                pass
+    return highest + 1
+
+
+def main():
+    import cv2
+    import numpy as np
+
+    os.makedirs(OUT, exist_ok=True)
+    if not os.path.isdir(IN):
+        print(f"no input directory at {IN}", file=sys.stderr)
+        return 2
+
+    names = sorted(os.listdir(IN))
+    images = [f for f in names if f.lower().endswith(IMAGES)]
+    parents = [f for f in names if f.lower().endswith(VIDEOS) and f.startswith("version-")]
+    parent = sorted(parents, key=lambda f: len(f))[-1] if parents else None
+
+    if not images:
+        with open(os.path.join(OUT, "video-gen-report.txt"), "w") as r:
+            r.write("No images to build from.\n\nThe job looked in /in for "
+                    + ", ".join(IMAGES) + " and found none. Add at least one picture and order again.\n")
+        return 0
+
+    s = read_settings()
+    version = next_version()
+    fps = max(1, int(s["fps"]))
+    seconds = max(0.5, float(s["seconds"]))
+    started = time.time()
+
+    # The frames of the version this one is built on, so that "on top of" is visible in the result and not
+    # only asserted in the manifest.
+    carried = []
+    if parent:
+        cap = cv2.VideoCapture(os.path.join(IN, parent))
+        while True:
+            ok, frame = cap.read()
+            if not ok:
+                break
+            carried.append(frame)
+        cap.release()
+
+    first = cv2.imread(os.path.join(IN, images[0]))
+    h, w = (first.shape[:2] if first is not None else (480, 640))
+    if carried:
+        h, w = carried[0].shape[:2]
+    h, w = h - h % 2, w - w % 2
+
+    out_path = os.path.join(OUT, f"version-{version}.mp4")
+    writer = cv2.VideoWriter(out_path, cv2.VideoWriter_fourcc(*"mp4v"), fps, (w, h))
+    for frame in carried:
+        writer.write(frame)
+
+    # The new material: a slow move across each image in turn, seeded so the same inputs and the same
+    # prompt give the same video. A client re-ordering the same job should not get a different answer.
+    rng = np.random.default_rng(int(s["seed"]) ^ (hash(s["prompt"]) & 0xFFFF))
+    per_image = max(1, int(round(fps * seconds / len(images))))
+    for name in images:
+        img = cv2.imread(os.path.join(IN, name))
+        if img is None:
+            continue
+        img = cv2.resize(img, (int(w * 1.25), int(h * 1.25)))
+        dx, dy = rng.integers(0, max(1, img.shape[1] - w)), rng.integers(0, max(1, img.shape[0] - h))
+        for i in range(per_image):
+            t = i / max(1, per_image - 1)
+            x = int(dx * (1 - t) + (img.shape[1] - w) * 0.5 * t)
+            y = int(dy * (1 - t) + (img.shape[0] - h) * 0.5 * t)
+            writer.write(img[y:y + h, x:x + w])
+    writer.release()
+
+    # Everything this version was made from, by content rather than by name: a client holding the pieces can
+    # check the claim without trusting the provider, and a renamed file does not break the record.
+    manifest = {
+        "version": version,
+        "prompt": s["prompt"],
+        "generator": {"name": GENERATOR, "device": DEVICE},
+        "settings": {"seconds": seconds, "fps": fps, "seed": int(s["seed"])},
+        "from": {
+            "images": [{"name": n, "sha256": sha256(os.path.join(IN, n))} for n in images],
+            "parent": ({"name": parent, "sha256": sha256(os.path.join(IN, parent))} if parent else None),
+        },
+        "produced": {"name": os.path.basename(out_path), "sha256": sha256(out_path),
+                     "bytes": os.path.getsize(out_path), "width": w, "height": h, "fps": fps,
+                     "frames": len(carried) + per_image * len(images),
+                     "carriedFromParent": len(carried)},
+    }
+    with open(os.path.join(OUT, f"version-{version}.json"), "w") as f:
+        json.dump(manifest, f, indent=2)
+        f.write("\n")
+
+    elapsed = time.time() - started
+    with open(os.path.join(OUT, "video-gen-report.txt"), "w") as r:
+        r.write(f"Version {version} of your video\n\n")
+        r.write(f"Built from {len(images)} image(s)" + (f", on top of {parent}" if parent else "") + "\n")
+        if s["prompt"]:
+            r.write(f"Prompt: {s['prompt']}\n")
+        r.write(f"\n{w}x{h}, {fps} fps, {manifest['produced']['frames']} frames")
+        if carried:
+            r.write(f" (of which {len(carried)} carried from the previous version)")
+        r.write(f"\nProduced: {manifest['produced']['bytes']:,} bytes\n")
+        r.write(f"\nHow the job ran: {GENERATOR} on {DEVICE}, {elapsed:.1f} s. No network.\n\n")
+        r.write("version-%d.json records every input by its sha256, the prompt, and the version this was\n"
+                "built on. Hash the pieces yourself to check it: nothing here asks you to take our word.\n"
+                % version)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
