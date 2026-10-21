@@ -126,6 +126,9 @@ const PARAMS = {
     restore: { name: "Enlarge and clean up my photographs", image: "photo-restore:v1", price: U("0.6"), deadline: NET.deadlines.proved,
       desc: "Four times the width and height, with the detail reconstructed rather than simply scaled up. Real-ESRGAN, running on the provider's machine next to the pictures. Every output pixel passes through 23 residual blocks, so a graphics card is worth about fifteen times a processor here: 17.6 seconds for a small image on this machine, 1.2 seconds for the same image on a provider's T4.",
       reads: "the .jpg and .png files you pick", writes: "a -restored.png for each, plus a report" },
+    videogen: { name: "Build a video from my pictures, and record what it came from", image: "video-gen:v1", price: U("0.4"), deadline: NET.deadlines.proved,
+      desc: "Builds a video from the pictures you pick, and writes beside it a record of exactly what it was made from: every input by its sha256, the prompt you gave, and the version it was built on. Order it again and it builds the next version on top of the last, in the same data set, so you end up with a chain of versions where each names its parent. Put your prompt in prompt.json. The generator is deliberately simple; the record is the point.",
+      reads: "your pictures, prompt.json, and the previous version", writes: "version-N.mp4, version-N.json and a report" },
     late: { name: "Build a search index: see what happens if the provider misses the deadline", image: "indexer-slow:v1", price: U("0.5"), deadline: NET.deadlines.late,
       desc: "Same program as the search index, but the provider deliberately misses the deadline, to show what happens then: nobody is paid, and a \"Get my money back\" button appears.", reads: "your .txt files", writes: "nothing (late)" },
   },
@@ -223,6 +226,17 @@ function extensionFor(bytes) {
   if (b.length >= 4 && at(0, 4) === "%PDF") return ".pdf";
   return ".txt";
 }
+
+// Video from the client's own pictures, each version recording what it was built from. Its inputs are the
+// pictures, the prompt, and the previous version -- the last of those is what makes it a loop, and why the
+// predicate accepts this job's own output back as input.
+JOB_SCRIPTS["video-gen:v1"] = {
+  dockerImage: "piecework/video-gen:v1",
+  outputs: "*",
+  inputs: (name) => /\.(jpe?g|png|webp|bmp)$/i.test(name)
+    || /^prompt\.(json|txt)$/i.test(name)
+    || /^version-\d+\.mp4$/i.test(name),
+};
 
 // ---------------------------------------------------------------- helpers
 

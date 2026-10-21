@@ -49,6 +49,8 @@ a{color:var(--accent)}
 .shots figcaption{color:var(--ink-3);font-size:.72rem;text-transform:uppercase;letter-spacing:.05em}
 /* Bounded on purpose: a four-times upscale is 1280px wide and would otherwise set the table's width. */
 .shot{display:block;max-width:180px;max-height:180px;width:auto;height:auto;border-radius:6px;border:1px solid var(--line);background:var(--surface-2)}
+/* A video needs more room than a thumbnail to be worth watching, but still not enough to set the table's width. */
+video.shot{max-width:320px;max-height:320px}
 </style>
 </head>
 <body>

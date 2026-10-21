@@ -187,6 +187,24 @@
       ],
       "note": "The same index on a provider’s GPU. Detection is a forward pass for every frame examined, which is work a card does well — but nobody has run this one on a card yet, so there is no number here and the processor version is the only measured option."
     },
+    "video-gen:v1": {
+      "name": "Build a video from my pictures, and record what it came from",
+      "price": "0.4",
+      "outputs": [
+        "(version-N.mp4, version-N.json and a report)"
+      ],
+      "deadlineEpochs": 120,
+      "inputExtensions": [
+        ".jpg",
+        ".jpeg",
+        ".png",
+        ".webp",
+        ".bmp",
+        ".json",
+        ".mp4"
+      ],
+      "note": "Builds a video from the pictures you pick, and writes beside it a record of exactly what it was made from: every input by its sha256, the prompt you gave, and the version it was built on. Order it again and it builds the next version on top of the last, all in the same data set — so you end up with a chain of versions where each one names its parent, and anyone holding the pieces can check that claim without trusting the provider. Put your prompt in a file called prompt.json: {\"prompt\": \"...\", \"seconds\": 4, \"fps\": 12}. The generator is deliberately simple for now; the interesting part is the record, not the picture."
+    },
     "photo-restore:v1": {
       "name": "Enlarge and clean up my photographs",
       "price": "0.6",

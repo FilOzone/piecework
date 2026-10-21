@@ -273,6 +273,21 @@
     ],
     "minVramGb": 4
   },
+  "video-gen:v1": {
+    "name": "Build a video from my pictures, and record what it came from",
+    "dockerImage": "piecework/video-gen:v1",
+    "outputs": "*",
+    "price": "0.4",
+    "inputExtensions": [
+      ".jpg",
+      ".jpeg",
+      ".png",
+      ".webp",
+      ".bmp",
+      ".json",
+      ".mp4"
+    ]
+  },
   "photo-restore:v1": {
     "name": "Enlarge and clean up my photographs",
     "dockerImage": "piecework/photo-restore:v1",

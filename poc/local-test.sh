@@ -37,7 +37,7 @@ cfg["providers"] = cfg.get("providers", []) + [{
     # because nobody else has built them yet.
     "offers": ["pii-redact:v1", "embed:v1", "indexer:v1", "query:v1", "transcode:v1", "transcribe:v1",
                "ocr:v1", "extract:v1", "term-count-proved:v1", "term-count-attested:v1",
-               "image-clean:v1", "photo-restore:v1", "video-index:v1"],
+               "image-clean:v1", "photo-restore:v1", "video-index:v1", "video-gen:v1"],
 }]
 # everything the local kit can run, including the two the public page does not offer
 for name, job in {

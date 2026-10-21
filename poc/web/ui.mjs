@@ -80,6 +80,10 @@ $("csaddr").textContent = CFG.computeService;
 // image-clean writes <base>-clean.png, so the input is whatever file in the same data set shares that base.
 // Only within the data set currently open, because that is the only one whose file list this page holds.
 const IMAGE_OUT = /\.(png|jpe?g|webp|gif|bmp)$/i;
+// A generated video is the one result a client wants to watch rather than download, and video-gen's whole
+// point is looking at version n before ordering version n+1. Played inline, muted and with controls: a
+// result that autoplays with sound in a page about storage receipts would be a surprise nobody wants.
+const VIDEO_OUT = /\.(mp4|webm|mov|m4v)$/i;
 const NAMED_AFTER_ITS_INPUT = /^(.*)-(restored|clean)\.png$/i;
 
 function shot(url, alt) {
@@ -92,6 +96,10 @@ function outputCell(j, provider, inputsByBase) {
     const url = PW.fileUrl(j.provider, o.cid);
     const link = `<a href="${esc(url)}" data-save="${esc(o.name)}" target="_blank" rel="noopener">`
       + `${esc(o.name)}</a>`;
+    if (VIDEO_OUT.test(o.name)) {
+      return `${link}<div class="shots"><figure><video class="shot" controls muted playsinline preload="metadata" `
+        + `src="${esc(url)}"></video><figcaption>${esc(o.name)}</figcaption></figure></div>`;
+    }
     if (!IMAGE_OUT.test(o.name)) return link;
     const after = `<figure>${shot(url, o.name)}<figcaption>after</figcaption></figure>`;
     const base = NAMED_AFTER_ITS_INPUT.exec(o.name)?.[1];
