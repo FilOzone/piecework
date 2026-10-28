@@ -25,7 +25,7 @@ RUN pip3 install --no-cache-dir torch==2.5.1 --index-url https://download.pytorc
       numpy==2.1.3 pillow==10.4.0
 RUN python3 -c "\
 from transformers import CLIPModel, CLIPProcessor; m='openai/clip-vit-base-patch32'; \
-CLIPModel.from_pretrained(m).save_pretrained('/models/clip'); \
+model = CLIPModel.from_pretrained(m); model.save_pretrained('/models/clip', state_dict={k: v.contiguous() for k, v in model.state_dict().items()}); \
 CLIPProcessor.from_pretrained(m).save_pretrained('/models/clip')"
 ENV DEVICE=cuda MODEL=/models/clip SAMPLE_FPS=1 BATCH=32
 COPY search.py /app/search.py

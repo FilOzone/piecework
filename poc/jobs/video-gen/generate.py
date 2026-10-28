@@ -205,8 +205,10 @@ def main():
             writer.write(cv2.resize(cv2.cvtColor(np.array(f), cv2.COLOR_RGB2BGR), (w, h)))
         writer.release()
         produced_frames = len(carried) + len(made)
+        fixed_frames = len(made)
     else:
         produced_frames = None
+        fixed_frames = None
     # The new material: a slow move across each image in turn, seeded so the same inputs and the same
     # prompt give the same video. A client re-ordering the same job should not get a different answer.
     prompt_seed = int.from_bytes(hashlib.sha256(str(s["prompt"]).encode()).digest()[:2], "big")
@@ -241,8 +243,20 @@ def main():
                      "bytes": os.path.getsize(out_path), "width": w, "height": h, "fps": fps,
                      "frames": produced_frames if produced_frames is not None
                                else len(carried) + per_image * len(images),
+                     # What the file actually is, not what was asked for. The two differ whenever the
+                     # generator cannot take a duration, and a reader should not have to divide to find out.
+                     "seconds": round((produced_frames if produced_frames is not None
+                                       else len(carried) + per_image * len(images)) / fps, 3),
                      "carriedFromParent": len(carried)},
     }
+    asked = round(seconds, 3)
+    got = manifest["produced"]["seconds"]
+    if abs(got - asked) > 0.05:
+        manifest["produced"]["durationNote"] = (
+            f"asked for {asked}s, produced {got}s: this generator makes a fixed {fixed_frames} frames "
+            f"and does not take a duration, so seconds is not controllable here"
+            if fixed_frames else
+            f"asked for {asked}s, produced {got}s")
     with open(os.path.join(OUT, f"version-{version}.json"), "w") as f:
         json.dump(manifest, f, indent=2)
         f.write("\n")
@@ -256,6 +270,13 @@ def main():
         r.write(f"\n{w}x{h}, {fps} fps, {manifest['produced']['frames']} frames")
         if carried:
             r.write(f" (of which {len(carried)} carried from the previous version)")
+        if abs(manifest["produced"]["seconds"] - round(seconds, 3)) > 0.05:
+            r.write(f"\n\nNote: you asked for {round(seconds, 3)} seconds and this is "
+                    f"{manifest['produced']['seconds']}. ")
+            if fixed_frames:
+                r.write(f"The model generator produces a fixed {fixed_frames} frames and does not take a "
+                        f"duration, so seconds has no effect on it. version-{version}.json records the "
+                        f"length this file actually is.")
         r.write(f"\nProduced: {manifest['produced']['bytes']:,} bytes\n")
         r.write(f"\nHow the job ran: {GENERATOR} on {DEVICE}, {elapsed:.1f} s. No network.\n\n")
         r.write("version-%d.json records every input by its sha256, the prompt, and the version this was\n"

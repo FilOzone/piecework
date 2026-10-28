@@ -19,10 +19,13 @@ FROM nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-pip \
  && rm -rf /var/lib/apt/lists/*
-RUN pip3 install --no-cache-dir torch==2.5.1 --index-url https://download.pytorch.org/whl/cu124 \
+RUN pip3 install --no-cache-dir torch==2.5.1 torchvision==0.20.1 --index-url https://download.pytorch.org/whl/cu124 \
  && pip3 install --no-cache-dir transformers==4.44.2 pillow==10.4.0 timm==1.0.9 einops==0.8.0
 ENV HF_HOME=/models/hf
 RUN python3 -c "\
+from unittest.mock import patch; \
+from transformers.dynamic_module_utils import get_imports; \
+patch('transformers.dynamic_module_utils.get_imports', lambda f: [i for i in get_imports(f) if i != 'flash_attn']).start(); \
 from transformers import AutoProcessor, AutoModelForCausalLM; \
 m='microsoft/Florence-2-base'; \
 AutoModelForCausalLM.from_pretrained(m, trust_remote_code=True).save_pretrained('/models/florence'); \

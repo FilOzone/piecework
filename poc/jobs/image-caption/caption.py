@@ -56,6 +56,9 @@ def main():
     dev = torch.device("cuda" if (DEVICE == "cuda" and torch.cuda.is_available()) else "cpu")
 
     from transformers import AutoProcessor, AutoModelForCausalLM
+    from unittest.mock import patch
+    from transformers.dynamic_module_utils import get_imports
+    patch("transformers.dynamic_module_utils.get_imports", lambda f: [i for i in get_imports(f) if i != "flash_attn"]).start()
     dtype = torch.float16 if dev.type == "cuda" else torch.float32
     model = AutoModelForCausalLM.from_pretrained(MODEL, torch_dtype=dtype, trust_remote_code=True,
                                                  local_files_only=True).to(dev).eval()
