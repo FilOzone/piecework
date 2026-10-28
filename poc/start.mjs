@@ -126,6 +126,15 @@ const PARAMS = {
     restore: { name: "Enlarge and clean up my photographs", image: "photo-restore:v1", price: U("0.6"), deadline: NET.deadlines.proved,
       desc: "Four times the width and height, with the detail reconstructed rather than simply scaled up. Real-ESRGAN, running on the provider's machine next to the pictures. Every output pixel passes through 23 residual blocks, so a graphics card is worth about fifteen times a processor here: 17.6 seconds for a small image on this machine, 1.2 seconds for the same image on a provider's T4.",
       reads: "the .jpg and .png files you pick", writes: "a -restored.png for each, plus a report" },
+    framesimilarity: { name: "Find where my video changes", image: "frame-similarity:v1", price: U("0.3"), deadline: NET.deadlines.proved,
+      desc: "Compares each sampled frame with the one before and says where the picture changed enough to be a new shot. The cut points are what let a video be stored as segments, so the next version can point at the segments it did not change instead of storing them again.",
+      reads: "your videos", writes: "a -similarity.txt and a -cuts.json per video, and a report" },
+    imageindex: { name: "Index what is in my images", image: "image-index:v1", price: U("0.4"), deadline: NET.deadlines.proved,
+      desc: "Looks at every image once and writes down what is in it and where. Faces are detected and never identified: no embeddings, no matching between images, no database of people.",
+      reads: "your images", writes: "an -index.txt per image, one image-index.json, and a report" },
+    framestability: { name: "Prove whether something moved", image: "frame-stability:v1", price: U("0.3"), deadline: NET.deadlines.proved,
+      desc: "Reads every frame, not a sample, and tracks one region you name in track.json. The answer is usually a negative worth having: it did not move, in any frame, and here are the coordinates to check that against the stored video.",
+      reads: "your videos and track.json", writes: "a -stability.txt and a -stability.json per video, and a report" },
     videogen: { name: "Build a video from my pictures, and record what it came from", image: "video-gen:v1", price: U("0.4"), deadline: NET.deadlines.proved,
       desc: "Builds a video from the pictures you pick, and writes beside it a record of exactly what it was made from: every input by its sha256, the prompt you gave, and the version it was built on. Order it again and it builds the next version on top of the last, in the same data set, so you end up with a chain of versions where each names its parent. Put your prompt in prompt.json. The generator is deliberately simple; the record is the point.",
       reads: "your pictures, prompt.json, and the previous version", writes: "version-N.mp4, version-N.json and a report" },
@@ -255,6 +264,31 @@ function extensionFor(bytes) {
 // Video from the client's own pictures, each version recording what it was built from. Its inputs are the
 // pictures, the prompt, and the previous version -- the last of those is what makes it a loop, and why the
 // predicate accepts this job's own output back as input.
+// Where a video changes, so it can be cut into segments the next version can reuse. No model, no card.
+JOB_SCRIPTS["frame-similarity:v1"] = {
+  dockerImage: "piecework/frame-similarity:v1",
+  outputs: "*",
+  inputs: (name) => /\.(mp4|mov|mkv|webm|avi|m4v)$/i.test(name) && !/-similarity\.txt$/i.test(name),
+};
+
+// What is in a folder of stills. Faces are detected and never identified; see the job for why that line
+// is where it is.
+JOB_SCRIPTS["image-index:v1"] = {
+  dockerImage: "piecework/image-index:v1",
+  outputs: "*",
+  inputs: (name) => /\.(jpe?g|png|webp|bmp|tiff?)$/i.test(name) && !/-index\.txt$/i.test(name),
+};
+
+// Did one region of the picture move, across every frame. track.json says what to watch, the way
+// prompt.json says what to generate.
+JOB_SCRIPTS["frame-stability:v1"] = {
+  dockerImage: "piecework/frame-stability:v1",
+  outputs: "*",
+  inputs: (name) => /\.(mp4|mov|mkv|webm|avi|m4v)$/i.test(name)
+    || /^track\.json$/i.test(name)
+    || /\.(png|jpe?g)$/i.test(name),   // an optional template image to look for
+};
+
 JOB_SCRIPTS["video-gen:v1"] = {
   dockerImage: "piecework/video-gen:v1",
   outputs: "*",

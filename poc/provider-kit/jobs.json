@@ -315,5 +315,66 @@
       ".bmp"
     ],
     "minVramGb": 4
+  },
+  "frame-similarity:v1": {
+    "name": "Find where my video changes",
+    "dockerImage": "piecework/frame-similarity:v1",
+    "outputs": "*",
+    "price": "0.3",
+    "inputExtensions": [
+      ".mp4",
+      ".mov",
+      ".mkv",
+      ".webm",
+      ".avi",
+      ".m4v"
+    ]
+  },
+  "image-index:v1": {
+    "name": "Index what is in my images",
+    "dockerImage": "piecework/image-index:v1",
+    "outputs": "*",
+    "price": "0.4",
+    "inputExtensions": [
+      ".jpg",
+      ".jpeg",
+      ".png",
+      ".webp",
+      ".bmp",
+      ".tif",
+      ".tiff"
+    ]
+  },
+  "image-index-gpu:v1": {
+    "name": "Index what is in my images (on the card)",
+    "dockerImage": "piecework/image-index-gpu:v1",
+    "outputs": "*",
+    "price": "0.4",
+    "inputExtensions": [
+      ".jpg",
+      ".jpeg",
+      ".png",
+      ".webp",
+      ".bmp",
+      ".tif",
+      ".tiff"
+    ]
+  },
+  "frame-stability:v1": {
+    "name": "Prove whether something moved",
+    "dockerImage": "piecework/frame-stability:v1",
+    "outputs": "*",
+    "price": "0.3",
+    "inputExtensions": [
+      ".mp4",
+      ".mov",
+      ".mkv",
+      ".webm",
+      ".avi",
+      ".m4v",
+      ".json",
+      ".png",
+      ".jpg"
+    ]
   }
 }

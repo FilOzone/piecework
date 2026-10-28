@@ -45,7 +45,8 @@
         "ocr:v1",
         "ocr-gpu:v1",
         "extract:v1",
-        "extract-gpu:v1"
+        "extract-gpu:v1",
+        "video-gen:v1"
       ],
       "proving": true
     }
@@ -185,7 +186,7 @@
         ".avi",
         ".m4v"
       ],
-      "note": "The same index on a provider’s GPU. Detection is a forward pass for every frame examined, which is work a card does well — but nobody has run this one on a card yet, so there is no number here and the processor version is the only measured option."
+      "note": "The same index on a provider's GPU, and now with a number. Measured on a storage provider's own T4 over ten minutes of footage: 27.4 frames a second, 21.9 s for the 600 frames examined, 32 s end to end including container start and model load — against 2.7 frames a second on a processor, so ten times faster, and an hour of footage drops from about 22 minutes of work to 2.2. It read 48.7 MB of video and wrote a 15 KB index. The provider's own caveat, worth keeping: that film is 320x240, so higher-resolution footage will be slower per frame. Decoding also stays on the processor here, so a faster card would start to wait on it."
     },
     "video-gen:v1": {
       "name": "Build a video from my pictures, and record what it came from",
@@ -406,6 +407,79 @@
         ".md"
       ],
       "note": "The same extraction with the model's layers on the card. Token generation is bound by memory bandwidth rather than arithmetic, roughly 400 GB/s on an A4000 against perhaps 50 on a server processor, so expect several times faster and not the twenty people assume on hearing GPU. This image has not been built successfully yet, so no provider can currently take it."
+    },
+    "frame-similarity:v1": {
+      "name": "Find where my video changes",
+      "price": "0.3",
+      "outputs": [
+        "(a -similarity.txt and a -cuts.json per video, plus a report)"
+      ],
+      "deadlineEpochs": 120,
+      "inputExtensions": [
+        ".mp4",
+        ".mov",
+        ".mkv",
+        ".webm",
+        ".avi",
+        ".m4v"
+      ],
+      "note": "Compares each sampled frame with the one before it and says where the picture changed enough to be a new shot. The answer is a list of cut points, which is what lets a video be stored as segments instead of one file — and that is what lets the next version of it point at the segments it did not change rather than storing them again. Two videos sharing half their frames share 0.0% of their bytes once encoded, so the sharing has to be built in at the cut points rather than discovered afterwards. No model and no GPU: this is histogram arithmetic, many times real time on a processor, which is why it is the cheapest row here."
+    },
+    "image-index:v1": {
+      "name": "Index what is in my images",
+      "price": "0.4",
+      "outputs": [
+        "(an -index.txt per image, one image-index.json, plus a report)"
+      ],
+      "deadlineEpochs": 240,
+      "inputExtensions": [
+        ".jpg",
+        ".jpeg",
+        ".png",
+        ".webp",
+        ".bmp",
+        ".tif",
+        ".tiff"
+      ],
+      "note": "Looks at every image once and writes down what is in it and where — a person, a car, a boat, with a box and a confidence for each. The same thing the video indexer does, for the archives that are folders of stills rather than footage: robotics training data, satellite and scientific imagery, web crawls. The index is small enough to read and search, which is the point: the archive stays where it is and only the answer travels. Faces are detected and never identified — no face embeddings, no matching between images, no database of people, so it cannot tell you who someone is or that two photographs show the same person. GDPR Article 9 treats biometric data as special category when it is processed to uniquely identify someone; detection without identification does not meet that test, and the job's own report says so. Order it with FACES=0 to turn even the detection off."
+    },
+    "image-index-gpu:v1": {
+      "name": "Index what is in my images (on the card)",
+      "price": "0.4",
+      "outputs": [
+        "(an -index.txt per image, one image-index.json, plus a report)"
+      ],
+      "deadlineEpochs": 240,
+      "inputExtensions": [
+        ".jpg",
+        ".jpeg",
+        ".png",
+        ".webp",
+        ".bmp",
+        ".tif",
+        ".tiff"
+      ],
+      "note": "The same index, and the same limits on faces, with the detector on a provider's GPU. This is the cleaner GPU measurement of the two indexers: the video one is held back by decoding frames on the processor, and a folder of JPEGs has no such ceiling, so what the card is worth shows up undiluted. Nobody has run it on a card yet, so there is no number here — the processor does about 3 images a second on this machine, and that is the figure to beat."
+    },
+    "frame-stability:v1": {
+      "name": "Prove whether something moved",
+      "price": "0.3",
+      "outputs": [
+        "(a -stability.txt and a -stability.json per video, plus a report)"
+      ],
+      "deadlineEpochs": 120,
+      "inputExtensions": [
+        ".mp4",
+        ".mov",
+        ".mkv",
+        ".webm",
+        ".avi",
+        ".m4v",
+        ".json",
+        ".png",
+        ".jpg"
+      ],
+      "note": "Reads every frame, not a sample, and tracks one region named in track.json beside the video. The useful answer is usually a negative: it did not move, in any frame, and here are the per-frame coordinates. The point of publishing the coordinates is that nobody has to take the verdict on trust — the video is stored, the method is fixed, and the same job over the same piece gives the same table, so anyone holding the pieces can check it. No model and no card: normalised cross-correlation in a small window."
     }
   },
   "policies": [
