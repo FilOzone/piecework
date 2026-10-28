@@ -176,12 +176,43 @@ def main():
     for frame in carried:
         writer.write(frame)
 
+    if GENERATOR == "svd":
+        # Stable Video Diffusion, image to video: the client's last picture becomes the seed frame and the
+        # model invents the motion rather than panning across a still. Needs a card -- on a processor this
+        # is hours per clip, which is not a slower service, it is no service -- so it refuses rather than
+        # quietly falling back and reporting a time nobody can compare with the motion row.
+        import torch
+        if not torch.cuda.is_available():
+            print("GENERATOR=svd needs a GPU. On a processor a diffusion video model is hours per clip. "
+                  "Use GENERATOR=motion for the CPU row.", file=sys.stderr)
+            return 2
+        from diffusers import StableVideoDiffusionPipeline
+        from PIL import Image
+        pipe = StableVideoDiffusionPipeline.from_pretrained(
+            os.environ.get("MODEL", "/models/svd"), torch_dtype=torch.float16,
+            variant="fp16", local_files_only=True)
+        pipe.to("cuda")
+        pipe.enable_model_cpu_offload()
+        seed_img = Image.open(os.path.join(IN, images[-1])).convert("RGB").resize((1024, 576))
+        # Seeded from the prompt and the client's seed, so re-ordering the same job returns the same video.
+        gen = torch.manual_seed(int(s["seed"]) ^ int.from_bytes(
+            hashlib.sha256(str(s["prompt"]).encode()).digest()[:4], "big"))
+        made = pipe(seed_img, decode_chunk_size=int(os.environ.get("CHUNK", "4")),
+                    num_frames=int(os.environ.get("NUM_FRAMES", "25")),
+                    motion_bucket_id=int(os.environ.get("MOTION", "127")),
+                    generator=gen).frames[0]
+        for f in made:
+            writer.write(cv2.resize(cv2.cvtColor(np.array(f), cv2.COLOR_RGB2BGR), (w, h)))
+        writer.release()
+        produced_frames = len(carried) + len(made)
+    else:
+        produced_frames = None
     # The new material: a slow move across each image in turn, seeded so the same inputs and the same
     # prompt give the same video. A client re-ordering the same job should not get a different answer.
     prompt_seed = int.from_bytes(hashlib.sha256(str(s["prompt"]).encode()).digest()[:2], "big")
     rng = np.random.default_rng(int(s["seed"]) ^ prompt_seed)
     per_image = max(1, int(round(fps * seconds / len(images))))
-    for name in images:
+    for name in ([] if produced_frames is not None else images):
         img = cv2.imread(os.path.join(IN, name))
         if img is None:
             continue
@@ -192,7 +223,8 @@ def main():
             x = int(dx * (1 - t) + (img.shape[1] - w) * 0.5 * t)
             y = int(dy * (1 - t) + (img.shape[0] - h) * 0.5 * t)
             writer.write(img[y:y + h, x:x + w])
-    writer.release()
+    if produced_frames is None:
+        writer.release()
 
     # Everything this version was made from, by content rather than by name: a client holding the pieces can
     # check the claim without trusting the provider, and a renamed file does not break the record.
@@ -207,7 +239,8 @@ def main():
         },
         "produced": {"name": os.path.basename(out_path), "sha256": sha256(out_path),
                      "bytes": os.path.getsize(out_path), "width": w, "height": h, "fps": fps,
-                     "frames": len(carried) + per_image * len(images),
+                     "frames": produced_frames if produced_frames is not None
+                               else len(carried) + per_image * len(images),
                      "carriedFromParent": len(carried)},
     }
     with open(os.path.join(OUT, f"version-{version}.json"), "w") as f:
