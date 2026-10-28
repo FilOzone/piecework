@@ -81,6 +81,8 @@ textarea:focus,input:focus,select:focus{outline:none;border-color:var(--accent)}
 .spin{display:inline-block;width:12px;height:12px;border:2px solid var(--line);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite;vertical-align:-1px;margin-right:6px}
 @keyframes spin{to{transform:rotate(360deg)}}
 .jobrow{display:flex;gap:10px;align-items:baseline;padding:6px 0;border-top:1px solid var(--line);font-size:.9rem}
+.extra{display:grid;grid-template-columns:1fr auto;gap:14px;align-items:center;padding:11px 0;border-top:1px solid var(--line)}
+.extra:first-of-type{border-top:none}
 .jobrow:first-child{border-top:none}
 a{color:var(--accent)}
 @media(max-width:620px){.take{grid-template-columns:1fr}.take video,.noplay{width:100%}}
@@ -104,18 +106,12 @@ a{color:var(--accent)}
               </defs>
           </svg>
           <!-- What PieceWork adds: the work, done on the pieces — inside the cloud, because that is where it happens. -->
-          <!-- What Takes puts in the cloud: a clapperboard, because a take is what a clapperboard counts.
-           PieceWork draws four pieces here; this is the same icon with the other half of the story.
-           Deliberately coarse: the whole mark is 46px, so this is about ten, and two fat stripes with a
-           visible gap under the stick is as much detail as survives. Three thin ones became a smudge. -->
-      <g transform="translate(29.9,28.3) scale(0.40)">
-        <rect x="4.4" y="12.4" width="17.6" height="9.6" rx="1.8" fill="#0090FF"/>
-        <g transform="rotate(-16 4.4 11.6)">
-          <rect x="4.4" y="5.9" width="17.6" height="5.4" rx="1.4" fill="#0090FF"/>
-          <path d="M11.4 5.9 L8.6 11.3 M18.2 5.9 L15.4 11.3"
-                stroke="#ffffff" stroke-width="2.4" stroke-linecap="butt"/>
-        </g>
-      </g>
+          <!-- What Takes puts in the cloud: the clapperboard itself, because a take is what a clapperboard
+           counts. This was drawn by hand in the cloud's own blue, which at ten pixels read as a blue smudge
+           rather than a clapperboard; the glyph is what people already recognise, and it brings its own
+           black and white, so it reads at this size and does not compete with the mark around it. -->
+      <text x="32.9" y="33.9" text-anchor="middle" dominant-baseline="central"
+            font-size="9.6">🎬</text>
         </svg></span>
     <div>
       <div class="sub">Filecoin Onchain Cloud</div>
@@ -149,11 +145,15 @@ a{color:var(--accent)}
   </div>
 
   <div class="card" id="setcard" hidden>
+    <div id="provpick"></div>
     <h2>Where your pictures live</h2>
     <div class="row" id="setpick"></div>
     <p class="muted" id="setnote" style="margin-top:10px"></p>
+    <p class="muted" id="setnote2" style="margin-top:6px"></p>
     <div id="pieces"></div>
   </div>
+
+  <div id="extras"></div>
 
   <div class="card" id="setupcard" hidden>
     <h2>Your pictures</h2>

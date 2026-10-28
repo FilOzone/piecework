@@ -37,8 +37,13 @@ const SPEC = CFG.jobs[JOB];
 const IS_PICTURE = /\.(jpe?g|png|webp|bmp|gif)$/i;
 const IS_INPUT = /(\.(jpe?g|png|webp|bmp|gif)|^prompt\.json|^version-\d+\.mp4)$/i;
 
-// The provider running on this machine, as the Takes build describes it.
-const PROVIDER = { address: "0xA0C38545600fe067D79Cac5215049eEb4BF387d0", curioUrl: "http://localhost:8080" };
+// Which provider to play against. Defaults to the one on this machine; --provider james runs the same
+// script against a real Curio on someone else's hardware, which is the only way to find out whether a
+// provider's "it's built" and a paid job on chain are the same thing.
+const PROVIDERS = {
+  local: { address: "0xA0C38545600fe067D79Cac5215049eEb4BF387d0", curioUrl: "http://localhost:8080" },
+  james: { address: "0xa3971A7234a3379A1813d9867B531e7EeB20ae07", curioUrl: "https://calib.ezpdpz.net" },
+};
 
 // A piece smaller than 127 bytes cannot be stored at all, and a short prompt makes one: the first take
 // failed at upload, before anything reached the chain. The job keeps only the keys it knows
@@ -52,6 +57,8 @@ function promptBody(o) {
 }
 
 const arg = (k) => { const i = process.argv.indexOf(k); return i > 0 ? process.argv[i + 1] : undefined; };
+const WHO = arg("--provider") ?? "local";
+const PROVIDER = PROVIDERS[WHO] ?? (() => { throw new Error(`no provider ${WHO}`); })();
 const say = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const fail = (m) => { console.error("FAILED:", m); process.exit(1); };
@@ -157,9 +164,10 @@ async function ensureMoney(price) {
 }
 
 async function main() {
-  say(`Client ${account.address} → provider ${PROVIDER.address} (${PROVIDER.curioUrl}).`);
-  const health = await fetch(PROVIDER.curioUrl + "/piece/bafkqaaa").then((r) => r.status).catch(() => null);
-  if (health === null) fail(`nothing is answering at ${PROVIDER.curioUrl} — start the provider first`);
+  say(`Client ${account.address} → provider ${WHO} ${PROVIDER.address} (${PROVIDER.curioUrl}).`);
+  const health = await fetch(PROVIDER.curioUrl + "/pdp/ping").then((r) => r.status).catch(() => null);
+  if (health === null) fail(`nothing is answering at ${PROVIDER.curioUrl}`);
+  say(`Provider answers /pdp/ping with ${health}.`);
 
   let dataSetId = arg("--data-set") ? BigInt(arg("--data-set")) : undefined;
   const prompt = promptBody({ prompt: arg("--prompt") ?? "a slow drift across the valley from dawn to night",

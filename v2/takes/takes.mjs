@@ -17,6 +17,64 @@ const num = (s) => Number(s ?? 0);
 const fmt = (s, dp = 3) => num(s).toFixed(dp);
 
 const JOB = "video-gen:v1";
+// The other things a client can run over the same data set. Takes was one job because there was one job;
+// these read what is already stored -- the pictures that went in, the takes that came out -- so they belong
+// on the same page rather than behind a separate catalogue.
+//
+// frame-stability is here too but needs a track.json saying which region to watch, and a region nobody
+// chose produces a confident answer about nothing. So it is offered only once such a file is in the data
+// set, which the drop zone above will take like any other file.
+const EXTRAS = [
+  { type: "image-index:v1", title: "What is in my pictures",
+    blurb: "Detects what is in each picture and where. Faces are detected, never identified.",
+    needs: "a picture" },
+  { type: "frame-similarity:v1", title: "Where does a take change",
+    blurb: "The cut points of a take \u2014 what would let the next version reuse the segments it did not change.",
+    needs: "a take" },
+  { type: "frame-stability:v1", title: "Did something move",
+    blurb: "Reads every frame and tracks one region named in track.json. Drop a track.json above to enable it.",
+    needs: "a take and a track.json" },
+];
+
+const extFor = (type) => (PW.CFG.jobs[type]?.inputExtensions ?? []).map((e) => e.toLowerCase());
+const piecesFor = (type) => {
+  const exts = extFor(type);
+  const named = state.pieces.filter((f) => exts.some((e) => f.name.toLowerCase().endsWith(e)));
+  // frame-stability is useless without its spec, so do not offer it as though it were ready.
+  if (type === "frame-stability:v1" && !named.some((f) => /^track\.json$/i.test(f.name))) return [];
+  if (type === "frame-stability:v1" && !named.some((f) => /\.(mp4|mov|mkv|webm|avi|m4v)$/i.test(f.name))) return [];
+  return named;
+};
+
+async function runExtra(type) {
+  const ids = piecesFor(type).map((f) => f.pieceId);
+  if (!ids.length) throw new Error(`nothing in this data set that ${type} can read`);
+  await PW.order(state.provider, state.dataSetId, type, "keep-inputs", ids);
+  await refresh();
+}
+
+function drawExtras() {
+  if (!state.dataSetId) return "";
+  const price = (t) => num(PW.CFG.jobs[t]?.price);
+  const canPay = (t) => state.money && num(state.money.available) >= price(t);
+  const rows = EXTRAS.map((x) => {
+    const n = piecesFor(x.type).length;
+    const ok = n > 0 && canPay(x.type) && !state.busy;
+    const why = n === 0 ? `needs ${x.needs} in this data set`
+      : !canPay(x.type) ? `needs ${price(x.type)} ${PW.CFG.token} in Filecoin Pay`
+      : `over ${n} piece${n > 1 ? "s" : ""}`;
+    return `<div class="extra">
+      <div><b>${esc(x.title)}</b> <span class="muted">${esc(price(x.type))} ${esc(PW.CFG.token)}</span>
+        <div class="muted">${esc(x.blurb)}</div></div>
+      <div style="text-align:right">
+        <button class="b" data-extra="${esc(x.type)}" ${ok ? "" : "disabled"}>Run it</button>
+        <div class="muted" style="font-size:.78rem;margin-top:4px">${esc(why)}</div></div>
+    </div>`;
+  }).join("");
+  return `<div class="card"><h2>Other things you can run on this data set</h2>
+    <p class="muted">These read what is already stored here \u2014 the pictures you uploaded and the takes
+    they produced \u2014 and write their answers back in as new pieces.</p>${rows}</div>`;
+}
 // /piece/<cid> is the bytes the CID names and nothing else. /play/<cid> is the same video re-encoded if a
 // browser could not decode it -- a convenience for the <video> element, never for a download or a check.
 //
@@ -36,14 +94,41 @@ const IS_INPUT = /(\.(jpe?g|png|webp|bmp|gif)|^prompt\.json|^version-\d+\.mp4)$/
 // was acted on.
 const state = { provider: null, dataSetId: null, sets: [], money: null, pick: "new",
                 waiting: [], takes: [], pieces: [], jobs: {}, block: 0,
-                busy: false, busyText: "", error: "", note: "" };
+                busy: false, busyText: "", error: "", note: "", setsError: "" };
 
-// The provider is chosen, not asked for: the first that actually offers this job. A page about one job has
-// no business showing a dropdown when only one entry in it can run anything.
+// Which providers can actually run this job. The page used to take the first and say nothing, which was
+// right while only one could; with two it has to be a choice, because a data set lives at one provider and
+// the money goes to whoever runs the work.
+const ableProviders = () => PW.CFG.providers.filter((p) => !p.offers || p.offers.includes(JOB));
+
 function pickProvider() {
-  const able = PW.CFG.providers.filter((p) => !p.offers || p.offers.includes(JOB));
+  const able = ableProviders();
   if (!able.length) throw new Error(`no provider in this configuration offers ${JOB}`);
-  return able[0];
+  return able.find((p) => p.id === state.provider) ?? able[0];
+}
+
+// A data set belongs to one provider and so does everything in it, so changing provider cannot keep the
+// open set, its pieces or its takes: those are another machine's and reading them from this one would
+// show a chain that is not there.
+function useProvider(id) {
+  if (id === state.provider) return;
+  state.provider = id;
+  state.dataSetId = null; state.pick = "new"; state.sets = []; state.setsError = "";
+  state.pieces = []; state.takes = []; state.jobs = {};
+  try { localStorage.setItem("takes-provider", id); } catch { /* private window */ }
+  draw();
+  run("steps", "Switching provider", async () => { await refreshSets(); await refreshMoney(); });
+}
+
+function drawProviders() {
+  const able = ableProviders();
+  if (able.length < 2) return "";
+  const p = pickProvider();
+  return `<div class="row" style="margin-bottom:10px">
+      <select id="prov">${able.map((x) =>
+        `<option value="${esc(x.id)}"${x.id === p.id ? " selected" : ""}>${esc(x.name)}</option>`).join("")}</select>
+      <span class="muted">${esc(p.curioUrl)} — takes you order are run here, and paid to this provider</span>
+    </div>`;
 }
 
 function say(where, text) { const el = $(where); if (el) el.textContent = text || ""; }
@@ -101,7 +186,12 @@ async function refreshMoney() { state.money = await PW.money().catch(() => null)
 
 async function refreshSets() {
   if (!state.provider) return;
-  state.sets = await PW.findDataSets(state.provider).catch(() => []);
+  try {
+    state.sets = await PW.findDataSets(state.provider);
+    state.setsError = "";
+  } catch (e) {
+    state.setsError = e?.shortMessage ?? e?.message ?? String(e);
+  }
 }
 
 // A typed prompt becomes the file the job reads. The job is unchanged and still looks for prompt.json in
@@ -175,6 +265,7 @@ async function order() {
 async function refresh() {
   await refreshMoney();
   state.block = await PW.block().catch(() => state.block);
+  await refreshSets();
   state.jobs = await PW.findJobs().catch(() => state.jobs);
   if (!state.dataSetId) return draw();
   const s = await PW.readSet(state.provider, state.dataSetId, PW.CFG.jobs);
@@ -304,12 +395,20 @@ function draw() {
 
   $("balances").innerHTML = drawBalances();
   $("faucets").innerHTML = drawFaucets();
+  $("provpick").innerHTML = drawProviders();
+  const pv = $("prov");
+  if (pv) pv.onchange = () => useProvider(pv.value);
+
   const picker = $("setpick"), wantSets = drawSets();
   const touching = picker.contains(document.activeElement);
   if (!touching && picker.dataset.html !== wantSets) { picker.innerHTML = wantSets; picker.dataset.html = wantSets; }
   $("uphint").textContent = state.dataSetId
     ? "" : "Upload your pictures first, then type a prompt and make a take.";
-  $("setnote").textContent = state.dataSetId
+  $("setnote").innerHTML = state.setsError
+    ? `<span class="pill bad">could not read your data sets</span> ${esc(state.setsError)} — retrying every few seconds.`
+    : !state.sets.length && PW.me ? "No data sets with this provider yet. Your first upload makes one."
+    : "";
+  $("setnote2").textContent = state.dataSetId
     ? `Using data set #${state.dataSetId} at ${PW.CFG.providers.find((p) => p.id === state.provider)?.name ?? state.provider}.`
     : "Your first take makes a data set. Everything after that goes into the same one, which is what lets a take be built on the one before.";
   const w = state.waiting;
@@ -343,6 +442,9 @@ function draw() {
   $("task").innerHTML = drawTask();
   $("jobs").innerHTML = drawJobs();
   $("pieces").innerHTML = drawPieces();
+  $("extras").innerHTML = drawExtras();
+  document.querySelectorAll("button[data-extra]").forEach((b) => (b.onclick = () =>
+    run("steps", PW.CFG.jobs[b.dataset.extra]?.name ?? b.dataset.extra, () => runExtra(b.dataset.extra))));
   $("takes").innerHTML = drawTakes();
   document.querySelectorAll("a[data-save]").forEach((a) => (a.onclick = saveWithItsName));
   document.querySelectorAll("video[data-take]").forEach((v) => (v.onerror = () => {
@@ -362,14 +464,19 @@ function draw() {
   // rebuild kept the dropdown from closing under the pointer and left the button next to it reading
   // "Start a new one" over a data set the client had just chosen.
   if (use) {
+    const nothingOpen = state.pick === "new" && !state.dataSetId;
     use.textContent = state.pick === "new" ? "Start a new one"
       : Number(state.pick) === state.dataSetId ? `Using #${state.pick}` : `Open #${state.pick}`;
-    use.disabled = state.busy;
+    use.disabled = state.busy || nothingOpen;
+    use.title = nothingOpen ? "Nothing is open — upload pictures below and they make a new data set" : "";
   }
 }
 
 $("connect").onclick = () => run("connectsteps", "Connecting", async () => {
   await PW.connect();
+  let remembered = null;
+  try { remembered = localStorage.getItem("takes-provider"); } catch { /* private window */ }
+  if (remembered && ableProviders().some((p) => p.id === remembered)) state.provider = remembered;
   state.provider = pickProvider().id;
   await refreshMoney();
   await refreshSets();
@@ -404,4 +511,4 @@ window.addEventListener("dragover", (e) => e.preventDefault());
 window.addEventListener("drop", (e) => e.preventDefault());
 
 draw();
-setInterval(() => { if (!state.busy && state.dataSetId) refresh().catch(() => {}); }, 8000);
+setInterval(() => { if (!state.busy && PW.me) refresh().catch(() => {}); }, 8000);
