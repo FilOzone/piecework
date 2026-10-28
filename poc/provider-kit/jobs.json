@@ -376,5 +376,50 @@
       ".png",
       ".jpg"
     ]
+  },
+  "image-caption-gpu:v1": {
+    "name": "Describe my images in words (on the card)",
+    "dockerImage": "piecework/image-caption-gpu:v1",
+    "outputs": "*",
+    "price": "0.5",
+    "inputExtensions": [
+      ".jpg",
+      ".jpeg",
+      ".png",
+      ".webp",
+      ".bmp",
+      ".tif",
+      ".tiff"
+    ]
+  },
+  "video-gen-gpu:v1": {
+    "name": "Build a video from my pictures, with a model (on the card)",
+    "dockerImage": "piecework/video-gen-gpu:v1",
+    "outputs": "*",
+    "price": "1.5",
+    "inputExtensions": [
+      ".jpg",
+      ".jpeg",
+      ".png",
+      ".webp",
+      ".bmp",
+      ".json",
+      ".mp4"
+    ]
+  },
+  "video-search-gpu:v1": {
+    "name": "Make my video searchable by description (on the card)",
+    "dockerImage": "piecework/video-search-gpu:v1",
+    "outputs": "*",
+    "price": "0.8",
+    "inputExtensions": [
+      ".mp4",
+      ".mov",
+      ".mkv",
+      ".webm",
+      ".avi",
+      ".m4v",
+      ".json"
+    ]
   }
 }

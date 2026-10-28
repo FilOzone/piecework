@@ -126,6 +126,15 @@ const PARAMS = {
     restore: { name: "Enlarge and clean up my photographs", image: "photo-restore:v1", price: U("0.6"), deadline: NET.deadlines.proved,
       desc: "Four times the width and height, with the detail reconstructed rather than simply scaled up. Real-ESRGAN, running on the provider's machine next to the pictures. Every output pixel passes through 23 residual blocks, so a graphics card is worth about fifteen times a processor here: 17.6 seconds for a small image on this machine, 1.2 seconds for the same image on a provider's T4.",
       reads: "the .jpg and .png files you pick", writes: "a -restored.png for each, plus a report" },
+    imagecaptiongpu: { name: "Describe my images in words (on the card)", image: "image-caption-gpu:v1", price: U("0.5"), deadline: NET.deadlines.proved,
+      desc: "Describes each picture in a sentence rather than picking from eighty fixed categories. The detector row cannot name a racing car; this one can. Needs a card, and says so rather than falling back.",
+      reads: "your images", writes: "a -caption.txt an image, one image-caption.json, and a report" },
+    videogengpu: { name: "Build a video from my pictures, with a model (on the card)", image: "video-gen-gpu:v1", price: U("1.5"), deadline: NET.deadlines.proved,
+      desc: "The same loop and the same record as the processor row, with a diffusion model instead of the simple generator. Identical outputs, so the chain of takes cannot tell which one ran.",
+      reads: "your pictures, prompt.json, and the previous version", writes: "version-N.mp4, version-N.json and a report" },
+    videosearchgpu: { name: "Make my video searchable by description (on the card)", image: "video-search-gpu:v1", price: U("0.8"), deadline: NET.deadlines.proved,
+      desc: "Embeds every sampled frame into the same space as text, so any phrase can be a query and the answer is timestamps. The vectors are kept, so later questions cost a dot product rather than another pass.",
+      reads: "your videos and queries.json", writes: "a -vectors.npy and a -search.txt a video, and a report" },
     framesimilarity: { name: "Find where my video changes", image: "frame-similarity:v1", price: U("0.3"), deadline: NET.deadlines.proved,
       desc: "Compares each sampled frame with the one before and says where the picture changed enough to be a new shot. The cut points are what let a video be stored as segments, so the next version can point at the segments it did not change instead of storing them again.",
       reads: "your videos", writes: "a -similarity.txt and a -cuts.json per video, and a report" },
@@ -265,6 +274,28 @@ function extensionFor(bytes) {
 // pictures, the prompt, and the previous version -- the last of those is what makes it a loop, and why the
 // predicate accepts this job's own output back as input.
 // Where a video changes, so it can be cut into segments the next version can reuse. No model, no card.
+// The rows that need a card. Each refuses to run without one rather than falling back quietly: the only
+// reason a GPU row exists beside a CPU row is the comparison, and a mislabelled number poisons it.
+JOB_SCRIPTS["image-caption-gpu:v1"] = {
+  dockerImage: "piecework/image-caption-gpu:v1",
+  outputs: "*",
+  inputs: (name) => /\.(jpe?g|png|webp|bmp|tiff?)$/i.test(name) && !/-caption\.txt$/i.test(name),
+};
+
+JOB_SCRIPTS["video-gen-gpu:v1"] = {
+  dockerImage: "piecework/video-gen-gpu:v1",
+  outputs: "*",
+  inputs: (name) => /\.(jpe?g|png|webp|bmp)$/i.test(name)
+    || /^prompt\.(json|txt)$/i.test(name)
+    || /^version-\d+\.mp4$/i.test(name),
+};
+
+JOB_SCRIPTS["video-search-gpu:v1"] = {
+  dockerImage: "piecework/video-search-gpu:v1",
+  outputs: "*",
+  inputs: (name) => /\.(mp4|mov|mkv|webm|avi|m4v)$/i.test(name) || /^queries\.json$/i.test(name),
+};
+
 JOB_SCRIPTS["frame-similarity:v1"] = {
   dockerImage: "piecework/frame-similarity:v1",
   outputs: "*",

@@ -480,6 +480,60 @@
         ".jpg"
       ],
       "note": "Reads every frame, not a sample, and tracks one region named in track.json beside the video. The useful answer is usually a negative: it did not move, in any frame, and here are the per-frame coordinates. The point of publishing the coordinates is that nobody has to take the verdict on trust — the video is stored, the method is fixed, and the same job over the same piece gives the same table, so anyone holding the pieces can check it. No model and no card: normalised cross-correlation in a small window."
+    },
+    "image-caption-gpu:v1": {
+      "name": "Describe my images in words (on the card)",
+      "price": "0.5",
+      "outputs": [
+        "(a -caption.txt per image, one image-caption.json, plus a report)"
+      ],
+      "deadlineEpochs": 240,
+      "inputExtensions": [
+        ".jpg",
+        ".jpeg",
+        ".png",
+        ".webp",
+        ".bmp",
+        ".tif",
+        ".tiff"
+      ],
+      "note": "Describes each picture in a sentence instead of picking from a fixed list. This answers the one real limit of “Index what is in my images”: that job's detector knows exactly eighty COCO categories, and racing car, helmet and wheel are not among them — so photographs of Formula 1 cars came back as a truck and an airplane. Not a bug and not tunable; the model has no word for what it is looking at. A vision-language model has no fixed vocabulary. Florence-2-base, about 0.5 GB in fp16, which no sealing card will notice. GPU only on purpose and it refuses without a card: seconds an image on a processor against well under one on a T4, and a run that quietly used the processor would report a number nobody could compare with the detector row. Not yet run by anyone, on any card."
+    },
+    "video-gen-gpu:v1": {
+      "name": "Build a video from my pictures, with a model (on the card)",
+      "price": "1.5",
+      "outputs": [
+        "(version-N.mp4, version-N.json and a report)"
+      ],
+      "deadlineEpochs": 240,
+      "inputExtensions": [
+        ".jpg",
+        ".jpeg",
+        ".png",
+        ".webp",
+        ".bmp",
+        ".json",
+        ".mp4"
+      ],
+      "note": "The same loop and the same record, with Stable Video Diffusion instead of the deliberately simple motion generator. Identical output contract — version-N.mp4 beside a version-N.json naming every input by its sha256, the prompt, and the version it was built on — so the chain of takes, the client page and the storage cannot tell which generator ran. The model invents the motion from your last picture rather than panning across a still. GPU only and it refuses without a card: a diffusion video model on a processor is hours per clip, which is not a slower service but no service. The image is large, about 12 GB, because the weights are baked in — jobs run with no network. Not yet run by anyone, on any card."
+    },
+    "video-search-gpu:v1": {
+      "name": "Make my video searchable by description (on the card)",
+      "price": "0.8",
+      "outputs": [
+        "(a -vectors.npy and a -search.txt per video, plus a report)"
+      ],
+      "deadlineEpochs": 240,
+      "inputExtensions": [
+        ".mp4",
+        ".mov",
+        ".mkv",
+        ".webm",
+        ".avi",
+        ".m4v",
+        ".json"
+      ],
+      "note": "Embeds each sampled frame into the same space as text, so the question can be any phrase — “a red single-seater on a wet track”, “an empty grandstand” — and the answer is the moments that match, with timestamps. Put the phrases in queries.json. This generalises “Index what is in my video”, which runs a detector that knows eighty fixed categories and can never be asked about anything else. The frame vectors are written beside the video on purpose: describing the archive is the expensive pass and every question after it is a dot product, which is the economic case for doing this where the data already sits. CLIP ViT-B/32, about 600 MB. GPU only, and it refuses without a card. Not yet run by anyone."
     }
   },
   "policies": [
