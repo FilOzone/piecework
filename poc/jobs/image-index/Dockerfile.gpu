@@ -1,0 +1,31 @@
+# PieceWork job: the same image index, on the GPU a sealing or farming rig already owns.
+# Contract unchanged: inputs in /in (read-only), results in /out, run with --network none.
+#   docker build -f Dockerfile.gpu -t piecework/image-index-gpu:v1 .
+#
+# Detection is a convolutional forward pass per image, which is the shape of work a card does well. Unlike
+# video there is no decode to get in the way -- video-index is limited by OpenCV decoding frames on the
+# processor, and a folder of JPEGs has no such ceiling -- so this is the cleaner measurement of what the
+# card is worth, and the better one to quote.
+#
+# No architecture is pinned: nothing is compiled from source, and the torch CUDA wheels ship kernels for
+# Volta, Turing, Ampere, Ada and Hopper. That matters for a real fleet -- a T4 (Turing, sm_75), an A4000
+# (Ampere, sm_86) and a V100 (Volta, sm_70) are three architectures, and an image built for one fails on
+# the others at runtime with "no kernel image is available", not at build.
+#
+# Faces: detected, never identified, exactly as in the CPU image. Putting a card behind it changes the
+# speed and nothing about what is produced.
+FROM nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-pip libgl1 libglib2.0-0 \
+ && rm -rf /var/lib/apt/lists/*
+RUN pip3 install --no-cache-dir torch==2.5.1 torchvision==0.20.1 \
+ && pip3 install --no-cache-dir opencv-python-headless==4.10.0.84
+ENV TORCH_HOME=/models
+RUN python3 -c "import torchvision as tv; \
+    tv.models.detection.fasterrcnn_mobilenet_v3_large_fpn(\
+      weights=tv.models.detection.FasterRCNN_MobileNet_V3_Large_FPN_Weights.COCO_V1)"
+ENV DEVICE=cuda SCORE=0.5 FACES=1
+COPY index.py /app/index.py
+LABEL org.piecework.job="image-index-gpu" org.piecework.inputs="/in/*.jpg /in/*.png /in/*.webp" \
+      org.piecework.outputs="/out/*-index.txt /out/image-index.json /out/image-index-report.txt"
+ENTRYPOINT ["python3", "/app/index.py"]
