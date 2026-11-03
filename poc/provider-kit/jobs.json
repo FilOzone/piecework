@@ -421,5 +421,23 @@
       ".m4v",
       ".json"
     ]
+  },
+  "video-gen-segments:v1": {
+    "name": "Build a video stored as segments, reusing what did not change",
+    "dockerImage": "piecework/video-gen:v1",
+    "env": {
+      "SEGMENTS": "1"
+    },
+    "outputs": "*",
+    "price": "0.4",
+    "inputExtensions": [
+      ".jpg",
+      ".jpeg",
+      ".png",
+      ".webp",
+      ".bmp",
+      ".json",
+      ".mp4"
+    ]
   }
 }

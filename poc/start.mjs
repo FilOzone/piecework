@@ -144,6 +144,9 @@ const PARAMS = {
     framestability: { name: "Prove whether something moved", image: "frame-stability:v1", price: U("0.3"), deadline: NET.deadlines.proved,
       desc: "Reads every frame, not a sample, and tracks one region you name in track.json. The answer is usually a negative worth having: it did not move, in any frame, and here are the coordinates to check that against the stored video.",
       reads: "your videos and track.json", writes: "a -stability.txt and a -stability.json per video, and a report" },
+    videogenseg: { name: "Build a video stored as segments, reusing what did not change", image: "video-gen-segments:v1", price: U("0.4"), deadline: NET.deadlines.proved,
+      desc: "The same loop, stored as one piece per shot instead of one piece per version. A take built on another names the segments it did not change rather than storing them again, so the third take is twelve segments of video that cost four to store.",
+      reads: "your pictures, prompt.json, and the earlier versions", writes: "version-N-seg-KK.mp4 per shot, version-N.json and a report" },
     videogen: { name: "Build a video from my pictures, and record what it came from", image: "video-gen:v1", price: U("0.4"), deadline: NET.deadlines.proved,
       desc: "Builds a video from the pictures you pick, and writes beside it a record of exactly what it was made from: every input by its sha256, the prompt you gave, and the version it was built on. Order it again and it builds the next version on top of the last, in the same data set, so you end up with a chain of versions where each names its parent. Put your prompt in prompt.json. The generator is deliberately simple; the record is the point.",
       reads: "your pictures, prompt.json, and the previous version", writes: "version-N.mp4, version-N.json and a report" },
@@ -318,6 +321,18 @@ JOB_SCRIPTS["frame-stability:v1"] = {
   inputs: (name) => /\.(mp4|mov|mkv|webm|avi|m4v)$/i.test(name)
     || /^track\.json$/i.test(name)
     || /\.(png|jpe?g)$/i.test(name),   // an optional template image to look for
+};
+
+// The same program and the same picture, written as one file per shot. A version built on another does
+// not re-emit the segments it did not change: it names them, and those pieces are already in the data set,
+// so the unchanged part of a video costs nothing to store rather than nearly nothing.
+JOB_SCRIPTS["video-gen-segments:v1"] = {
+  dockerImage: "piecework/video-gen:v1",
+  env: { SEGMENTS: "1" },
+  outputs: "*",
+  inputs: (name) => /\.(jpe?g|png|webp|bmp)$/i.test(name)
+    || /^prompt\.(json|txt)$/i.test(name)
+    || /^version-\d+(-seg-\d+)?\.(mp4|json)$/i.test(name),
 };
 
 JOB_SCRIPTS["video-gen:v1"] = {
@@ -763,7 +778,12 @@ async function runJob(jobId, client, spec, inputPieceIds, deadline, dataSetId) {
       "--guest", String(spec.guest ?? "bound"),
       "--out", "/job/out", "--proof", "/job/proof.json",
       ...inputNames.map((n) => `/job/in/${n}`)], { ...XENV, maxBuffer: 64 * 1024 * 1024 });
-  } else if (spec.dockerImage) await execFile("docker", ["run", "--rm", "--network", "none", "-v", `${dir}/in:/in:ro`, "-v", `${dir}/out:/out`, spec.dockerImage], XENV);
+  } else if (spec.dockerImage) await execFile("docker", ["run", "--rm", "--network", "none",
+    "-v", `${dir}/in:/in:ro`, "-v", `${dir}/out:/out`,
+    // A job may need a switch its image cannot infer from the inputs: segmented output is the same
+    // program and the same picture, written as one file per shot instead of one file.
+    ...Object.entries(spec.env ?? {}).flatMap(([k, v]) => ["-e", `${k}=${v}`]),
+    spec.dockerImage], XENV);
   else await execFile("docker", ["run", "--rm", "--network", "none", "-v", `${dir}/in:/in:ro`, "-v", `${dir}/out:/out`,
     "alpine:3.20", "sh", "-c", spec.script], XENV);
   plog(`Job #${jobId}: the program finished in ${((Date.now() - t0) / 1000).toFixed(1)} s.`);

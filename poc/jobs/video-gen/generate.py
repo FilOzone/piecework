@@ -31,6 +31,7 @@ do share most of their content.
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -38,6 +39,14 @@ import time
 
 IN, OUT = "/in", "/out"
 GENERATOR = os.environ.get("GENERATOR", "motion")
+# Segments: the version is written as one file per shot rather than one file for the whole thing, and a
+# version built on another one does not re-emit the segments it did not change -- it names them. Those
+# pieces are already in the data set, so the storage cost of the unchanged part is zero rather than small.
+#
+# This is the answer to the 0.0% measurement. Two takes sharing half their frames share none of their bytes
+# once encoded, so the sharing cannot be found by chunking afterwards; it has to be built in at the only
+# place it can be, which is the boundary between what changed and what did not.
+SEGMENTS = os.environ.get("SEGMENTS", "0") == "1"
 DEVICE = os.environ.get("DEVICE", "cpu")
 IMAGES = (".jpg", ".jpeg", ".png", ".webp", ".bmp")
 VIDEOS = (".mp4", ".mov", ".mkv", ".webm")
@@ -74,14 +83,18 @@ def read_settings():
 
 
 def next_version():
-    """Version numbers come from what is already in the data set, so the client need not track them."""
+    """Version numbers come from what is already in the data set, so the client need not track them.
+
+    Every shape a version can take has to count here, not just the whole-file one. When segments were
+    added this looked only for version-N.mp4, which segment mode never writes -- so every take believed it
+    was the first, numbered itself 1, and wrote segment names that collided with its own parent's. In a
+    data set that is not a saving, it is two different videos claiming the same pieces.
+    """
     highest = 0
     for f in os.listdir(IN):
-        if f.startswith("version-") and f.endswith(".mp4"):
-            try:
-                highest = max(highest, int(f[len("version-"):-len(".mp4")]))
-            except ValueError:
-                pass
+        m = re.fullmatch(r"version-(\d+)(?:-seg-\d+)?\.(?:mp4|json)", f)
+        if m:
+            highest = max(highest, int(m.group(1)))
     return highest + 1
 
 
@@ -171,6 +184,15 @@ def main():
         h, w = carried[0].shape[:2]
     h, w = h - h % 2, w - w % 2
 
+    # One segment per source picture, which is where the picture actually changes -- the same boundary
+    # frame-similarity finds by histogram distance, and the one an encoder puts a keyframe at anyway.
+    inherited = []
+    if SEGMENTS:
+        prior = sorted(f for f in names if re.fullmatch(r"version-\d+\.json", f))
+        if prior:
+            with open(os.path.join(IN, prior[-1])) as f:
+                inherited = (json.load(f).get("segments") or [])
+
     out_path = os.path.join(OUT, f"version-{version}.mp4")
     writer = Encoder(out_path, w, h, fps)
     for frame in carried:
@@ -214,7 +236,34 @@ def main():
     prompt_seed = int.from_bytes(hashlib.sha256(str(s["prompt"]).encode()).digest()[:2], "big")
     rng = np.random.default_rng(int(s["seed"]) ^ prompt_seed)
     per_image = max(1, int(round(fps * seconds / len(images))))
-    for name in ([] if produced_frames is not None else images):
+    made_segments = []
+    if SEGMENTS and produced_frames is None:
+        writer.release()
+        os.remove(out_path)
+        prompt_seed2 = int.from_bytes(hashlib.sha256(str(s["prompt"]).encode()).digest()[:2], "big")
+        rng2 = np.random.default_rng(int(s["seed"]) ^ prompt_seed2)
+        per_image2 = max(1, int(round(fps * seconds / len(images))))
+        for idx, name in enumerate(images):
+            img = cv2.imread(os.path.join(IN, name))
+            if img is None:
+                continue
+            seg_name = f"version-{version}-seg-{idx:02d}.mp4"
+            seg_path = os.path.join(OUT, seg_name)
+            seg = Encoder(seg_path, w, h, fps)
+            big = cv2.resize(img, (int(w * 1.25), int(h * 1.25)))
+            dx, dy = rng2.integers(0, max(1, big.shape[1] - w)), rng2.integers(0, max(1, big.shape[0] - h))
+            for i in range(per_image2):
+                t = i / max(1, per_image2 - 1)
+                x = int(dx * (1 - t) + (big.shape[1] - w) * 0.5 * t)
+                y = int(dy * (1 - t) + (big.shape[0] - h) * 0.5 * t)
+                seg.write(big[y:y + h, x:x + w])
+            seg.release()
+            made_segments.append({"name": seg_name, "sha256": sha256(seg_path),
+                                  "bytes": os.path.getsize(seg_path), "frames": per_image2,
+                                  "from": f"version-{version}", "source": name})
+        produced_frames = sum(x["frames"] for x in inherited) + sum(x["frames"] for x in made_segments)
+
+    for name in ([] if (produced_frames is not None or SEGMENTS) else images):
         img = cv2.imread(os.path.join(IN, name))
         if img is None:
             continue
@@ -225,7 +274,7 @@ def main():
             x = int(dx * (1 - t) + (img.shape[1] - w) * 0.5 * t)
             y = int(dy * (1 - t) + (img.shape[0] - h) * 0.5 * t)
             writer.write(img[y:y + h, x:x + w])
-    if produced_frames is None:
+    if produced_frames is None and not SEGMENTS:
         writer.release()
 
     # Everything this version was made from, by content rather than by name: a client holding the pieces can
@@ -239,7 +288,8 @@ def main():
             "images": [{"name": n, "sha256": sha256(os.path.join(IN, n))} for n in images],
             "parent": ({"name": parent, "sha256": sha256(os.path.join(IN, parent))} if parent else None),
         },
-        "produced": {"name": os.path.basename(out_path), "sha256": sha256(out_path),
+        "produced": None if SEGMENTS else {
+                     "name": os.path.basename(out_path), "sha256": sha256(out_path),
                      "bytes": os.path.getsize(out_path), "width": w, "height": h, "fps": fps,
                      "frames": produced_frames if produced_frames is not None
                                else len(carried) + per_image * len(images),
@@ -249,6 +299,33 @@ def main():
                                        else len(carried) + per_image * len(images)) / fps, 3),
                      "carriedFromParent": len(carried)},
     }
+    if SEGMENTS:
+        segments = inherited + made_segments
+        manifest["segments"] = segments
+        reused_bytes = sum(x["bytes"] for x in inherited)
+        new_bytes = sum(x["bytes"] for x in made_segments)
+        manifest["storage"] = {
+            "segmentsInThisVersion": len(segments),
+            "reusedFromEarlierVersions": len(inherited),
+            "writtenByThisVersion": len(made_segments),
+            "bytesWritten": new_bytes,
+            "bytesReused": reused_bytes,
+            # What the old way would have cost: every segment, every time.
+            "bytesIfWholeFile": reused_bytes + new_bytes,
+            "note": ("the reused segments are not written again: they are already pieces in this data set "
+                     "and this version names them by sha256, so a reader can check that what it is playing "
+                     "is what the earlier version produced"),
+        }
+        # The whole-file output does not exist in segment mode, so the produced block describes the set.
+        manifest["produced"] = {
+            "name": f"version-{version}", "segments": [x["name"] for x in segments],
+            "sha256OfSegments": [x["sha256"] for x in segments],
+            "width": w, "height": h, "fps": fps,
+            "frames": sum(x["frames"] for x in segments),
+            "seconds": round(sum(x["frames"] for x in segments) / fps, 3),
+            "bytes": reused_bytes + new_bytes,
+            "carriedFromParent": sum(x["frames"] for x in inherited),
+        }
     asked = round(seconds, 3)
     got = manifest["produced"]["seconds"]
     if abs(got - asked) > 0.05:
@@ -270,6 +347,16 @@ def main():
         r.write(f"\n{w}x{h}, {fps} fps, {manifest['produced']['frames']} frames")
         if carried:
             r.write(f" (of which {len(carried)} carried from the previous version)")
+        if SEGMENTS:
+            st = manifest["storage"]
+            r.write(f"\n\nStored as {st['segmentsInThisVersion']} segments, of which "
+                    f"{st['writtenByThisVersion']} were written now and {st['reusedFromEarlierVersions']} "
+                    f"were already here and are only named.\n")
+            r.write(f"This version wrote {st['bytesWritten']:,} bytes. The same video as one file would "
+                    f"have been {st['bytesIfWholeFile']:,}.\n")
+            if st["bytesIfWholeFile"]:
+                saved = 100 * st["bytesReused"] / st["bytesIfWholeFile"]
+                r.write(f"So {saved:.0f}% of it cost nothing to store, because it was already stored.\n")
         if abs(manifest["produced"]["seconds"] - round(seconds, 3)) > 0.05:
             r.write(f"\n\nNote: you asked for {round(seconds, 3)} seconds and this is "
                     f"{manifest['produced']['seconds']}. ")

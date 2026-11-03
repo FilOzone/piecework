@@ -202,7 +202,14 @@ async function order(dataSetId) {
         say(`--- ${g.name} (first lines) ---`);
         console.log(text.split("\n").slice(0, 12).map((l) => "    " + l).join("\n"));
       }
-      say(`PASS — ${JOB} ran as an ordered job and was paid.`);
+      // Paid is not delivered. Job #34 was paid 0.5 tUSDFC having produced no pieces at all, and this
+      // said PASS because the chain reported status 2 -- a check that could only ever agree with itself.
+      // What the client buys is files in their data set, so that is what is asserted.
+      if (!outs.length) fail(`${JOB} was PAID but delivered no output pieces at all. ` +
+        `The provider committed an empty result; nothing landed in data set #${dataSetId}.`);
+      if (!got.length) fail(`${JOB} was paid and committed ${outs.length} piece id(s), but none of them ` +
+        `could be read back from the data set.`);
+      say(`PASS — ${JOB} ran as an ordered job, was paid, and delivered ${got.length} file(s).`);
       return;
     }
     if (Number(j[8]) === 3) fail(`job #${jobId} refused on chain`);

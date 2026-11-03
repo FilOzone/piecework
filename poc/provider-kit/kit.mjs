@@ -321,7 +321,9 @@ async function runJob(ev) {
   try {
     if (spec.byo) {
       await runBounded(`piecework-job-${jobId}`,
-        [...mounts, "--cpus", spec.cpus, "--memory", spec.memory, "--pids-limit", "512", spec.dockerImage],
+        [...mounts, "--cpus", spec.cpus, "--memory", spec.memory, "--pids-limit", "512",
+         ...Object.entries(spec.env ?? {}).flatMap(([k, v]) => ["-e", `${k}=${v}`]),
+         spec.dockerImage],
         spec.seconds);
     } else if (spec.prove) {
       // The repo goes in read-only — the guest's ELF is compiled into the binary, so nothing is read from

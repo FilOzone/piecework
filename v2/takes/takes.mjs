@@ -98,7 +98,8 @@ function drawExtras() {
     const ok = n > 0 && canPay(x.type) && !state.busy;
     const prov = PW.CFG.providers.find((p) => p.id === state.provider);
     const unoffered = prov?.offers && !prov.offers.includes(x.type);
-    const why = unoffered ? `${prov.name.split(" ")[0]} does not run this one`
+    const short = (prov?.name ?? "this provider").replace(/\s*\(.*\)\s*$/, "").trim();
+    const why = unoffered ? `${short} has no GPU for this one`
       : !state.dataSetId ? "open a data set, or make a take, first"
       : n === 0 ? `needs ${x.needs} in this data set`
       : !canPay(x.type) ? `needs ${price(x.type)} ${PW.CFG.token} in Filecoin Pay`
@@ -157,8 +158,22 @@ function useProvider(id) {
   state.dataSetId = null; state.pick = "new"; state.sets = []; state.setsError = "";
   state.pieces = []; state.takes = []; state.jobs = {};
   try { localStorage.setItem("takes-provider", id); } catch { /* private window */ }
+  state.switching = true;
   draw();
-  run("steps", "Switching provider", async () => { await refreshSets(); await refreshMoney(); });
+  // Not through run(): it returns silently when anything else is busy, and the one thing that must not be
+  // dropped here is refilling the list we just emptied. A provider switch that leaves "no data sets here
+  // yet" over an account that has three is worse than a slow one.
+  (async () => {
+    try {
+      await refreshSets();
+      await refreshMoney();
+    } catch (e) {
+      state.setsError = e?.shortMessage ?? e?.message ?? String(e);
+    } finally {
+      state.switching = false;
+      draw();
+    }
+  })();
 }
 
 function drawProviders() {
@@ -354,7 +369,8 @@ function drawSets() {
     </select>
     <button class="b small" id="useset" ${state.busy ? "disabled" : ""}>${
       state.pick === "new" ? "Start a new one" : `Open #${esc(state.pick)}`}</button>
-    ${state.sets.length ? "" : '<span class="muted">no data sets here yet — your first take makes one</span>'}`;
+    ${state.switching ? '<span class="muted">looking for your data sets here…</span>'
+      : state.sets.length ? "" : '<span class="muted">no data sets here yet — your first take makes one</span>'}`;
 }
 
 // Choosing "Start a new one" has to actually put the page back to having no data set, or the next take is

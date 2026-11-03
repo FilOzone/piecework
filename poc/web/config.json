@@ -544,6 +544,25 @@
       ],
       "note": "Embeds each sampled frame into the same space as text, so the question can be any phrase — “a red single-seater on a wet track”, “an empty grandstand” — and the answer is the moments that match, with timestamps. Put the phrases in queries.json. This generalises “Index what is in my video”, which runs a detector that knows eighty fixed categories and can never be asked about anything else. The frame vectors are written beside the video on purpose: describing the archive is the expensive pass and every question after it is a dot product, which is the economic case for doing this where the data already sits. CLIP ViT-B/32, about 600 MB. GPU only, and it refuses without a card. Measured on a storage provider's own T4, the first run on any card: 600 frames from ten minutes of footage in 41.5 s, 14.4 frames a second, 60.6 s end to end. Asked for “a rocket launch” it returned 09:14 to 09:23 of the clip, which is where the launch is.",
       "inputPattern": "(\\.(mp4|mov|mkv|webm|avi|m4v)|^queries\\.json)$"
+    },
+    "video-gen-segments:v1": {
+      "name": "Build a video stored as segments, reusing what did not change",
+      "price": "0.4",
+      "outputs": [
+        "(version-N-seg-KK.mp4 per shot, version-N.json and a report)"
+      ],
+      "deadlineEpochs": 120,
+      "inputExtensions": [
+        ".jpg",
+        ".jpeg",
+        ".png",
+        ".webp",
+        ".bmp",
+        ".json",
+        ".mp4"
+      ],
+      "inputPattern": "(\\.(jpe?g|png|webp|bmp)|^prompt\\.json|^version-\\d+(-seg-\\d+)?\\.(mp4|json))$",
+      "note": "The same loop as the ordinary take, stored as one piece per shot rather than one piece per version. A take built on another does not re-encode or re-store the shots it did not change: it names them by sha256, and those pieces are already in your data set. Measured here, each take writes four segments however long the chain gets — take 3 is twelve segments of video that cost four to store, so two thirds of it was free, and the fraction climbs with every iteration. This is the saving that chunking cannot find after the fact: two takes sharing half their frames share 0.0% of their bytes once encoded, so it has to be built in at the boundary between what changed and what did not."
     }
   },
   "policies": [
