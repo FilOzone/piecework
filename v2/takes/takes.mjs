@@ -31,22 +31,58 @@ const EXTRAS = [
   { type: "frame-similarity:v1", title: "Where does a take change",
     blurb: "The cut points of a take \u2014 what would let the next version reuse the segments it did not change.",
     needs: "a take" },
+  { type: "image-caption-gpu:v1", title: "Describe my pictures in words",
+    blurb: "A vision-language model, so there is no fixed list of things it can name. The detector above "
+           + "knows eighty categories and none of them is a racing car; this one just says what it sees. "
+           + "Needs a provider with a card.",
+    needs: "a picture" },
+  { type: "video-search-gpu:v1", title: "Search a take by describing it",
+    blurb: "Embeds every sampled frame so any phrase becomes a query \u2014 \u201ca red car\u201d, "
+           + "\u201can empty room\u201d \u2014 and the answer is the moments that match, with timestamps. "
+           + "Needs a provider with a card.",
+    needs: "a take" },
+  { type: "video-gen-gpu:v1", title: "Make a take with a model instead",
+    blurb: "The same loop and the same record, with a diffusion model rather than the simple generator. "
+           + "It writes a version just like the ordinary one, so it joins the chain above. Slow \u2014 "
+           + "minutes, not a second \u2014 and needs a provider with a card.",
+    needs: "a picture" },
   { type: "frame-stability:v1", title: "Did something move",
-    blurb: "Reads every frame and tracks one region named in track.json. Drop a track.json above to enable it.",
-    needs: "a take and a track.json" },
+    blurb: "Reads every frame of a take \u2014 not a sample \u2014 and checks whether one patch of the "
+           + "picture ever shifts. The answer is a position for every frame, so you can check it against "
+           + "the stored video rather than taking the verdict on trust.",
+    needs: "a take" },
 ];
 
 const extFor = (type) => (PW.CFG.jobs[type]?.inputExtensions ?? []).map((e) => e.toLowerCase());
+// Same rule as the ordering tool: where the catalogue names a pattern it wins, so a job is never ordered
+// over pieces it cannot read.
 const piecesFor = (type) => {
   const exts = extFor(type);
-  const named = state.pieces.filter((f) => exts.some((e) => f.name.toLowerCase().endsWith(e)));
-  // frame-stability is useless without its spec, so do not offer it as though it were ready.
-  if (type === "frame-stability:v1" && !named.some((f) => /^track\.json$/i.test(f.name))) return [];
+  const pat = PW.CFG.jobs[type]?.inputPattern ? new RegExp(PW.CFG.jobs[type].inputPattern, "i") : null;
+  const prov = PW.CFG.providers.find((x) => x.id === state.provider);
+  if (prov?.offers && !prov.offers.includes(type)) return [];
+  const named = state.pieces.filter((f) => pat ? pat.test(f.name)
+                                               : exts.some((e) => f.name.toLowerCase().endsWith(e)));
   if (type === "frame-stability:v1" && !named.some((f) => /\.(mp4|mov|mkv|webm|avi|m4v)$/i.test(f.name))) return [];
   return named;
 };
 
+function trackFile() {
+  const body = promptBody({
+    region: [224, 224, 64, 64], search: 12, tolerance: 0,
+    about: "the middle of the frame; a page that let you drag a box over the take would set this from that",
+  });
+  return new File([body], "track.json", { type: "application/json" });
+}
+
 async function runExtra(type) {
+  // frame-stability needs a spec saying which patch to watch. Writing it here keeps the job honest -- it
+  // still reads track.json out of the data set exactly as it would if a command line had put one there --
+  // while sparing the client from authoring JSON to use a button.
+  if (type === "frame-stability:v1" && !state.pieces.some((f) => /^track\.json$/i.test(f.name))) {
+    await PW.addFiles(state.provider, state.dataSetId, [trackFile()]);
+    await refresh();
+  }
   const ids = piecesFor(type).map((f) => f.pieceId);
   if (!ids.length) throw new Error(`nothing in this data set that ${type} can read`);
   await PW.order(state.provider, state.dataSetId, type, "keep-inputs", ids);
@@ -54,13 +90,17 @@ async function runExtra(type) {
 }
 
 function drawExtras() {
-  if (!state.dataSetId) return "";
+  if (!PW.me) return "";
   const price = (t) => num(PW.CFG.jobs[t]?.price);
   const canPay = (t) => state.money && num(state.money.available) >= price(t);
   const rows = EXTRAS.map((x) => {
-    const n = piecesFor(x.type).length;
+    const n = state.dataSetId ? piecesFor(x.type).length : 0;
     const ok = n > 0 && canPay(x.type) && !state.busy;
-    const why = n === 0 ? `needs ${x.needs} in this data set`
+    const prov = PW.CFG.providers.find((p) => p.id === state.provider);
+    const unoffered = prov?.offers && !prov.offers.includes(x.type);
+    const why = unoffered ? `${prov.name.split(" ")[0]} does not run this one`
+      : !state.dataSetId ? "open a data set, or make a take, first"
+      : n === 0 ? `needs ${x.needs} in this data set`
       : !canPay(x.type) ? `needs ${price(x.type)} ${PW.CFG.token} in Filecoin Pay`
       : `over ${n} piece${n > 1 ? "s" : ""}`;
     return `<div class="extra">
@@ -71,9 +111,10 @@ function drawExtras() {
         <div class="muted" style="font-size:.78rem;margin-top:4px">${esc(why)}</div></div>
     </div>`;
   }).join("");
-  return `<div class="card"><h2>Other things you can run on this data set</h2>
-    <p class="muted">These read what is already stored here \u2014 the pictures you uploaded and the takes
-    they produced \u2014 and write their answers back in as new pieces.</p>${rows}</div>`;
+  return `<div class="card"><h2>Other things you can run on your data set</h2>
+    <p class="muted">These read what is already stored \u2014 the pictures you uploaded and the takes they
+    produced \u2014 and write their answers back in as new pieces. Nothing is copied anywhere to run
+    them.</p>${rows}</div>`;
 }
 // /piece/<cid> is the bytes the CID names and nothing else. /play/<cid> is the same video re-encoded if a
 // browser could not decode it -- a convenience for the <video> element, never for a download or a check.
@@ -217,7 +258,7 @@ async function useSet(id) {
   state.dataSetId = Number(id);
   state.pick = String(state.dataSetId);
   state.takes = [];
-  const s = await PW.readSet(state.provider, state.dataSetId, PW.CFG.jobs);
+  const s = await PW.readSet(state.provider, state.dataSetId, PW.CFG.jobs, { removals: false });
   // Without this the provider's results are refused by Warm Storage after the job has already run.
   if (!s.canReceiveResults) await PW.allowResults(state.dataSetId);
   await refresh();
@@ -250,7 +291,7 @@ async function makeTake() {
 }
 
 async function order() {
-  const s = await PW.readSet(state.provider, state.dataSetId, PW.CFG.jobs);
+  const s = await PW.readSet(state.provider, state.dataSetId, PW.CFG.jobs, { removals: false });
   // Everything the job reads: the pictures, the prompt, and the takes so far. Which of them is the parent
   // is the job's decision, not the page's.
   const ids = Object.entries(s.files ?? {})
@@ -268,7 +309,7 @@ async function refresh() {
   await refreshSets();
   state.jobs = await PW.findJobs().catch(() => state.jobs);
   if (!state.dataSetId) return draw();
-  const s = await PW.readSet(state.provider, state.dataSetId, PW.CFG.jobs);
+  const s = await PW.readSet(state.provider, state.dataSetId, PW.CFG.jobs, { removals: false });
   const files = Object.entries(s.files ?? {}).map(([pieceId, f]) => ({ pieceId, ...f }));
   state.pieces = files;
   const takes = [];

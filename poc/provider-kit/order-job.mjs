@@ -42,7 +42,7 @@ const FILES = (arg("--files") ?? fail("need --files")).split(",").map((f) => f.t
 
 const account = privateKeyToAccount(
   fs.readFileSync(path.join(os.homedir(), ".foc-compute-poc/calibnet/demo-client.key"), "utf8").trim());
-const transport = fallback([http(CFG.rpc), http("https://filecoin-calibration.chainup.net/rpc/v1")], { retryCount: 3 });
+const transport = fallback([http(CFG.rpc), http("https://rpc.ankr.com/filecoin_testnet")], { retryCount: 3 });
 const pub = createPublicClient({ chain: calibration, transport, pollingInterval: 4000 });
 const wallet = createWalletClient({ chain: calibration, transport, account });
 
@@ -87,7 +87,7 @@ async function ensureMoney(price) {
   const [, , available] = await pub.readContract({ address: C.payments, abi: ABI.FilecoinPayV1,
     functionName: "getAccountInfoIfSettled", args: [C.usdfc, account.address] });
   say(`Free in Filecoin Pay: ${Number(formatUnits(available, 18)).toFixed(3)}; this job costs ${SPEC.price}.`);
-  const want = price + price / 2n;
+  const want = price + parseUnits("3", 18);
   if (available < want) {
     const ERC = [{ type: "function", name: "approve", stateMutability: "nonpayable",
       inputs: [{ type: "address" }, { type: "uint256" }], outputs: [{ type: "bool" }] },
@@ -168,8 +168,13 @@ async function order(dataSetId) {
   const price = parseUnits(SPEC.price, 18);
   const r0 = await pub.getBlockNumber();
   const all = await piecesOf(dataSetId);
+  // A job that declares ".json" among its extensions would otherwise claim every other job's output as
+  // an input: frame-stability was ordered over seven pieces when two mattered. Where the catalogue gives
+  // a pattern, it is the rule; extensions remain the coarse fallback.
   const exts = (SPEC.inputExtensions ?? []).map((e) => e.toLowerCase());
-  const inputs = all.filter((p) => exts.some((e) => p.name.toLowerCase().endsWith(e)));
+  const pattern = SPEC.inputPattern ? new RegExp(SPEC.inputPattern, "i") : null;
+  const inputs = all.filter((p) => pattern ? pattern.test(p.name)
+                                           : exts.some((e) => p.name.toLowerCase().endsWith(e)));
   say(`Pieces: ${all.map((p) => p.name).join(", ")}`);
   say(`${inputs.length} of them readable by ${JOB}.`);
   if (!inputs.length) fail("nothing this job can read");
@@ -205,4 +210,9 @@ async function order(dataSetId) {
     await sleep(15_000);
   }
 }
-main().catch((e) => fail(e.shortMessage ?? e.message ?? e));
+main().catch((e) => {
+  for (let c = e, n = 0; c && n < 5; c = c.cause, n++)
+    console.error(n ? `  caused by: ${c.shortMessage ?? c.message ?? c}` : `FAILED: ${c.shortMessage ?? c.message ?? c}`,
+      c.details ? `\n    details: ${JSON.stringify(c.details).slice(0, 500)}` : "");
+  process.exit(1);
+});

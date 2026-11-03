@@ -26,7 +26,11 @@ cfg["providers"] = cfg.get("providers", []) + [{
     "curioUrl": "http://localhost:8080",
     "note": "The provider running on your own laptop.",
     "proving": True,
-    "offers": ["video-gen:v1"],
+    # Everything this stand-in actually runs. It said video-gen alone, which was true when there was one
+    # job; with the page gating buttons on this list, a stale entry hides jobs the provider can run.
+    # The GPU rows are deliberately absent: there is no card on a laptop, and offering one would cost a
+    # client a deadline to discover that.
+    "offers": ["video-gen:v1", "frame-similarity:v1", "image-index:v1", "frame-stability:v1"],
     # This stand-in serves /play/<cid>: a browser-playable rendering of a take, beside the exact bytes at
     # /piece/<cid>. Real Curio does not, so only this entry claims it.
     "playRoute": True,

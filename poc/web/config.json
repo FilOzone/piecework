@@ -46,7 +46,13 @@
         "ocr-gpu:v1",
         "extract:v1",
         "extract-gpu:v1",
-        "video-gen:v1"
+        "video-gen:v1",
+        "frame-similarity:v1",
+        "image-index:v1",
+        "frame-stability:v1",
+        "image-caption-gpu:v1",
+        "video-search-gpu:v1",
+        "video-gen-gpu:v1"
       ],
       "proving": true
     }
@@ -204,7 +210,8 @@
         ".json",
         ".mp4"
       ],
-      "note": "Builds a video from the pictures you pick, and writes beside it a record of exactly what it was made from: every input by its sha256, the prompt you gave, and the version it was built on. Order it again and it builds the next version on top of the last, all in the same data set — so you end up with a chain of versions where each one names its parent, and anyone holding the pieces can check that claim without trusting the provider. Put your prompt in a file called prompt.json: {\"prompt\": \"...\", \"seconds\": 4, \"fps\": 12}. The generator is deliberately simple for now; the interesting part is the record, not the picture."
+      "note": "Builds a video from the pictures you pick, and writes beside it a record of exactly what it was made from: every input by its sha256, the prompt you gave, and the version it was built on. Order it again and it builds the next version on top of the last, all in the same data set — so you end up with a chain of versions where each one names its parent, and anyone holding the pieces can check that claim without trusting the provider. Put your prompt in a file called prompt.json: {\"prompt\": \"...\", \"seconds\": 4, \"fps\": 12}. The generator is deliberately simple for now; the interesting part is the record, not the picture.",
+      "inputPattern": "(\\.(jpe?g|png|webp|bmp)|^prompt\\.json|^version-\\d+(-seg-\\d+)?\\.mp4)$"
     },
     "photo-restore:v1": {
       "name": "Enlarge and clean up my photographs",
@@ -479,7 +486,8 @@
         ".png",
         ".jpg"
       ],
-      "note": "Reads every frame, not a sample, and tracks one region named in track.json beside the video. The useful answer is usually a negative: it did not move, in any frame, and here are the per-frame coordinates. The point of publishing the coordinates is that nobody has to take the verdict on trust — the video is stored, the method is fixed, and the same job over the same piece gives the same table, so anyone holding the pieces can check it. No model and no card: normalised cross-correlation in a small window."
+      "note": "Reads every frame, not a sample, and tracks one region named in track.json beside the video. The useful answer is usually a negative: it did not move, in any frame, and here are the per-frame coordinates. The point of publishing the coordinates is that nobody has to take the verdict on trust — the video is stored, the method is fixed, and the same job over the same piece gives the same table, so anyone holding the pieces can check it. No model and no card: normalised cross-correlation in a small window.",
+      "inputPattern": "(\\.(mp4|mov|mkv|webm|avi|m4v)|^track\\.json)$"
     },
     "image-caption-gpu:v1": {
       "name": "Describe my images in words (on the card)",
@@ -515,7 +523,8 @@
         ".json",
         ".mp4"
       ],
-      "note": "The same loop and the same record, with Stable Video Diffusion instead of the deliberately simple motion generator. Identical output contract — version-N.mp4 beside a version-N.json naming every input by its sha256, the prompt, and the version it was built on — so the chain of takes, the client page and the storage cannot tell which generator ran. The model invents the motion from your last picture rather than panning across a still. GPU only and it refuses without a card: a diffusion video model on a processor is hours per clip, which is not a slower service but no service. The image is large, about 12 GB, because the weights are baked in — jobs run with no network. Measured on a storage provider's own T4, the first run on any card: 25 frames at 512x512 in 400.9 s, 12.3 s a diffusion step, H.264 out. Note the duration: this model makes a fixed 25 frames and does not take a length, so at 12 fps every clip is about 2.1 seconds whatever seconds says in prompt.json. The record written beside the video states the length the file actually is, and says when that differs from what was asked."
+      "note": "The same loop and the same record, with Stable Video Diffusion instead of the deliberately simple motion generator. Identical output contract — version-N.mp4 beside a version-N.json naming every input by its sha256, the prompt, and the version it was built on — so the chain of takes, the client page and the storage cannot tell which generator ran. The model invents the motion from your last picture rather than panning across a still. GPU only and it refuses without a card: a diffusion video model on a processor is hours per clip, which is not a slower service but no service. The image is large, about 12 GB, because the weights are baked in — jobs run with no network. Measured on a storage provider's own T4, the first run on any card: 25 frames at 512x512 in 400.9 s, 12.3 s a diffusion step, H.264 out. Note the duration: this model makes a fixed 25 frames and does not take a length, so at 12 fps every clip is about 2.1 seconds whatever seconds says in prompt.json. The record written beside the video states the length the file actually is, and says when that differs from what was asked.",
+      "inputPattern": "(\\.(jpe?g|png|webp|bmp)|^prompt\\.json|^version-\\d+(-seg-\\d+)?\\.mp4)$"
     },
     "video-search-gpu:v1": {
       "name": "Make my video searchable by description (on the card)",
@@ -533,7 +542,8 @@
         ".m4v",
         ".json"
       ],
-      "note": "Embeds each sampled frame into the same space as text, so the question can be any phrase — “a red single-seater on a wet track”, “an empty grandstand” — and the answer is the moments that match, with timestamps. Put the phrases in queries.json. This generalises “Index what is in my video”, which runs a detector that knows eighty fixed categories and can never be asked about anything else. The frame vectors are written beside the video on purpose: describing the archive is the expensive pass and every question after it is a dot product, which is the economic case for doing this where the data already sits. CLIP ViT-B/32, about 600 MB. GPU only, and it refuses without a card. Measured on a storage provider's own T4, the first run on any card: 600 frames from ten minutes of footage in 41.5 s, 14.4 frames a second, 60.6 s end to end. Asked for “a rocket launch” it returned 09:14 to 09:23 of the clip, which is where the launch is."
+      "note": "Embeds each sampled frame into the same space as text, so the question can be any phrase — “a red single-seater on a wet track”, “an empty grandstand” — and the answer is the moments that match, with timestamps. Put the phrases in queries.json. This generalises “Index what is in my video”, which runs a detector that knows eighty fixed categories and can never be asked about anything else. The frame vectors are written beside the video on purpose: describing the archive is the expensive pass and every question after it is a dot product, which is the economic case for doing this where the data already sits. CLIP ViT-B/32, about 600 MB. GPU only, and it refuses without a card. Measured on a storage provider's own T4, the first run on any card: 600 frames from ten minutes of footage in 41.5 s, 14.4 frames a second, 60.6 s end to end. Asked for “a rocket launch” it returned 09:14 to 09:23 of the clip, which is where the launch is.",
+      "inputPattern": "(\\.(mp4|mov|mkv|webm|avi|m4v)|^queries\\.json)$"
     }
   },
   "policies": [
@@ -569,5 +579,8 @@
       "lockupEpochs": 60,
       "note": "While this runs, add a file whose name starts with \"ask\" — the question inside it is answered from the vectors already stored next to your data, and the answer appears in your data set. Nothing about your documents leaves the provider. It needs \"Keep my data set searchable\" to have run first, so there are vectors to answer from."
     }
-  }
+  },
+  "rpcFallbacks": [
+    "https://rpc.ankr.com/filecoin_testnet"
+  ]
 }

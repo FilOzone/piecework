@@ -3,7 +3,7 @@
 // or to the storage provider you picked.
 
 import {
-  createPublicClient, createWalletClient, custom, http, getAddress, parseUnits, formatUnits,
+  createPublicClient, createWalletClient, custom, http, fallback, getAddress, parseUnits, formatUnits,
   keccak256, toHex, hexToBytes, decodeEventLog,
 } from "https://cdn.jsdelivr.net/npm/viem@2.56.8/+esm";
 import { CID } from "https://cdn.jsdelivr.net/npm/multiformats@13.3.6/+esm";
@@ -28,7 +28,13 @@ export const ABI = await fetch(`abi.json${q}`).then((r) => r.json());
 for (const k of Object.keys(ABI)) if (k !== "Errors") ABI[k] = [...ABI[k], ...ABI.Errors]; // so reverts decode
 const C = { ...CFG.contracts, cs: getAddress(CFG.computeService) };
 const chain = CFG.chainId === 314 ? Chains.mainnet : Chains.calibration;
-const pub = createPublicClient({ chain, transport: http(CFG.rpc) });
+// One node was a single point of failure: the public endpoint returns 502 often enough that this page
+// would sit on "Opening the data set..." through viem's retries with nothing else to ask. The extra
+// endpoints come from the configuration so a deployment can set its own, and the first that answers wins.
+const pub = createPublicClient({
+  chain,
+  transport: fallback([CFG.rpc, ...(CFG.rpcFallbacks ?? [])].map((u) => http(u)), { retryCount: 2 }),
+});
 export { C, chain, pub };
 
 // The names of files this browser has uploaded, by piece CID. Warm Storage records the name in a PieceAdded
@@ -285,24 +291,29 @@ async function clientDataSetId(dataSetId) {
 }
 
 // What is in a data set, read from the chain and from the provider. Piece names are the ones the client gave.
-export async function readSet(providerId, dataSetId, jobs = {}) {
+export async function readSet(providerId, dataSetId, jobs = {}, opts = {}) {
   const p = provider(providerId);
   const d = await pub.readContract({ address: C.view, abi: ABI.FilecoinWarmStorageServiceStateView, functionName: "getDataSet", args: [BigInt(dataSetId)] });
   if (!d?.payer || getAddress(d.payer) !== me) throw new Error(`data set #${dataSetId} is not paid for by your wallet`);
   if (getAddress(d.serviceProvider) !== getAddress(p.address)) throw new Error(`data set #${dataSetId} is not held by ${p.name}`);
   const next = Number(await pub.readContract({ address: C.pdp, abi: ABI.PDPVerifier, functionName: "getNextPieceId", args: [BigInt(dataSetId)] }));
   const mine = knownNames();
-  const live = [];
-  for (let i = 0; i < next; i++) {
-    if (await pub.readContract({ address: C.pdp, abi: ABI.PDPVerifier, functionName: "pieceLive", args: [BigInt(dataSetId), BigInt(i)] })) live.push(i);
-  }
+  // Asked together rather than one after another: a data set of twenty pieces was forty sequential round
+  // trips to a public node, which is most of the time spent opening one.
+  step(`Reading ${next} piece${next === 1 ? "" : "s"} of data set #${dataSetId}`);
+  const liveFlags = await Promise.all(Array.from({ length: next }, (_, i) =>
+    pub.readContract({ address: C.pdp, abi: ABI.PDPVerifier, functionName: "pieceLive",
+      args: [BigInt(dataSetId), BigInt(i)] }).catch(() => false)));
+  const live = liveFlags.map((ok, i) => (ok ? i : -1)).filter((i) => i >= 0);
   const names = await pieceNames(dataSetId, live);
   const files = {};
-  for (const i of live) {
-    const raw = await pub.readContract({ address: C.pdp, abi: ABI.PDPVerifier, functionName: "getPieceCid", args: [BigInt(dataSetId), BigInt(i)] });
-    const cid = CID.decode(hexToBytes(raw.data)).toString();
+  const raws = await Promise.all(live.map((i) =>
+    pub.readContract({ address: C.pdp, abi: ABI.PDPVerifier, functionName: "getPieceCid",
+      args: [BigInt(dataSetId), BigInt(i)] })));
+  live.forEach((i, at) => {
+    const cid = CID.decode(hexToBytes(raws[at].data)).toString();
     files[i] = { name: names[String(i)] ?? mine[cid] ?? `piece-${i}`, cid };
-  }
+  });
   // what each piece is: a result of a job, a file of yours, on its way out, or one the provider may clear away
   for (const j of Object.values(jobs)) {
     if (Number(j.dataSetId) !== Number(dataSetId)) continue;
@@ -320,7 +331,13 @@ export async function readSet(providerId, dataSetId, jobs = {}) {
     if (!/^piece-\d+$/.test(f.name)) rememberName(f.cid, f.name.replace(/ \(job #\d+\)$/, ""));
   }
 
-  const m = await marks(dataSetId, p.address, Object.keys(files)).catch(() => null);
+  // Measured on an 18-piece data set: 11.4s of event scans plus 4.3s of per-piece calls, against ~10s for
+  // everything else. Skipped unless the caller actually shows a remove control.
+  let m = null;
+  if (opts.removals !== false) {
+    step("Checking which pieces can still be removed");
+    m = await marks(dataSetId, p.address, Object.keys(files)).catch(() => null);
+  }
   if (m) for (const [pid, f] of Object.entries(files)) {
     if (m.scheduled.has(pid)) f.removing = true;
     else if (m.still[pid]) f.removable = true;
@@ -345,6 +362,7 @@ export async function readSet(providerId, dataSetId, jobs = {}) {
 // shrugging. `want` is the set of live piece ids; once every one of them has a name there is nothing to gain
 // from reading older blocks, so this usually costs nothing extra.
 async function pieceNames(dataSetId, want = null) {
+  step("Looking up what the pieces are called");
   const head = Number(await pub.getBlockNumber());
   const names = {};
   const missing = () => !want || [...want].some((id) => names[String(id)] === undefined);
@@ -360,7 +378,8 @@ async function pieceNames(dataSetId, want = null) {
   const DEEP = 60; // ~18k blocks, about six days
   const gaveUp = deepScanned(dataSetId);
   for (let to = head, n = 0; n < DEEP; to -= 300, n++) {
-    if (n >= 14 && (!missing() || gaveUp)) break;
+    if (n > 0 && !missing()) break;          // everything wanted is named: there is nothing left to find
+    if (n >= 14 && gaveUp) break;            // known-incomplete set: do not walk six days again
     if (to <= 0) break;
     const logs = await pub.getContractEvents({ address: C.fwss, abi: ABI.FilecoinWarmStorageService, eventName: "PieceAdded",
       args: { dataSetId: BigInt(dataSetId) }, fromBlock: BigInt(Math.max(0, to - 299)), toBlock: BigInt(to) }).catch(() => []);
@@ -387,11 +406,12 @@ const CHUNK = 300, WINDOW = 16; // public nodes refuse a wide eth_getLogs range;
 
 async function inWindow(fn) {
   const head = Number(await pub.getBlockNumber());
-  const out = [];
-  for (let to = head, n = 0; n < WINDOW; to -= CHUNK, n++) {
-    out.push(...await fn(BigInt(Math.max(0, to - CHUNK + 1)), BigInt(to)));
-  }
-  return out;
+  // Asked all at once. The ranges are independent and a public node answers them in parallel happily;
+  // doing them one after another made every page load wait for sixteen round trips in series.
+  const ranges = Array.from({ length: WINDOW }, (_, n) => head - n * CHUNK);
+  const batches = await Promise.all(ranges.map((to) =>
+    fn(BigInt(Math.max(0, to - CHUNK + 1)), BigInt(to))));
+  return batches.flat();
 }
 
 // The data sets this wallet pays for, at this provider. Warm Storage names the payer when a data set is
@@ -525,10 +545,10 @@ export async function findSessions() {
 // contract's own answer and needs no searching; only the scheduling has to be looked for in events.
 async function marks(dataSetId, providerAddress, pieceIds) {
   const still = {};
-  for (const pid of pieceIds) {
-    still[pid] = await pub.readContract({ address: C.cs, abi: ABI.ComputeService, functionName: "mayRemove",
-      args: [BigInt(dataSetId), getAddress(providerAddress), BigInt(pid)] }).catch(() => false);
-  }
+  const answers = await Promise.all(pieceIds.map((pid) =>
+    pub.readContract({ address: C.cs, abi: ABI.ComputeService, functionName: "mayRemove",
+      args: [BigInt(dataSetId), getAddress(providerAddress), BigInt(pid)] }).catch(() => false)));
+  pieceIds.forEach((pid, i) => { still[pid] = answers[i]; });
   const scheduled = new Set();
   for (const l of await inWindow((fromBlock, toBlock) => pub.getContractEvents({ address: C.pdp, abi: ABI.PDPVerifier,
     eventName: "PiecesScheduledForRemoval", fromBlock, toBlock }).catch(() => []))) {

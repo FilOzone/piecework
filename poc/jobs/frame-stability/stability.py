@@ -138,8 +138,20 @@ def main():
         matched = [r for r in rows if r[1] is not None and r[3] >= min_score]
         unmatched = [r for r in rows if r not in matched]
         moved = [r for r in matched if abs(r[1] - x0) > tolerance or abs(r[2] - y0) > tolerance]
-        verdict = ("did not move" if not moved and not unmatched
-                   else "MOVED" if moved else "not found in every frame")
+        # A verdict has to be worth the word. Pointed at an arbitrary patch of a panning video this
+        # reported "MOVED" from four frames while failing to find the region in forty-three -- which is
+        # not a finding about the video, it is the measurement failing and saying nothing about it. When
+        # most frames cannot be matched, that is the answer, and the movement count is meaningless.
+        lost = len(unmatched) / max(1, len(rows))
+        if lost > 0.25:
+            verdict = (f"could not track this region — not found in {len(unmatched)} of {len(rows)} "
+                       f"frames, so nothing can be concluded about whether it moved")
+        elif moved:
+            verdict = "MOVED"
+        elif unmatched:
+            verdict = "not found in every frame"
+        else:
+            verdict = "did not move"
         body = [name,
                 f"{len(rows)} frames read",
                 f"Tracking a {tw}x{th} region first seen at ({x0}, {y0}); "
@@ -148,7 +160,11 @@ def main():
                 "",
                 f"VERDICT: {verdict}",
                 ""]
-        if moved:
+        if lost > 0.25:
+            body.append(f"  the region at ({x0}, {y0}) is not in most frames. Either it leaves the "
+                        f"picture, or the whole picture moves — a pan, for instance — in which case "
+                        f"this job is the wrong question to ask of this video.")
+        if moved and lost <= 0.25:
             body.append(f"  moved in {len(moved)} frame(s); first at frame {moved[0][0]} "
                         f"to ({moved[0][1]}, {moved[0][2]})")
         if unmatched:
