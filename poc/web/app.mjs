@@ -377,13 +377,27 @@ async function pieceNames(dataSetId, want = null) {
   // the marker every refresh would go looking for it again.
   const DEEP = 60; // ~18k blocks, about six days
   const gaveUp = deepScanned(dataSetId);
-  for (let to = head, n = 0; n < DEEP; to -= 300, n++) {
+  // Asked a batch at a time rather than one scan after another. A data set a few days old sits near the
+  // far edge of this window, so the walk ran almost the whole sixty scans in series -- which is where
+  // "Looking up what the pieces are called" sat for the best part of a minute. The batch still stops as
+  // soon as nothing is missing, so a fresh data set costs one batch.
+  // And bounded by the clock, because the walk can be guaranteed to fail: a data set whose pieces were
+  // named more than this window ago has no events left to find, and the old code spent two minutes
+  // discovering that on every first open. Names that are gone are gone; the page falls back to piece-N,
+  // and a name the client has seen before is still served from its own cache.
+  const BATCH = 12, UNTIL = Date.now() + 8000;
+  for (let n = 0; n < DEEP; n += BATCH) {
     if (n > 0 && !missing()) break;          // everything wanted is named: there is nothing left to find
     if (n >= 14 && gaveUp) break;            // known-incomplete set: do not walk six days again
-    if (to <= 0) break;
-    const logs = await pub.getContractEvents({ address: C.fwss, abi: ABI.FilecoinWarmStorageService, eventName: "PieceAdded",
-      args: { dataSetId: BigInt(dataSetId) }, fromBlock: BigInt(Math.max(0, to - 299)), toBlock: BigInt(to) }).catch(() => []);
-    for (const ev of logs) {
+    if (n > 0 && Date.now() > UNTIL) break;  // out of time: whatever is left is not worth the wait
+    const tos = Array.from({ length: Math.min(BATCH, DEEP - n) }, (_, k) => head - (n + k) * 300)
+      .filter((to) => to > 0);
+    if (!tos.length) break;
+    const batches = await Promise.all(tos.map((to) =>
+      pub.getContractEvents({ address: C.fwss, abi: ABI.FilecoinWarmStorageService, eventName: "PieceAdded",
+        args: { dataSetId: BigInt(dataSetId) }, fromBlock: BigInt(Math.max(0, to - 299)),
+        toBlock: BigInt(to) }).catch(() => [])));
+    for (const ev of batches.flat()) {
       const i = ev.args.keys?.indexOf("name") ?? -1;
       if (i >= 0) names[String(ev.args.pieceId)] = ev.args.values[i];
     }

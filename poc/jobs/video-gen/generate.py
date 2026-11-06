@@ -50,7 +50,11 @@ SEGMENTS = os.environ.get("SEGMENTS", "0") == "1"
 DEVICE = os.environ.get("DEVICE", "cpu")
 IMAGES = (".jpg", ".jpeg", ".png", ".webp", ".bmp")
 VIDEOS = (".mp4", ".mov", ".mkv", ".webm")
-DEFAULTS = {"prompt": "", "seconds": 4.0, "fps": 12, "seed": 0}
+DEFAULTS = {"prompt": "", "seconds": 4.0, "fps": 12, "seed": 0,
+            # Segment mode only. Fixed per segment rather than derived from the take length,
+            # because a segment whose length depends on how many pictures there are can never
+            # be reused when a picture is added. None means take SEGMENT_SECONDS, default 2.0.
+            "secondsPerSegment": None}
 
 
 def sha256(path):
@@ -151,14 +155,27 @@ def main():
 
     names = sorted(os.listdir(IN))
     images = [f for f in names if f.lower().endswith(IMAGES)]
-    parents = [f for f in names if f.lower().endswith(VIDEOS) and f.startswith("version-")]
-    parent = sorted(parents, key=lambda f: len(f))[-1] if parents else None
+    # The parent is the whole provenance claim, so it is chosen by version number rather than by the
+    # length of its filename, which was the old heuristic and tied between version-1 and version-2.
+    # A whole-version video only: version-1-seg-00.mp4 is a piece OF version 1, not a version, and it
+    # matched both the old filename-length heuristic and a naive version-number match, so a segmented
+    # take ended up naming its own first segment as its parent and carrying 24 frames out of it.
+    pat = re.compile(r"version-(\d+)\.(?:mp4|mov|mkv|webm)$", re.I)
+    parents = [f for f in names if pat.match(f)]
+    parent = max(parents, key=lambda f: int(pat.match(f).group(1))) if parents else None
 
     if not images:
         with open(os.path.join(OUT, "video-gen-report.txt"), "w") as r:
             r.write("No images to build from.\n\nThe job looked in /in for "
                     + ", ".join(IMAGES) + " and found none. Add at least one picture and order again.\n")
         return 0
+
+    if SEGMENTS and GENERATOR == "svd":
+        # The two shapes are incompatible: svd produces one fixed clip, segment mode produces one piece
+        # per picture. Refusing is better than a manifest that describes neither.
+        print("SEGMENTS=1 and GENERATOR=svd cannot be combined: svd makes one fixed clip, segment mode "
+              "makes one piece per picture. Pick one.", file=sys.stderr)
+        return 2
 
     s = read_settings()
     version = next_version()
@@ -169,7 +186,7 @@ def main():
     # The frames of the version this one is built on, so that "on top of" is visible in the result and not
     # only asserted in the manifest.
     carried = []
-    if parent:
+    if parent and not SEGMENTS:
         cap = cv2.VideoCapture(os.path.join(IN, parent))
         while True:
             ok, frame = cap.read()
@@ -186,12 +203,27 @@ def main():
 
     # One segment per source picture, which is where the picture actually changes -- the same boundary
     # frame-similarity finds by histogram distance, and the one an encoder puts a keyframe at anyway.
-    inherited = []
+    #
+    # Reuse is a measurement, not an assumption. The old code took the parent manifest's whole segment
+    # list and called it reused, so the saving could never come out low: it reported the share of a
+    # longer take that happened to be older, whatever the pictures were. Here every segment any earlier
+    # version wrote is indexed by its sha256, and a segment counts as reused only when the bytes this
+    # run produced are already in that index. Nothing matches means 0%, which is the point.
+    known = {}
     if SEGMENTS:
-        prior = sorted(f for f in names if re.fullmatch(r"version-\d+\.json", f))
-        if prior:
-            with open(os.path.join(IN, prior[-1])) as f:
-                inherited = (json.load(f).get("segments") or [])
+        for f in sorted(x for x in names if re.fullmatch(r"version-\d+\.json", x)):
+            try:
+                with open(os.path.join(IN, f)) as fh:
+                    doc = json.load(fh)
+            except (OSError, json.JSONDecodeError):
+                continue
+            for seg in (doc.get("segments") or []):
+                if seg.get("sha256") and seg.get("name"):
+                    known.setdefault(seg["sha256"], {"name": seg["name"],
+                                                     "bytes": seg.get("bytes", 0),
+                                                     "frames": seg.get("frames", 0),
+                                                     "from": seg.get("from", f[:-5]),
+                                                     "source": seg.get("source")})
 
     out_path = os.path.join(OUT, f"version-{version}.mp4")
     writer = Encoder(out_path, w, h, fps)
@@ -237,31 +269,70 @@ def main():
     rng = np.random.default_rng(int(s["seed"]) ^ prompt_seed)
     per_image = max(1, int(round(fps * seconds / len(images))))
     made_segments = []
+    segments_ordered, per_seg = [], None
     if SEGMENTS and produced_frames is None:
         writer.release()
         os.remove(out_path)
-        prompt_seed2 = int.from_bytes(hashlib.sha256(str(s["prompt"]).encode()).digest()[:2], "big")
-        rng2 = np.random.default_rng(int(s["seed"]) ^ prompt_seed2)
-        per_image2 = max(1, int(round(fps * seconds / len(images))))
+        # A segment is a pure function of the picture it was made from, the prompt and the client's seed.
+        # It used to depend on two more things: its position in the list, because the crop came from one
+        # sequential random stream, and how many pictures there were, because the per-picture frame count
+        # was the take's duration divided by that number. Either of those changing rewrote every segment,
+        # so adding one picture could never reuse anything. That is why the duration of a segment is fixed
+        # here and the take's length is the number of pictures times it; `seconds` cannot also be honoured
+        # and the manifest says so rather than silently producing a different length than was asked for.
+        seg_seconds = max(0.5, float(s.get("secondsPerSegment") or
+                                     os.environ.get("SEGMENT_SECONDS", 2.0)))
+        per_seg = max(2, int(round(fps * seg_seconds)))
         for idx, name in enumerate(images):
             img = cv2.imread(os.path.join(IN, name))
             if img is None:
                 continue
-            seg_name = f"version-{version}-seg-{idx:02d}.mp4"
-            seg_path = os.path.join(OUT, seg_name)
-            seg = Encoder(seg_path, w, h, fps)
+            pic_sha = sha256(os.path.join(IN, name))
+            # Seeded from this picture and this prompt only, so the same picture yields the same bytes
+            # wherever it sits in the take. This is what makes the reuse below possible at all.
+            seed_src = hashlib.sha256(
+                str(s["prompt"]).encode() + bytes.fromhex(pic_sha) + str(int(s["seed"])).encode()
+            ).digest()
+            rng_seg = np.random.default_rng(int.from_bytes(seed_src[:8], "big"))
             big = cv2.resize(img, (int(w * 1.25), int(h * 1.25)))
-            dx, dy = rng2.integers(0, max(1, big.shape[1] - w)), rng2.integers(0, max(1, big.shape[0] - h))
-            for i in range(per_image2):
-                t = i / max(1, per_image2 - 1)
+            dx = rng_seg.integers(0, max(1, big.shape[1] - w))
+            dy = rng_seg.integers(0, max(1, big.shape[0] - h))
+
+            tmp_path = os.path.join(OUT, f".seg-{idx:02d}.tmp.mp4")
+            seg = Encoder(tmp_path, w, h, fps)
+            for i in range(per_seg):
+                t = i / (per_seg - 1)
                 x = int(dx * (1 - t) + (big.shape[1] - w) * 0.5 * t)
                 y = int(dy * (1 - t) + (big.shape[0] - h) * 0.5 * t)
                 seg.write(big[y:y + h, x:x + w])
             seg.release()
-            made_segments.append({"name": seg_name, "sha256": sha256(seg_path),
-                                  "bytes": os.path.getsize(seg_path), "frames": per_image2,
-                                  "from": f"version-{version}", "source": name})
-        produced_frames = sum(x["frames"] for x in inherited) + sum(x["frames"] for x in made_segments)
+            digest = sha256(tmp_path)
+
+            hit = known.get(digest)
+            if hit:
+                # Already a piece in this data set. Throwing the bytes away is the saving: this version
+                # names the existing piece by the same sha256, so a reader can check that what it plays
+                # is exactly what the earlier version produced.
+                os.remove(tmp_path)
+                segments_ordered.append({"name": hit["name"], "sha256": digest,
+                                         "bytes": hit["bytes"], "frames": hit["frames"] or per_seg,
+                                         "from": hit["from"], "source": name, "reused": True})
+            else:
+                seg_name = f"version-{version}-seg-{idx:02d}.mp4"
+                os.rename(tmp_path, os.path.join(OUT, seg_name))
+                entry = {"name": seg_name, "sha256": digest,
+                         "bytes": os.path.getsize(os.path.join(OUT, seg_name)), "frames": per_seg,
+                         "from": f"version-{version}", "source": name, "reused": False}
+                segments_ordered.append(entry)
+                known[digest] = entry
+        made_segments = [x for x in segments_ordered if not x["reused"]]
+        produced_frames = sum(x["frames"] for x in segments_ordered)
+        if not segments_ordered:
+            with open(os.path.join(OUT, "video-gen-report.txt"), "w") as r:
+                r.write("None of the pictures could be read.\n\nThe job found "
+                        f"{len(images)} image file(s) in /in and none of them decoded, so there was "
+                        "nothing to build a segment from.\n")
+            return 0
 
     for name in ([] if (produced_frames is not None or SEGMENTS) else images):
         img = cv2.imread(os.path.join(IN, name))
@@ -299,22 +370,28 @@ def main():
                                        else len(carried) + per_image * len(images)) / fps, 3),
                      "carriedFromParent": len(carried)},
     }
-    if SEGMENTS:
-        segments = inherited + made_segments
+    if SEGMENTS and segments_ordered:
+        segments = segments_ordered
         manifest["segments"] = segments
-        reused_bytes = sum(x["bytes"] for x in inherited)
-        new_bytes = sum(x["bytes"] for x in made_segments)
+        reused = [x for x in segments if x["reused"]]
+        fresh = [x for x in segments if not x["reused"]]
+        reused_bytes = sum(x["bytes"] for x in reused)
+        new_bytes = sum(x["bytes"] for x in fresh)
         manifest["storage"] = {
             "segmentsInThisVersion": len(segments),
-            "reusedFromEarlierVersions": len(inherited),
-            "writtenByThisVersion": len(made_segments),
+            "reusedFromEarlierVersions": len(reused),
+            "writtenByThisVersion": len(fresh),
             "bytesWritten": new_bytes,
             "bytesReused": reused_bytes,
-            # What the old way would have cost: every segment, every time.
+            # What it would have cost to store this take with no reuse: every segment, every time.
             "bytesIfWholeFile": reused_bytes + new_bytes,
-            "note": ("the reused segments are not written again: they are already pieces in this data set "
-                     "and this version names them by sha256, so a reader can check that what it is playing "
-                     "is what the earlier version produced"),
+            "reuseTest": "sha256 of the encoded segment against every segment earlier versions wrote",
+            "secondsPerSegment": round(per_seg / fps, 3) if per_seg else None,
+            "note": ("a segment counts as reused only when the bytes this run produced are already a "
+                     "piece in this data set, matched by sha256; those bytes are not written again and "
+                     "this version names the existing piece, so a reader can check that what it plays is "
+                     "exactly what the earlier version produced. No match means 0%, which is why this "
+                     "number is a measurement rather than a property of how the take was assembled"),
         }
         # The whole-file output does not exist in segment mode, so the produced block describes the set.
         manifest["produced"] = {
@@ -324,7 +401,7 @@ def main():
             "frames": sum(x["frames"] for x in segments),
             "seconds": round(sum(x["frames"] for x in segments) / fps, 3),
             "bytes": reused_bytes + new_bytes,
-            "carriedFromParent": sum(x["frames"] for x in inherited),
+            "carriedFromParent": sum(x["frames"] for x in segments if x["reused"]),
         }
     asked = round(seconds, 3)
     got = manifest["produced"]["seconds"]
@@ -349,14 +426,20 @@ def main():
             r.write(f" (of which {len(carried)} carried from the previous version)")
         if SEGMENTS:
             st = manifest["storage"]
-            r.write(f"\n\nStored as {st['segmentsInThisVersion']} segments, of which "
-                    f"{st['writtenByThisVersion']} were written now and {st['reusedFromEarlierVersions']} "
-                    f"were already here and are only named.\n")
-            r.write(f"This version wrote {st['bytesWritten']:,} bytes. The same video as one file would "
+            r.write(f"\n\nStored as {st['segmentsInThisVersion']} segments of "
+                    f"{st['secondsPerSegment']}s each, of which {st['writtenByThisVersion']} were written "
+                    f"now and {st['reusedFromEarlierVersions']} turned out to be byte-for-byte what an "
+                    f"earlier version already stored, so they are only named.\n")
+            r.write(f"This version wrote {st['bytesWritten']:,} bytes. Storing every segment again would "
                     f"have been {st['bytesIfWholeFile']:,}.\n")
             if st["bytesIfWholeFile"]:
                 saved = 100 * st["bytesReused"] / st["bytesIfWholeFile"]
-                r.write(f"So {saved:.0f}% of it cost nothing to store, because it was already stored.\n")
+                if saved:
+                    r.write(f"So {saved:.0f}% of it cost nothing to store, because the same bytes were "
+                            f"already here. Matched by sha256, segment by segment.\n")
+                else:
+                    r.write("So none of it was already stored: every segment is new bytes. Matched by "
+                            "sha256, segment by segment, and nothing matched.\n")
         if abs(manifest["produced"]["seconds"] - round(seconds, 3)) > 0.05:
             r.write(f"\n\nNote: you asked for {round(seconds, 3)} seconds and this is "
                     f"{manifest['produced']['seconds']}. ")

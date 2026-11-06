@@ -150,7 +150,7 @@ button is a real transaction. See [DEMO.md](DEMO.md). Needs Node 20+, Docker, an
 ## The tests
 
 ```sh
-cd contracts && forge test      # 44 tests: Filecoin Pay mechanics, and ComputeService against it
+cd contracts && forge test      # 71 tests: Filecoin Pay mechanics, and ComputeService against it
 cd integration && forge test    # 12 tests: ComputeService with the real FOC contracts
 ```
 

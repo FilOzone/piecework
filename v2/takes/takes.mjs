@@ -17,6 +17,10 @@ const num = (s) => Number(s ?? 0);
 const fmt = (s, dp = 3) => num(s).toFixed(dp);
 
 const JOB = "video-gen:v1";
+const JOB_SEGMENTED = "video-gen-segments:v1";
+// Which of the two a take uses. Segments are the default because the saving only shows up in a chain, and
+// a visitor who makes three takes should see it without knowing to ask.
+const takeJob = () => (state.segmented ? JOB_SEGMENTED : JOB);
 // The other things a client can run over the same data set. Takes was one job because there was one job;
 // these read what is already stored -- the pictures that went in, the takes that came out -- so they belong
 // on the same page rather than behind a separate catalogue.
@@ -31,20 +35,22 @@ const EXTRAS = [
   { type: "frame-similarity:v1", title: "Where does a take change",
     blurb: "The cut points of a take \u2014 what would let the next version reuse the segments it did not change.",
     needs: "a take" },
-  { type: "image-caption-gpu:v1", title: "Describe my pictures in words",
+  { type: "image-caption-gpu:v1", title: "Describe my pictures in words", gpu: true,
     blurb: "A vision-language model, so there is no fixed list of things it can name. The detector above "
            + "knows eighty categories and none of them is a racing car; this one just says what it sees. "
            + "Needs a provider with a card.",
     needs: "a picture" },
-  { type: "video-search-gpu:v1", title: "Search a take by describing it",
+  { type: "video-search-gpu:v1", title: "Search a take by describing it", gpu: true,
     blurb: "Embeds every sampled frame so any phrase becomes a query \u2014 \u201ca red car\u201d, "
            + "\u201can empty room\u201d \u2014 and the answer is the moments that match, with timestamps. "
            + "Needs a provider with a card.",
     needs: "a take" },
-  { type: "video-gen-gpu:v1", title: "Make a take with a model instead",
-    blurb: "The same loop and the same record, with a diffusion model rather than the simple generator. "
-           + "It writes a version just like the ordinary one, so it joins the chain above. Slow \u2014 "
-           + "minutes, not a second \u2014 and needs a provider with a card.",
+  { type: "video-gen-gpu:v1", title: "Make a take with AI video generation", gpu: true,
+    blurb: "Uses a real video model, Stable Video Diffusion, in place of the simple generator the ordinary "
+           + "take uses. That one pans across your pictures; this one invents the motion from your last "
+           + "picture. Same record and same chain, so the two are interchangeable. A couple of minutes "
+           + "rather than a second, and the model makes a fixed 25 frames, so the clip is about two "
+           + "seconds whatever length you ask for.",
     needs: "a picture" },
   { type: "frame-stability:v1", title: "Did something move",
     blurb: "Reads every frame of a take \u2014 not a sample \u2014 and checks whether one patch of the "
@@ -105,7 +111,8 @@ function drawExtras() {
       : !canPay(x.type) ? `needs ${price(x.type)} ${PW.CFG.token} in Filecoin Pay`
       : `over ${n} piece${n > 1 ? "s" : ""}`;
     return `<div class="extra">
-      <div><b>${esc(x.title)}</b> <span class="muted">${esc(price(x.type))} ${esc(PW.CFG.token)}</span>
+      <div><b>${esc(x.title)}</b> <span class="muted">${esc(price(x.type))} ${esc(PW.CFG.token)}</span>${
+        x.gpu ? ' <span class="pill gpu">GPU</span>' : ""}
         <div class="muted">${esc(x.blurb)}</div></div>
       <div style="text-align:right">
         <button class="b" data-extra="${esc(x.type)}" ${ok ? "" : "disabled"}>Run it</button>
@@ -130,12 +137,12 @@ const playUrl = (providerId, cid) => {
 };
 // What the job reads out of the data set: the pictures, the prompt, and the takes so far.
 const IS_PICTURE = /\.(jpe?g|png|webp|bmp|gif)$/i;
-const IS_INPUT = /(\.(jpe?g|png|webp|bmp|gif)|^prompt\.json|^version-\d+\.mp4)$/i;
+const IS_INPUT = /(\.(jpe?g|png|webp|bmp|gif)|^prompt\.json|^version-\d+(-seg-\d+)?\.(mp4|json))$/i;
 // pick is what the dropdown is showing, held here rather than read off the element: draw() rebuilds the
 // select, and run() draws before it does anything, so a choice left in the DOM was destroyed the moment it
 // was acted on.
 const state = { provider: null, dataSetId: null, sets: [], money: null, pick: "new",
-                waiting: [], takes: [], pieces: [], jobs: {}, block: 0,
+                waiting: [], takes: [], pieces: [], jobs: {}, block: 0, segmented: true,
                 busy: false, busyText: "", error: "", note: "", setsError: "" };
 
 // Which providers can actually run this job. The page used to take the first and say nothing, which was
@@ -302,10 +309,10 @@ async function makeTake() {
   if (!state.dataSetId) throw new Error("upload your pictures first");
   if (!$("prompt").value.trim()) throw new Error("type a prompt first");
   await PW.addFiles(state.provider, state.dataSetId, [promptFile()]);
-  await order();
+  await order(takeJob());
 }
 
-async function order() {
+async function order(type = JOB) {
   const s = await PW.readSet(state.provider, state.dataSetId, PW.CFG.jobs, { removals: false });
   // Everything the job reads: the pictures, the prompt, and the takes so far. Which of them is the parent
   // is the job's decision, not the page's.
@@ -313,7 +320,7 @@ async function order() {
     .filter(([, f]) => IS_INPUT.test(f.name))
     .map(([pid]) => pid);
   if (!ids.length) throw new Error("this data set has no pictures in it yet");
-  await PW.order(state.provider, state.dataSetId, JOB, "keep-inputs", ids);
+  await PW.order(state.provider, state.dataSetId, type, "keep-inputs", ids);
   await refresh();
 }
 
@@ -327,14 +334,21 @@ async function refresh() {
   const s = await PW.readSet(state.provider, state.dataSetId, PW.CFG.jobs, { removals: false });
   const files = Object.entries(s.files ?? {}).map(([pieceId, f]) => ({ pieceId, ...f }));
   state.pieces = files;
+  // Every version has a version-N.json; only an unsegmented one also has a version-N.mp4. Reading the
+  // manifests rather than the videos is what lets both kinds appear in the same chain.
+  const records = files.filter((f) => /^version-\d+\.json$/i.test(f.name));
   const takes = [];
-  for (const v of files.filter((f) => /^version-\d+\.mp4$/i.test(f.name))) {
-    const n = Number(v.name.match(/\d+/)[0]);
-    const m = files.find((x) => x.name === `version-${n}.json`);
-    const manifest = m
-      ? await fetch(PW.fileUrl(state.provider, m.cid)).then((r) => r.json()).catch(() => null)
+  for (const r of records) {
+    const n = Number(r.name.match(/\d+/)[0]);
+    const manifest = await fetch(PW.fileUrl(state.provider, r.cid)).then((x) => x.json()).catch(() => null);
+    const segs = manifest?.segments ?? null;
+    const video = files.find((f) => f.name === `version-${n}.mp4`) ?? null;
+    // A segmented take plays as its own pieces, in order. Those named from an earlier version are not
+    // copies: they are that version's pieces, which is the whole point of storing it this way.
+    const pieces = segs
+      ? segs.map((sg) => ({ ...sg, piece: files.find((f) => f.name === sg.name) ?? null }))
       : null;
-    takes.push({ n, video: v, manifest });
+    takes.push({ n, video, manifest, segments: pieces });
   }
   state.takes = takes.sort((a, b) => b.n - a.n);
   draw();
@@ -421,20 +435,48 @@ function drawTakes() {
     const parent = m?.from?.parent;
     const parentTake = parent && state.takes.find((x) => x.manifest?.produced?.name === parent.name);
     const matches = parentTake && parentTake.manifest.produced.sha256 === parent.sha256;
+    const seg = t.segments;
+    const st = m?.storage;
+
+    // A segmented take has no single video file. It plays its pieces in order, and the ones it inherited
+    // are the earlier version's pieces rather than copies of them.
+    const player = seg
+      ? `<div class="segs">${seg.map((x, i) => x.piece
+          ? `<video controls muted playsinline preload="metadata" class="seg"
+                    title="${esc(x.name)} — from ${esc(x.from)}"
+                    src="${esc(playUrl(state.provider, x.piece.cid))}"></video>
+             <div class="segcap ${x.from === `version-${t.n}` ? "new" : "kept"}">${i + 1}. ${
+               x.from === `version-${t.n}` ? "new" : `kept from ${esc(x.from.replace("version-", "take "))}`}</div>`
+          : `<div class="noplay">segment ${esc(x.name)} is named but not in this data set</div>`).join("")}</div>`
+      : t.video
+        ? `<div data-slot="${t.n}"><video controls muted playsinline preload="metadata" data-take="${t.n}"
+               src="${esc(playUrl(state.provider, t.video.cid))}"></video></div>`
+        : '<div class="noplay">no video for this version</div>';
+
+    const save = t.video
+      ? `<a href="${esc(PW.fileUrl(state.provider, t.video.cid))}" data-save="${esc(t.video.name)}"
+            style="font-size:.8rem;font-weight:400;margin-left:8px">save ${esc(t.video.name)}</a>` : "";
+
+    // What this version cost to keep, which is the thing the segmented row exists to show.
+    const cost = st ? `
+stored      ${st.writtenByThisVersion} of ${st.segmentsInThisVersion} segments written (${
+      (st.bytesWritten / 1024).toFixed(0)} kB); ${st.reusedFromEarlierVersions} already here and only named${
+      st.bytesIfWholeFile ? `
+            ${Math.round(100 * st.bytesReused / st.bytesIfWholeFile)}% of this take cost nothing to store` : ""}` : "";
+
     return `<div class="take">
-      <div data-slot="${t.n}"><video controls muted playsinline preload="metadata" data-take="${t.n}"
-             src="${esc(playUrl(state.provider, t.video.cid))}"></video></div>
+      ${player}
       <div>
-        <h3>Take ${t.n}${t.n === state.takes[0].n ? ' <span class="pill ok">newest</span>' : ""}
-          <a href="${esc(PW.fileUrl(state.provider, t.video.cid))}" data-save="${esc(t.video.name)}"
-             style="font-size:.8rem;font-weight:400;margin-left:8px">save ${esc(t.video.name)}</a></h3>
-        ${m?.prompt ? `<div class="muted">“${esc(m.prompt)}”</div>` : ""}
-        ${m ? `<div class="lineage">this take   ${esc(short(m.produced.sha256))}
-built on    ${parent ? `<span class="parent">${esc(parent.name)}  ${esc(short(parent.sha256))}</span>` : "nothing — this is the first take"}${
-  parent ? `\n            ${matches ? '<span class="ok">✓ matches the hash that take published for itself</span>'
-                                    : '<span class="bad">✗ does not match any take here</span>'}` : ""}
-from        ${esc((m.from.images ?? []).map((i) => i.name).join(", ") || "—")}
-frames      ${m.produced.frames}${m.produced.carriedFromParent ? ` (${m.produced.carriedFromParent} carried from the take before)` : ""}</div>` : '<div class="muted">waiting for its record…</div>'}
+        <h3>Take ${t.n}${t.n === state.takes[0].n ? ' <span class="pill ok">newest</span>' : ""}${
+          seg ? ' <span class="pill gpu">segments</span>' : ""}${save}</h3>
+        ${m?.prompt ? `<div class="muted">\u201c${esc(m.prompt)}\u201d</div>` : ""}
+        ${m ? `<div class="lineage">this take   ${esc(short(m.produced?.sha256 ?? (m.produced?.sha256OfSegments ?? []).join(" ")))}
+built on    ${parent ? `<span class="parent">${esc(parent.name)}  ${esc(short(parent.sha256))}</span>` : "nothing \u2014 this is the first take"}${
+  parent ? `\n            ${matches ? '<span class="ok">\u2713 matches the hash that take published for itself</span>'
+                                    : '<span class="bad">\u2717 does not match any take here</span>'}` : ""}
+from        ${esc((m.from?.images ?? []).map((i) => i.name).join(", ") || "\u2014")}
+frames      ${m.produced?.frames ?? "?"}${m.produced?.carriedFromParent ? ` (${m.produced.carriedFromParent} carried from the take before)` : ""}${cost}</div>`
+      : '<div class="muted">waiting for its record\u2026</div>'}
       </div>
     </div>`;
   }).join("");
@@ -490,7 +532,12 @@ function draw() {
   const clr = $("clearup");
   if (clr) clr.onclick = () => { state.waiting = []; draw(); };
 
-  $("cost").textContent = `${price} ${PW.CFG.token} a take` + (canPay ? "" : " — not enough in Filecoin Pay yet");
+  const segBox = $("segmented");
+  if (segBox) {
+    segBox.checked = state.segmented;
+    segBox.onchange = () => { state.segmented = segBox.checked; draw(); };
+  }
+  $("cost").textContent = `${num(PW.CFG.jobs[takeJob()]?.price)} ${PW.CFG.token} a take` + (canPay ? "" : " — not enough in Filecoin Pay yet");
   $("deposit").disabled = state.busy;
   $("make").disabled = state.busy || !canPay || !state.dataSetId;
   $("make").textContent = state.busy ? "Working…" : state.takes.length ? "Make another take" : "Make the first take";

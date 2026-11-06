@@ -48,6 +48,8 @@ textarea:focus,input:focus,select:focus{outline:none;border-color:var(--accent)}
 .staged .tn{width:40px;height:40px;object-fit:cover;border-radius:6px;display:block}
 .staged a{color:var(--accent)}
 .pill.bad{background:var(--bad-soft);color:var(--bad)}
+/* Which rows need a card, said on the row rather than in the last line of its description. */
+.pill.gpu{background:var(--warn-soft);color:var(--warn);font-size:.68rem;letter-spacing:.04em}
 /* Balances: the three numbers that decide whether anything can happen at all. */
 .balances{display:flex;gap:10px;flex-wrap:wrap}
 .bal{flex:1 1 170px;background:var(--surface-2);border:1px solid var(--line);border-radius:10px;padding:11px 13px}
@@ -61,6 +63,13 @@ textarea:focus,input:focus,select:focus{outline:none;border-color:var(--accent)}
 .take{display:grid;grid-template-columns:260px 1fr;gap:16px;padding:16px 0;border-top:1px solid var(--line)}
 .take:first-child{border-top:none}
 .take video{width:260px;border-radius:9px;background:#000;display:block}
+/* A segmented take is its pieces, shown in order, each labelled with whether this version wrote it or
+   inherited it. That label is the saving, made visible rather than described. */
+.segs{width:260px;display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.segs .seg{width:100%;border-radius:6px;background:#000;display:block}
+.segcap{font-size:.66rem;line-height:1.3;margin:-2px 0 4px}
+.segcap.new{color:var(--accent)}
+.segcap.kept{color:var(--money)}
 .take h3{margin:0 0 6px;font-size:1rem}
 /* Stands where the player would, at the player's size, so a take that a browser cannot decode does not
    turn the card into a paragraph of explanation. */
@@ -166,6 +175,11 @@ a{color:var(--accent)}
     <p class="muted" id="uphint" style="margin-top:8px"></p>
     <h2 style="margin-top:18px">The prompt</h2>
     <textarea id="prompt" rows="2"></textarea>
+    <label class="muted" style="display:block;margin-top:10px;font-size:.88rem;cursor:pointer">
+      <input type="checkbox" id="segmented" checked>
+      Store each version as segments, reusing the shots that did not change. A later take then names the
+      parts it kept instead of writing them again, so the longer the chain the less it costs to keep.
+    </label>
     <div class="row" style="margin-top:12px">
       <button class="b primary" id="make">Make a take</button>
       <span class="muted" id="cost"></span>

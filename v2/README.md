@@ -1,7 +1,8 @@
 # FOC Compute V2
 
 V1 is the general thing: a storage provider sells compute over data it already holds, paid through
-Filecoin Pay, with 21 jobs and two levels of proof. It is in `poc/` and it is not changed by anything here.
+Filecoin Pay, with 18 jobs (28 images counting the GPU variants) and two levels of proof. It is in
+`poc/` and it is not changed by anything here.
 
 V2 is one application on top of it: **iterative video generation**. Upload images, generate a video, look
 at it, generate the next version on top of the last, and keep every version — in one data set, on one
@@ -46,6 +47,41 @@ by construction**:
 Visual similarity is not shared bytes. Re-encoding changes essentially every byte, and most frames are
 stored as differences from their neighbours rather than as themselves.
 
-This was measured on this job's own mp4v output, not on a real generator's. Run it on real output before
-concluding anything about a real product — but the mechanism is the codec, not the tool, so expect the
-same answer.
+Re-measured on H.264 (`avc1`) output on 6 November 2026, because the first run was on mp4v and the codec
+was the suspected cause rather than the tool. Same pair, half the frames identical by construction
+(`version-1.mp4` 47,932 bytes and `version-2.mp4` 96,236 bytes from jobs 23 and 24 on Calibration):
+
+| chunking | shared |
+|---|---|
+| fixed 4 KB blocks | **0.0%** |
+| fixed 1 KB blocks | **0.0%** |
+| content-defined, ~2 KB | **0.0%** |
+
+So the answer does not depend on the codec, and chunking after the fact cannot find the sharing.
+
+## What did work: segments, reused by content
+
+The sharing has to be built in at the boundary between what changed and what did not, which is what
+`SEGMENTS=1` does: one piece per source picture, each one a pure function of that picture, the prompt and
+the client's seed. A segment is then reused only when the bytes this run produced are already a piece in
+the data set, matched by sha256, so the saving is a measurement and not a property of how the take was
+assembled.
+
+Measured end to end on Calibration against the provider on this machine, data set #50990, jobs #37, #38
+and #39, each ordered and paid:
+
+| take | pictures | segments | written | reused | of the bytes | output pieces delivered |
+|---|---|---|---|---|---|---|
+| 1 | 3 | 3 | 3 | 0 | **0%** | 5 |
+| 2 | 4 (one added) | 4 | 1 | 3 | **74%** | 3 |
+| 3 | 4 (unchanged) | 4 | 0 | 4 | **100%** | 2 |
+
+The delivered-piece count is the check that matters: take 3 wrote no video at all, only its manifest and
+report, because every segment it produced was already stored. The control, run locally rather than on chain: the same four
+pictures with a different prompt returns to 0% and writes all four segments again, which is what makes
+the number worth quoting at all. It can go to zero.
+
+Two things this depends on, both worth knowing before trusting the figure elsewhere. The encoder has to be
+deterministic, which it is on a processor and is not on the A4000, so GPU takes will not reuse. And MUXL,
+DASL's deterministic ISO-BMFF subset, is what would make that a guarantee of the container rather than an
+observation about one encoder.
