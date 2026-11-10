@@ -65,6 +65,46 @@ def sha256(path):
     return h.hexdigest()
 
 
+MUXL = shutil.which("muxl")
+
+
+def canonicalise(path):
+    """Rewrite one segment into MUXL canonical form and return (path, BDASL CID).
+
+    The bytes ffmpeg writes are not a stable name for a video. Two files carrying identical frames
+    differ in atom ordering, timestamp bases and chunk layout, between muxers and between versions
+    of one muxer: measured here, three containers of the same frames gave three different sha256s
+    and one canonical form. MUXL (dasl.ing/muxl.html) defines that form, so the identifier belongs
+    to the content rather than to the tool that packaged it.
+
+    Returns (None, None) when muxl is absent or refuses. The caller then stores the raw bytes and
+    records canonical=false, because a paid job delivering a less portable identifier is better
+    than a paid job delivering nothing.
+    """
+    if not MUXL:
+        return None, None
+    canon = path + ".canon.mp4"
+    try:
+        subprocess.run([MUXL, "segment", path, "--flat", canon],
+                       check=True, capture_output=True, timeout=120)
+        out = subprocess.run([MUXL, "cid", canon, "--segments"],
+                             check=True, capture_output=True, timeout=120, text=True)
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as e:
+        if os.path.exists(canon):
+            os.remove(canon)
+        detail = getattr(e, "stderr", None) or b""
+        if isinstance(detail, bytes):
+            detail = detail.decode("utf-8", "replace")
+        print(f"muxl could not canonicalise {os.path.basename(path)}: {detail.strip()}",
+              file=sys.stderr)
+        return None, None
+    # "bafkr4i...<tab>track1 seg0<tab>15268 bytes" -- one line per canonical segment. Ours is
+    # single-track and single-segment by construction, so the first field of line one is the id.
+    first = next((ln for ln in out.stdout.splitlines() if ln.strip()), "")
+    parts = first.split()
+    return canon, (parts[0] if parts else None)
+
+
 def read_settings():
     """The prompt and the knobs, from prompt.json if the client supplied one."""
     settings = dict(DEFAULTS)
@@ -223,7 +263,9 @@ def main():
                                                      "bytes": seg.get("bytes", 0),
                                                      "frames": seg.get("frames", 0),
                                                      "from": seg.get("from", f[:-5]),
-                                                     "source": seg.get("source")})
+                                                     "source": seg.get("source"),
+                                                     "muxlCid": seg.get("muxlCid"),
+                                                     "canonical": seg.get("canonical", False)})
 
     out_path = os.path.join(OUT, f"version-{version}.mp4")
     writer = Encoder(out_path, w, h, fps)
@@ -306,6 +348,15 @@ def main():
                 y = int(dy * (1 - t) + (big.shape[0] - h) * 0.5 * t)
                 seg.write(big[y:y + h, x:x + w])
             seg.release()
+
+            # What gets stored is the canonical form, not what ffmpeg happened to write, so the
+            # piece in the data set is the one any MUXL implementation would produce from these
+            # frames. The hash is taken over those canonical bytes, which is what makes the reuse
+            # index survive an ffmpeg upgrade underneath us.
+            canon_path, muxl_cid = canonicalise(tmp_path)
+            if canon_path:
+                os.remove(tmp_path)
+                tmp_path = canon_path
             digest = sha256(tmp_path)
 
             hit = known.get(digest)
@@ -315,12 +366,15 @@ def main():
                 # is exactly what the earlier version produced.
                 os.remove(tmp_path)
                 segments_ordered.append({"name": hit["name"], "sha256": digest,
+                                         "muxlCid": hit.get("muxlCid") or muxl_cid,
+                                         "canonical": hit.get("canonical", canon_path is not None),
                                          "bytes": hit["bytes"], "frames": hit["frames"] or per_seg,
                                          "from": hit["from"], "source": name, "reused": True})
             else:
                 seg_name = f"version-{version}-seg-{idx:02d}.mp4"
                 os.rename(tmp_path, os.path.join(OUT, seg_name))
-                entry = {"name": seg_name, "sha256": digest,
+                entry = {"name": seg_name, "sha256": digest, "muxlCid": muxl_cid,
+                         "canonical": canon_path is not None,
                          "bytes": os.path.getsize(os.path.join(OUT, seg_name)), "frames": per_seg,
                          "from": f"version-{version}", "source": name, "reused": False}
                 segments_ordered.append(entry)
@@ -385,7 +439,10 @@ def main():
             "bytesReused": reused_bytes,
             # What it would have cost to store this take with no reuse: every segment, every time.
             "bytesIfWholeFile": reused_bytes + new_bytes,
-            "reuseTest": "sha256 of the encoded segment against every segment earlier versions wrote",
+            "reuseTest": "sha256 of the MUXL-canonical segment against every segment earlier "
+                         "versions wrote",
+            "canonicalForm": ("muxl" if all(x.get("canonical") for x in segments) else
+                              "mixed" if any(x.get("canonical") for x in segments) else "none"),
             "secondsPerSegment": round(per_seg / fps, 3) if per_seg else None,
             "note": ("a segment counts as reused only when the bytes this run produced are already a "
                      "piece in this data set, matched by sha256; those bytes are not written again and "
@@ -432,6 +489,13 @@ def main():
                     f"earlier version already stored, so they are only named.\n")
             r.write(f"This version wrote {st['bytesWritten']:,} bytes. Storing every segment again would "
                     f"have been {st['bytesIfWholeFile']:,}.\n")
+            if st.get("canonicalForm") == "muxl":
+                r.write("Segments are stored in MUXL canonical form (dasl.ing/muxl.html), so their "
+                        "identifiers come from the frames rather than from the tool that packaged "
+                        "them, and another implementation computes the same ones.\n")
+            elif st.get("canonicalForm") != "none":
+                r.write("Some segments could not be put in MUXL canonical form; version-N.json marks "
+                        "which, and their identifiers are only stable against this encoder.\n")
             if st["bytesIfWholeFile"]:
                 saved = 100 * st["bytesReused"] / st["bytesIfWholeFile"]
                 if saved:

@@ -81,7 +81,12 @@ report, because every segment it produced was already stored. The control, run l
 pictures with a different prompt returns to 0% and writes all four segments again, which is what makes
 the number worth quoting at all. It can go to zero.
 
-Two things this depends on, both worth knowing before trusting the figure elsewhere. The encoder has to be
-deterministic, which it is on a processor and is not on the A4000, so GPU takes will not reuse. And MUXL,
-DASL's deterministic ISO-BMFF subset, is what would make that a guarantee of the container rather than an
-observation about one encoder.
+Segments are stored in **MUXL canonical form** since 10 November 2026, so the identifier comes from the
+frames and not from the tool that packaged them: three containers of the same frames, with three different
+sha256s, canonicalise to one set of bytes and one CID. Details and the measurement are in
+[MUXL.md](MUXL.md).
+
+One limit remains and MUXL does not touch it. The *encoder* still has to be deterministic, which it is on
+a processor and is not on the A4000, and segment mode refuses the model generator outright, so the saving
+is a processor-generator property today. MUXL standardises packaging, not encoding; two non-deterministic
+encodes of one prompt share nothing to match however canonical the container is.
