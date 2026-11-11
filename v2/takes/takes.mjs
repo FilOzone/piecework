@@ -137,7 +137,9 @@ const playUrl = (providerId, cid) => {
 };
 // What the job reads out of the data set: the pictures, the prompt, and the takes so far.
 const IS_PICTURE = /\.(jpe?g|png|webp|bmp|gif)$/i;
-const IS_INPUT = /(\.(jpe?g|png|webp|bmp|gif)|^prompt\.json|^version-\d+(-seg-\d+)?\.(mp4|json))$/i;
+// A video the client brought is an input too: segment mode cuts it at its own keyframes.
+// Our own version-N-seg-KK.mp4 outputs are inputs as well, since a later take reuses them.
+const IS_INPUT = /(\.(jpe?g|png|webp|bmp|gif|mp4|mov|mkv|webm)|^prompt\.json|^version-\d+(-seg-\d+)?\.json)$/i;
 // pick is what the dropdown is showing, held here rather than read off the element: draw() rebuilds the
 // select, and run() draws before it does anything, so a choice left in the DOM was destroyed the moment it
 // was acted on.

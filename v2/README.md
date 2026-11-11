@@ -81,6 +81,32 @@ report, because every segment it produced was already stored. The control, run l
 pictures with a different prompt returns to 0% and writes all four segments again, which is what makes
 the number worth quoting at all. It can go to zero.
 
+## A video as the input, not just pictures
+
+One segment per source picture only works because the motion generator pans across stills, so the
+picture boundary is the only place anything changes. A video the client brought has no such
+structure, which is the general case and the better one: `video-gen-segments:v1` now takes a video
+and cuts it at the video's **own** sync samples, which MUXL does by spec and which is the only place
+a segment can start anyway. Nothing is generated and nothing is re-encoded; a stream copy is
+fragmented, MUXL segments it, and each segment is wrapped into a standalone canonical file so it
+plays on its own.
+
+Measured on a 4-scene video with one scene replaced. The two client actions give different numbers,
+and the difference is the point:
+
+| what the client does | segments reused | why |
+|---|---|---|
+| re-exports the whole edited video | 2 of 4, **48%** | x264's rate control looks ahead, so the segment *before* the edit changes too |
+| replaces one segment and reassembles | 3 of 4, **75%** | nothing is re-encoded, so untouched segments are untouched bytes |
+
+The second row is the shape worth building toward: a take is a list of segment identifiers, and an
+edit replaces one entry. `muxl wrap --flat` reassembles them into a playable file, verified in a
+browser at 8.0s and 96 frames. It saves encoding as well as storage, which matters far more on the
+model path, where one clip is about 170s of card time.
+
+Audio is not carried yet: only the video track is segmented, and the report says so rather than
+quietly dropping it.
+
 Segments are stored in **MUXL canonical form** since 10 November 2026, so the identifier comes from the
 frames and not from the tool that packaged them: three containers of the same frames, with three different
 sha256s, canonicalise to one set of bytes and one CID. Details and the measurement are in

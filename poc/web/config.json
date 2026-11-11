@@ -84,7 +84,7 @@
         ".md",
         ".csv"
       ],
-      "note": "Turns documents into vectors so they can be searched by meaning rather than by keyword. Transcripts count as documents — this is what makes a recording searchable."
+      "note": "Turns documents into vectors so they can be searched by meaning rather than by keyword. Transcripts count as documents \u2014 this is what makes a recording searchable."
     },
     "embed-gpu:v1": {
       "name": "Make my documents searchable by meaning (embeddings) (on the card)",
@@ -175,7 +175,7 @@
         ".avi",
         ".m4v"
       ],
-      "note": "Watches the video once and writes down what is in it and when — a person at 00:04:12, a car at 00:07:30, a shot change just before. The index is small enough to read and search, which is the point: on one test the video was 24.5 MB and the index was 154 bytes, so the answer came back 159,193 times smaller than the question. That is the case where sending your video somewhere to be processed makes least sense. On a processor it runs at about 2.7 times real time, so an hour of footage is roughly 22 minutes of work."
+      "note": "Watches the video once and writes down what is in it and when \u2014 a person at 00:04:12, a car at 00:07:30, a shot change just before. The index is small enough to read and search, which is the point: on one test the video was 24.5 MB and the index was 154 bytes, so the answer came back 159,193 times smaller than the question. That is the case where sending your video somewhere to be processed makes least sense. On a processor it runs at about 2.7 times real time, so an hour of footage is roughly 22 minutes of work."
     },
     "video-index-gpu:v1": {
       "name": "Index what is in my video (on the card)",
@@ -192,7 +192,7 @@
         ".avi",
         ".m4v"
       ],
-      "note": "The same index on a provider's GPU, and now with a number. Measured on a storage provider's own T4 over ten minutes of footage: 27.4 frames a second, 21.9 s for the 600 frames examined, 32 s end to end including container start and model load — against 2.7 frames a second on a processor, so ten times faster, and an hour of footage drops from about 22 minutes of work to 2.2. It read 48.7 MB of video and wrote a 15 KB index. The provider's own caveat, worth keeping: that film is 320x240, so higher-resolution footage will be slower per frame. Decoding also stays on the processor here, so a faster card would start to wait on it."
+      "note": "The same index on a provider's GPU, and now with a number. Measured on a storage provider's own T4 over ten minutes of footage: 27.4 frames a second, 21.9 s for the 600 frames examined, 32 s end to end including container start and model load \u2014 against 2.7 frames a second on a processor, so ten times faster, and an hour of footage drops from about 22 minutes of work to 2.2. It read 48.7 MB of video and wrote a 15 KB index. The provider's own caveat, worth keeping: that film is 320x240, so higher-resolution footage will be slower per frame. Decoding also stays on the processor here, so a faster card would start to wait on it."
     },
     "video-gen:v1": {
       "name": "Build a video from my pictures, and record what it came from",
@@ -210,7 +210,7 @@
         ".json",
         ".mp4"
       ],
-      "note": "Builds a video from the pictures you pick, and writes beside it a record of exactly what it was made from: every input by its sha256, the prompt you gave, and the version it was built on. Order it again and it builds the next version on top of the last, all in the same data set — so you end up with a chain of versions where each one names its parent, and anyone holding the pieces can check that claim without trusting the provider. Put your prompt in a file called prompt.json: {\"prompt\": \"...\", \"seconds\": 4, \"fps\": 12}. The generator is deliberately simple for now; the interesting part is the record, not the picture.",
+      "note": "Builds a video from the pictures you pick, and writes beside it a record of exactly what it was made from: every input by its sha256, the prompt you gave, and the version it was built on. Order it again and it builds the next version on top of the last, all in the same data set \u2014 so you end up with a chain of versions where each one names its parent, and anyone holding the pieces can check that claim without trusting the provider. Put your prompt in a file called prompt.json: {\"prompt\": \"...\", \"seconds\": 4, \"fps\": 12}. The generator is deliberately simple for now; the interesting part is the record, not the picture.",
       "inputPattern": "(\\.(jpe?g|png|webp|bmp)|^prompt\\.json|^version-\\d+(-seg-\\d+)?\\.mp4)$"
     },
     "photo-restore:v1": {
@@ -227,7 +227,7 @@
         ".webp",
         ".bmp"
       ],
-      "note": "Four times the width and height, with detail reconstructed rather than interpolated (Real-ESRGAN). On a processor this took 17.6 seconds for a 320x320 image, which scales to roughly 35 minutes for a normal 12-megapixel photograph — so order the card version for anything bigger than a thumbnail, or for more than a handful."
+      "note": "Four times the width and height, with detail reconstructed rather than interpolated (Real-ESRGAN). On a processor this took 17.6 seconds for a 320x320 image, which scales to roughly 35 minutes for a normal 12-megapixel photograph \u2014 so order the card version for anything bigger than a thumbnail, or for more than a handful."
     },
     "photo-restore-gpu:v1": {
       "name": "Enlarge and clean up my photographs (on the card)",
@@ -243,7 +243,7 @@
         ".webp",
         ".bmp"
       ],
-      "note": "The same restoration on a provider’s GPU. Measured on a storage provider’s own T4: 1.2 seconds to take a 320x320 image to 1280x1280, and 2.7 seconds for the job end to end, against 17.6 seconds for the same image on a processor. About fifteen times, which over an archive is the difference between weeks and months."
+      "note": "The same restoration on a provider\u2019s GPU. Measured on a storage provider\u2019s own T4: 1.2 seconds to take a 320x320 image to 1280x1280, and 2.7 seconds for the job end to end, against 17.6 seconds for the same image on a processor. About fifteen times, which over an archive is the difference between weeks and months."
     },
     "transcode:v1": {
       "name": "Re-encode my video, smaller",
@@ -335,11 +335,11 @@
       ],
       "verified": true,
       "imageDigest": "0x002faeef6f22ecb5f451643ff42c37ec420eb37f4e535ddcf14f72d0c6942d47",
-      "note": "The provider is paid only if a zero-knowledge proof convinces the chain that the count was computed over exactly the pieces you named. Delivering the right answer is not enough — it has to be the right answer about your data. Proving takes about ten minutes, so this job's deadline is an hour rather than the usual twenty minutes. Costs four times as much to prove as the attested version of the same job, which is why it costs four times as much to order.",
+      "note": "The provider is paid only if a zero-knowledge proof convinces the chain that the count was computed over exactly the pieces you named. Delivering the right answer is not enough \u2014 it has to be the right answer about your data. Proving takes about ten minutes, so this job's deadline is an hour rather than the usual twenty minutes. Costs four times as much to prove as the attested version of the same job, which is why it costs four times as much to order.",
       "verifier": "computeProofVerifier"
     },
     "term-count-attested:v1": {
-      "name": "Count a term, and prove the count — without proving whose data it was",
+      "name": "Count a term, and prove the count \u2014 without proving whose data it was",
       "price": "0.125",
       "outputs": [
         "term-count.txt"
@@ -351,7 +351,7 @@
       "verified": true,
       "verifier": "computeProofVerifierUnbound",
       "imageDigest": "0x0019f78dfa23d6ecc3140563c3746ba611461e81f5c70d9de052c22841d69cc0",
-      "note": "The chain verifies the proof, so the count itself is not in doubt. What it does not check is which bytes were counted: the proof commits to a sha256 of each input rather than to its Filecoin piece CID, and nothing on chain ties those digests to the pieces you pay to store. They are recorded in the delivering transaction and written into the result, so you can retrieve a piece, hash it, and see whether it matches — evidence after the fact rather than a condition on payment. A quarter the price because it is a quarter the proving cost: 24 cycles a byte against 99. Order the bound job if you want the chain to enforce that the count was taken over your data."
+      "note": "The chain verifies the proof, so the count itself is not in doubt. What it does not check is which bytes were counted: the proof commits to a sha256 of each input rather than to its Filecoin piece CID, and nothing on chain ties those digests to the pieces you pay to store. They are recorded in the delivering transaction and written into the result, so you can retrieve a piece, hash it, and see whether it matches \u2014 evidence after the fact rather than a condition on payment. A quarter the price because it is a quarter the proving cost: 24 cycles a byte against 99. Order the bound job if you want the chain to enforce that the count was taken over your data."
     },
     "ocr:v1": {
       "name": "Read my scanned pages into text",
@@ -387,7 +387,7 @@
         ".bmp",
         ".pdf"
       ],
-      "note": "A neural detector on the provider's card instead of tesseract on its processor. This is the one row where a GPU may buy accuracy as well as speed, because the classical engine degrades on skew, noise and low DPI where a neural one holds up. Both numbers are still missing — pages a minute and error rate on the same pages — and faster but no more accurate would be the weaker result."
+      "note": "A neural detector on the provider's card instead of tesseract on its processor. This is the one row where a GPU may buy accuracy as well as speed, because the classical engine degrades on skew, noise and low DPI where a neural one holds up. Both numbers are still missing \u2014 pages a minute and error rate on the same pages \u2014 and faster but no more accurate would be the weaker result."
     },
     "extract:v1": {
       "name": "Pull the facts out of my documents",
@@ -430,7 +430,7 @@
         ".avi",
         ".m4v"
       ],
-      "note": "Compares each sampled frame with the one before it and says where the picture changed enough to be a new shot. The answer is a list of cut points, which is what lets a video be stored as segments instead of one file — and that is what lets the next version of it point at the segments it did not change rather than storing them again. Two videos sharing half their frames share 0.0% of their bytes once encoded, so the sharing has to be built in at the cut points rather than discovered afterwards. No model and no GPU: this is histogram arithmetic, many times real time on a processor, which is why it is the cheapest row here."
+      "note": "Compares each sampled frame with the one before it and says where the picture changed enough to be a new shot. The answer is a list of cut points, which is what lets a video be stored as segments instead of one file \u2014 and that is what lets the next version of it point at the segments it did not change rather than storing them again. Two videos sharing half their frames share 0.0% of their bytes once encoded, so the sharing has to be built in at the cut points rather than discovered afterwards. No model and no GPU: this is histogram arithmetic, many times real time on a processor, which is why it is the cheapest row here."
     },
     "image-index:v1": {
       "name": "Index what is in my images",
@@ -448,7 +448,7 @@
         ".tif",
         ".tiff"
       ],
-      "note": "Looks at every image once and writes down what is in it and where — a person, a car, a boat, with a box and a confidence for each. The same thing the video indexer does, for the archives that are folders of stills rather than footage: robotics training data, satellite and scientific imagery, web crawls. The index is small enough to read and search, which is the point: the archive stays where it is and only the answer travels. Faces are detected and never identified — no face embeddings, no matching between images, no database of people, so it cannot tell you who someone is or that two photographs show the same person. GDPR Article 9 treats biometric data as special category when it is processed to uniquely identify someone; detection without identification does not meet that test, and the job's own report says so. Order it with FACES=0 to turn even the detection off."
+      "note": "Looks at every image once and writes down what is in it and where \u2014 a person, a car, a boat, with a box and a confidence for each. The same thing the video indexer does, for the archives that are folders of stills rather than footage: robotics training data, satellite and scientific imagery, web crawls. The index is small enough to read and search, which is the point: the archive stays where it is and only the answer travels. Faces are detected and never identified \u2014 no face embeddings, no matching between images, no database of people, so it cannot tell you who someone is or that two photographs show the same person. GDPR Article 9 treats biometric data as special category when it is processed to uniquely identify someone; detection without identification does not meet that test, and the job's own report says so. Order it with FACES=0 to turn even the detection off."
     },
     "image-index-gpu:v1": {
       "name": "Index what is in my images (on the card)",
@@ -466,7 +466,7 @@
         ".tif",
         ".tiff"
       ],
-      "note": "The same index, and the same limits on faces, with the detector on a provider's GPU. This is the cleaner GPU measurement of the two indexers: the video one is held back by decoding frames on the processor, and a folder of JPEGs has no such ceiling, so what the card is worth shows up undiluted. Nobody has run it on a card yet, so there is no number here — the processor does about 3 images a second on this machine, and that is the figure to beat."
+      "note": "The same index, and the same limits on faces, with the detector on a provider's GPU. This is the cleaner GPU measurement of the two indexers: the video one is held back by decoding frames on the processor, and a folder of JPEGs has no such ceiling, so what the card is worth shows up undiluted. Nobody has run it on a card yet, so there is no number here \u2014 the processor does about 3 images a second on this machine, and that is the figure to beat."
     },
     "frame-stability:v1": {
       "name": "Prove whether something moved",
@@ -486,7 +486,7 @@
         ".png",
         ".jpg"
       ],
-      "note": "Reads every frame, not a sample, and tracks one region named in track.json beside the video. The useful answer is usually a negative: it did not move, in any frame, and here are the per-frame coordinates. The point of publishing the coordinates is that nobody has to take the verdict on trust — the video is stored, the method is fixed, and the same job over the same piece gives the same table, so anyone holding the pieces can check it. No model and no card: normalised cross-correlation in a small window.",
+      "note": "Reads every frame, not a sample, and tracks one region named in track.json beside the video. The useful answer is usually a negative: it did not move, in any frame, and here are the per-frame coordinates. The point of publishing the coordinates is that nobody has to take the verdict on trust \u2014 the video is stored, the method is fixed, and the same job over the same piece gives the same table, so anyone holding the pieces can check it. No model and no card: normalised cross-correlation in a small window.",
       "inputPattern": "(\\.(mp4|mov|mkv|webm|avi|m4v)|^track\\.json)$"
     },
     "image-caption-gpu:v1": {
@@ -505,7 +505,7 @@
         ".tif",
         ".tiff"
       ],
-      "note": "Describes each picture in a sentence instead of picking from a fixed list. This answers the one real limit of “Index what is in my images”: that job's detector knows exactly eighty COCO categories, and racing car, helmet and wheel are not among them — so photographs of Formula 1 cars came back as a truck and an airplane. Not a bug and not tunable; the model has no word for what it is looking at. A vision-language model has no fixed vocabulary. Florence-2-base, about 0.5 GB in fp16, which no sealing card will notice. GPU only on purpose and it refuses without a card: seconds an image on a processor against well under one on a T4, and a run that quietly used the processor would report a number nobody could compare with the detector row. Measured on a storage provider's own T4, the first run on any card: four images in 8.0 s, 1.99 s an image, 34.9 s end to end including container start and model load."
+      "note": "Describes each picture in a sentence instead of picking from a fixed list. This answers the one real limit of \u201cIndex what is in my images\u201d: that job's detector knows exactly eighty COCO categories, and racing car, helmet and wheel are not among them \u2014 so photographs of Formula 1 cars came back as a truck and an airplane. Not a bug and not tunable; the model has no word for what it is looking at. A vision-language model has no fixed vocabulary. Florence-2-base, about 0.5 GB in fp16, which no sealing card will notice. GPU only on purpose and it refuses without a card: seconds an image on a processor against well under one on a T4, and a run that quietly used the processor would report a number nobody could compare with the detector row. Measured on a storage provider's own T4, the first run on any card: four images in 8.0 s, 1.99 s an image, 34.9 s end to end including container start and model load."
     },
     "video-gen-gpu:v1": {
       "name": "Build a video from my pictures, with a model (on the card)",
@@ -523,7 +523,7 @@
         ".json",
         ".mp4"
       ],
-      "note": "The same loop and the same record, with Stable Video Diffusion instead of the deliberately simple motion generator. Identical output contract — version-N.mp4 beside a version-N.json naming every input by its sha256, the prompt, and the version it was built on — so the chain of takes, the client page and the storage cannot tell which generator ran. The model invents the motion from your last picture rather than panning across a still. GPU only and it refuses without a card: a diffusion video model on a processor is hours per clip, which is not a slower service but no service. The image is large, about 12 GB, because the weights are baked in — jobs run with no network. Measured on a storage provider's own T4, the first run on any card: 25 frames at 512x512 in 400.9 s, 12.3 s a diffusion step, H.264 out. Note the duration: this model makes a fixed 25 frames and does not take a length, so at 12 fps every clip is about 2.1 seconds whatever seconds says in prompt.json. The record written beside the video states the length the file actually is, and says when that differs from what was asked.",
+      "note": "The same loop and the same record, with Stable Video Diffusion instead of the deliberately simple motion generator. Identical output contract \u2014 version-N.mp4 beside a version-N.json naming every input by its sha256, the prompt, and the version it was built on \u2014 so the chain of takes, the client page and the storage cannot tell which generator ran. The model invents the motion from your last picture rather than panning across a still. GPU only and it refuses without a card: a diffusion video model on a processor is hours per clip, which is not a slower service but no service. The image is large, about 12 GB, because the weights are baked in \u2014 jobs run with no network. Measured on a storage provider's own T4, the first run on any card: 25 frames at 512x512 in 400.9 s, 12.3 s a diffusion step, H.264 out. Note the duration: this model makes a fixed 25 frames and does not take a length, so at 12 fps every clip is about 2.1 seconds whatever seconds says in prompt.json. The record written beside the video states the length the file actually is, and says when that differs from what was asked.",
       "inputPattern": "(\\.(jpe?g|png|webp|bmp)|^prompt\\.json|^version-\\d+(-seg-\\d+)?\\.mp4)$"
     },
     "video-search-gpu:v1": {
@@ -542,7 +542,7 @@
         ".m4v",
         ".json"
       ],
-      "note": "Embeds each sampled frame into the same space as text, so the question can be any phrase — “a red single-seater on a wet track”, “an empty grandstand” — and the answer is the moments that match, with timestamps. Put the phrases in queries.json. This generalises “Index what is in my video”, which runs a detector that knows eighty fixed categories and can never be asked about anything else. The frame vectors are written beside the video on purpose: describing the archive is the expensive pass and every question after it is a dot product, which is the economic case for doing this where the data already sits. CLIP ViT-B/32, about 600 MB. GPU only, and it refuses without a card. Measured on a storage provider's own T4, the first run on any card: 600 frames from ten minutes of footage in 41.5 s, 14.4 frames a second, 60.6 s end to end. Asked for “a rocket launch” it returned 09:14 to 09:23 of the clip, which is where the launch is.",
+      "note": "Embeds each sampled frame into the same space as text, so the question can be any phrase \u2014 \u201ca red single-seater on a wet track\u201d, \u201can empty grandstand\u201d \u2014 and the answer is the moments that match, with timestamps. Put the phrases in queries.json. This generalises \u201cIndex what is in my video\u201d, which runs a detector that knows eighty fixed categories and can never be asked about anything else. The frame vectors are written beside the video on purpose: describing the archive is the expensive pass and every question after it is a dot product, which is the economic case for doing this where the data already sits. CLIP ViT-B/32, about 600 MB. GPU only, and it refuses without a card. Measured on a storage provider's own T4, the first run on any card: 600 frames from ten minutes of footage in 41.5 s, 14.4 frames a second, 60.6 s end to end. Asked for \u201ca rocket launch\u201d it returned 09:14 to 09:23 of the clip, which is where the launch is.",
       "inputPattern": "(\\.(mp4|mov|mkv|webm|avi|m4v)|^queries\\.json)$"
     },
     "video-gen-segments:v1": {
@@ -559,10 +559,13 @@
         ".webp",
         ".bmp",
         ".json",
-        ".mp4"
+        ".mp4",
+        ".mov",
+        ".mkv",
+        ".webm"
       ],
-      "inputPattern": "(\\.(jpe?g|png|webp|bmp)|^prompt\\.json|^version-\\d+(-seg-\\d+)?\\.(mp4|json))$",
-      "note": "The same loop as the ordinary take, stored as one piece per shot rather than one piece per version. A take built on another does not re-encode or re-store the shots it did not change: it names them by sha256, and those pieces are already in your data set. Measured here, each take writes four segments however long the chain gets — take 3 is twelve segments of video that cost four to store, so two thirds of it was free, and the fraction climbs with every iteration. This is the saving that chunking cannot find after the fact: two takes sharing half their frames share 0.0% of their bytes once encoded, so it has to be built in at the boundary between what changed and what did not."
+      "inputPattern": "(\\.(jpe?g|png|webp|bmp|mp4|mov|mkv|webm)|^prompt\\.json|^version-\\d+(-seg-\\d+)?\\.json)$",
+      "note": "One piece per shot rather than one piece per version, so a take built on another names the shots it did not change instead of storing them again. Reuse is measured, not assumed: a segment counts as reused only when the bytes this run produced are already a piece in your data set, matched by sha256. Measured on Calibration as paid jobs: adding one picture to a take reused 3 of 4 segments and 74% of the bytes cost nothing; rerunning with nothing changed reused all four and stored no video at all; the same pictures with a different prompt correctly returns to 0%. Segments are stored in MUXL canonical form, so a segment is named by its content rather than by the tool that packaged the file. Give it a video instead of pictures and it is cut at the video's own keyframes, which is the general case: replacing one scene costs that scene, where re-encoding the whole file changes frames before the edit too. This is the saving chunking cannot find afterwards: two takes sharing half their frames share 0.0% of their bytes once encoded, on H.264 as well as mp4v."
     }
   },
   "policies": [
@@ -584,7 +587,7 @@
       "name": "Keep my data set searchable",
       "rate": "0.002",
       "lockupEpochs": 60,
-      "note": "Whenever you add a document, it is turned into vectors next to your files and written back into the same data set. You never order anything — what you are buying is that your data set stays searchable as it changes."
+      "note": "Whenever you add a document, it is turned into vectors next to your files and written back into the same data set. You never order anything \u2014 what you are buying is that your data set stays searchable as it changes."
     },
     "redact-live:v1": {
       "name": "Keep my data set clean",
@@ -596,7 +599,7 @@
       "name": "Keep my data set answering questions",
       "rate": "0.002",
       "lockupEpochs": 60,
-      "note": "While this runs, add a file whose name starts with \"ask\" — the question inside it is answered from the vectors already stored next to your data, and the answer appears in your data set. Nothing about your documents leaves the provider. It needs \"Keep my data set searchable\" to have run first, so there are vectors to answer from."
+      "note": "While this runs, add a file whose name starts with \"ask\" \u2014 the question inside it is answered from the vectors already stored next to your data, and the answer appears in your data set. Nothing about your documents leaves the provider. It needs \"Keep my data set searchable\" to have run first, so there are vectors to answer from."
     }
   },
   "rpcFallbacks": [

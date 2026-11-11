@@ -33,6 +33,7 @@ import json
 import os
 import re
 import shutil
+import tempfile
 import subprocess
 import sys
 import time
@@ -103,6 +104,92 @@ def canonicalise(path):
     first = next((ln for ln in out.stdout.splitlines() if ln.strip()), "")
     parts = first.split()
     return canon, (parts[0] if parts else None)
+
+
+def client_videos(names):
+    """Videos the client brought, as opposed to this job's own earlier output."""
+    return [f for f in names
+            if f.lower().endswith(VIDEOS) and not re.match(r"version-\d+", f, re.I)]
+
+
+def video_track(frag):
+    """Which MUXL track number carries the video, read from the catalog rather than guessed."""
+    try:
+        out = subprocess.run([MUXL, "catalog", frag], check=True, capture_output=True,
+                             timeout=120, text=True).stdout
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):
+        return 1
+    m = re.search(r'^video\s+"[^"]*":.*?\(track (\d+)', out, re.M)
+    return int(m.group(1)) if m else 1
+
+
+def frames_in(path):
+    try:
+        out = subprocess.run(["ffprobe", "-v", "error", "-count_frames", "-select_streams", "v:0",
+                              "-show_entries", "stream=nb_read_frames", "-of", "csv=p=0", path],
+                             check=True, capture_output=True, timeout=300, text=True).stdout
+        return int(out.strip().split(",")[0])
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError, ValueError):
+        return 0
+
+
+def split_video(src, work):
+    """Cut a client's video into MUXL canonical segments at its own sync samples.
+
+    This is the general case the picture path is not. One segment per source picture only works
+    because the motion generator pans across stills, so the picture boundary is the only place
+    anything changes; a video the client brought has no such structure. MUXL segments at video sync
+    samples by spec, which is also the only place a segment can start, so the cut points come from
+    the video rather than from a guess about it.
+
+    Returns a list of standalone playable canonical files, in order, or None if the video could not
+    be read. Audio is not carried: only the video track is segmented, which the report states.
+    """
+    if not MUXL:
+        return None
+    frag = os.path.join(work, "frag.mp4")
+    # Stream-copy first, because re-encoding to segment would change the very bytes whose stability
+    # is the point. Only a container ffmpeg cannot fragment as-is gets re-encoded.
+    for extra in (["-c", "copy"], ["-c:v", "libx264", "-pix_fmt", "yuv420p", "-an"]):
+        try:
+            subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", src, *extra,
+                            "-movflags", "frag_keyframe+empty_moov+default_base_moof", frag],
+                           check=True, capture_output=True, timeout=900)
+            break
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):
+            continue
+    else:
+        return None
+
+    segdir = os.path.join(work, "segs")
+    os.makedirs(segdir, exist_ok=True)
+    try:
+        subprocess.run([MUXL, "segment", frag, "--dir", segdir],
+                       check=True, capture_output=True, timeout=900)
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as e:
+        detail = getattr(e, "stderr", None) or b""
+        if isinstance(detail, bytes):
+            detail = detail.decode("utf-8", "replace")
+        print(f"muxl could not segment {os.path.basename(src)}: {detail.strip()}", file=sys.stderr)
+        return None
+
+    track = os.path.join(segdir, f"track{video_track(frag)}")
+    if not os.path.isdir(track):
+        return None
+    pieces = sorted(f for f in os.listdir(track) if f.endswith(".m4s"))
+    made = []
+    for i, m4s in enumerate(pieces):
+        # A bare .m4s is not playable on its own, and the page plays each segment in its own
+        # element, so each one is wrapped into a standalone canonical file. Deterministic: wrapping
+        # the same segment twice gives the same bytes.
+        standalone = os.path.join(work, f"seg-{i:04d}.mp4")
+        try:
+            subprocess.run([MUXL, "wrap", "--flat", standalone, os.path.join(track, m4s)],
+                           check=True, capture_output=True, timeout=300)
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):
+            return None
+        made.append(standalone)
+    return made or None
 
 
 def read_settings():
@@ -204,10 +291,17 @@ def main():
     parents = [f for f in names if pat.match(f)]
     parent = max(parents, key=lambda f: int(pat.match(f).group(1))) if parents else None
 
-    if not images:
+    # A video the client brought is an input in its own right, not just a possible parent. In segment
+    # mode it is the better input: its cut points come from the video rather than from our generator
+    # happening to pan across one still at a time.
+    brought = client_videos(names) if SEGMENTS else []
+    source_video = brought[0] if brought else None
+
+    if not images and not source_video:
         with open(os.path.join(OUT, "video-gen-report.txt"), "w") as r:
-            r.write("No images to build from.\n\nThe job looked in /in for "
-                    + ", ".join(IMAGES) + " and found none. Add at least one picture and order again.\n")
+            r.write("Nothing to build from.\n\nThe job looked in /in for "
+                    + ", ".join(IMAGES) + " and for a video, and found neither. Add at least one "
+                    "picture, or a video to cut into segments, and order again.\n")
         return 0
 
     if SEGMENTS and GENERATOR == "svd":
@@ -235,8 +329,16 @@ def main():
             carried.append(frame)
         cap.release()
 
-    first = cv2.imread(os.path.join(IN, images[0]))
+    first = cv2.imread(os.path.join(IN, images[0])) if images else None
     h, w = (first.shape[:2] if first is not None else (480, 640))
+    if source_video:
+        # The video's own size, not the no-pictures fallback, since nothing here is being generated.
+        probe = cv2.VideoCapture(os.path.join(IN, source_video))
+        vw = int(probe.get(cv2.CAP_PROP_FRAME_WIDTH) or 0)
+        vh = int(probe.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
+        probe.release()
+        if vw and vh:
+            h, w = vh, vw
     if carried:
         h, w = carried[0].shape[:2]
     h, w = h - h % 2, w - w % 2
@@ -309,9 +411,58 @@ def main():
     # prompt give the same video. A client re-ordering the same job should not get a different answer.
     prompt_seed = int.from_bytes(hashlib.sha256(str(s["prompt"]).encode()).digest()[:2], "big")
     rng = np.random.default_rng(int(s["seed"]) ^ prompt_seed)
-    per_image = max(1, int(round(fps * seconds / len(images))))
+    per_image = max(1, int(round(fps * seconds / len(images)))) if images else 0
     made_segments = []
     segments_ordered, per_seg = [], None
+    if SEGMENTS and produced_frames is None and source_video:
+        # The general case. Nothing is generated: the client's own video is cut at its own sync
+        # samples, each segment stored as a standalone canonical file, and a segment already in the
+        # data set is named rather than stored again. An edit that replaces one scene therefore
+        # costs one scene, not a whole re-encode -- and re-encoding would not even reuse, because
+        # the encoder looks ahead and changes frames before the edit as well.
+        writer.release()
+        os.remove(out_path)
+        with tempfile.TemporaryDirectory() as work:
+            cut = split_video(os.path.join(IN, source_video), work)
+            if cut is None:
+                with open(os.path.join(OUT, "video-gen-report.txt"), "w") as r:
+                    r.write(f"Could not cut {source_video} into segments.\n\nThe file was read but "
+                            "neither a stream copy nor a re-encode produced something MUXL would "
+                            "segment. Nothing was stored and nothing is claimed.\n")
+                return 0
+            for idx, path in enumerate(cut):
+                digest = sha256(path)
+                cid = None
+                try:
+                    out = subprocess.run([MUXL, "cid", path, "--segments"], check=True,
+                                         capture_output=True, timeout=120, text=True).stdout
+                    parts = next((ln for ln in out.splitlines() if ln.strip()), "").split()
+                    cid = parts[0] if parts else None
+                except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):
+                    pass
+                hit = known.get(digest)
+                if hit:
+                    segments_ordered.append({"name": hit["name"], "sha256": digest,
+                                             "muxlCid": hit.get("muxlCid") or cid,
+                                             "canonical": True,
+                                             "bytes": hit["bytes"],
+                                             "frames": hit["frames"] or frames_in(path),
+                                             "from": hit["from"], "source": source_video,
+                                             "reused": True})
+                else:
+                    seg_name = f"version-{version}-seg-{idx:02d}.mp4"
+                    shutil.copy2(path, os.path.join(OUT, seg_name))
+                    entry = {"name": seg_name, "sha256": digest, "muxlCid": cid,
+                             "canonical": True,
+                             "bytes": os.path.getsize(os.path.join(OUT, seg_name)),
+                             "frames": frames_in(path), "from": f"version-{version}",
+                             "source": source_video, "reused": False}
+                    segments_ordered.append(entry)
+                    known[digest] = entry
+        made_segments = [x for x in segments_ordered if not x["reused"]]
+        produced_frames = sum(x["frames"] for x in segments_ordered)
+        per_seg = None
+
     if SEGMENTS and produced_frames is None:
         writer.release()
         os.remove(out_path)
@@ -462,7 +613,12 @@ def main():
         }
     asked = round(seconds, 3)
     got = manifest["produced"]["seconds"]
-    if abs(got - asked) > 0.05:
+    if source_video:
+        # seconds is a knob for the generator. Cutting a video the client already has does not take
+        # a duration, so comparing its length against the default would report a mismatch that
+        # means nothing.
+        pass
+    elif abs(got - asked) > 0.05:
         manifest["produced"]["durationNote"] = (
             f"asked for {asked}s, produced {got}s: this generator makes a fixed {fixed_frames} frames "
             f"and does not take a duration, so seconds is not controllable here"
@@ -475,7 +631,11 @@ def main():
     elapsed = time.time() - started
     with open(os.path.join(OUT, "video-gen-report.txt"), "w") as r:
         r.write(f"Version {version} of your video\n\n")
-        r.write(f"Built from {len(images)} image(s)" + (f", on top of {parent}" if parent else "") + "\n")
+        if source_video:
+            r.write(f"Cut from {source_video}, at the video's own keyframes\n")
+        else:
+            r.write(f"Built from {len(images)} image(s)"
+                    + (f", on top of {parent}" if parent else "") + "\n")
         if s["prompt"]:
             r.write(f"Prompt: {s['prompt']}\n")
         r.write(f"\n{w}x{h}, {fps} fps, {manifest['produced']['frames']} frames")
@@ -483,10 +643,15 @@ def main():
             r.write(f" (of which {len(carried)} carried from the previous version)")
         if SEGMENTS:
             st = manifest["storage"]
-            r.write(f"\n\nStored as {st['segmentsInThisVersion']} segments of "
-                    f"{st['secondsPerSegment']}s each, of which {st['writtenByThisVersion']} were written "
-                    f"now and {st['reusedFromEarlierVersions']} turned out to be byte-for-byte what an "
+            each = (f" of {st['secondsPerSegment']}s each" if st.get("secondsPerSegment") else "")
+            r.write(f"\n\nStored as {st['segmentsInThisVersion']} segments{each}, of which "
+                    f"{st['writtenByThisVersion']} were written now and "
+                    f"{st['reusedFromEarlierVersions']} turned out to be byte-for-byte what an "
                     f"earlier version already stored, so they are only named.\n")
+            if source_video:
+                r.write("The cut points are the video's own: MUXL segments at sync samples, which is "
+                        "the only place a segment can start. Replacing one scene costs that scene. "
+                        "Only the video track is carried; audio is not segmented yet.\n")
             r.write(f"This version wrote {st['bytesWritten']:,} bytes. Storing every segment again would "
                     f"have been {st['bytesIfWholeFile']:,}.\n")
             if st.get("canonicalForm") == "muxl":
