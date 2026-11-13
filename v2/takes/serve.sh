@@ -11,7 +11,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 WEB="$(cd "$HERE/../../poc/web" && pwd)"
 OUT="$HOME/piecework-runtime/takes"   # outside ~/Documents, same reason as the V1 build: iCloud eviction
 rm -rf "$OUT"; mkdir -p "$OUT"
-cp "$HERE"/index.html "$HERE"/takes.mjs "$OUT"/
+cp "$HERE"/index.html "$HERE"/takes.mjs "$HERE"/view.html "$OUT"/
 cp "$WEB"/app.mjs "$WEB"/abi.json "$WEB"/foc-logo-icon.svg "$OUT"/
 
 # The provider on this machine, added the same way the V1 build adds it, and for the same reason: a job

@@ -416,19 +416,161 @@ async function saveWithItsName(e) {
   }
 }
 
+// ---------------------------------------------------------------------------------------------
+// The data set, as somewhere you can look around. It was a table of names and hashes, which is an
+// accurate description of what a data set is and a useless one for finding your own holiday clip
+// in it. Same pieces, shown as files: a thumbnail where one can be made, a type where it cannot,
+// grouped by what the thing is, searchable, and openable without leaving the page.
+const IS_VIDEO = /\.(mp4|mov|mkv|webm|m4v)$/i;
+const IS_TEXT = /\.(txt|json|md|csv)$/i;
+
+const ICONS = {
+  video: '<path d="M4 7a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/>'
+       + '<path d="m15 10 4.5-2.6a.6.6 0 0 1 .9.5v8.2a.6.6 0 0 1-.9.5L15 14z"/>',
+  image: '<rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8.5" cy="10" r="1.6"/>'
+       + '<path d="m4 17 5-4.2 3.4 2.8L16 12l4 4"/>',
+  text:  '<path d="M6 3h8l4 4v14a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/>'
+       + '<path d="M14 3v5h4M8 12h8M8 16h5"/>',
+  other: '<path d="M6 3h8l4 4v14a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/>'
+       + '<path d="M14 3v5h4"/>',
+};
+const kindOf = (n) => IS_PICTURE.test(n) ? "image" : IS_VIDEO.test(n) ? "video"
+                    : IS_TEXT.test(n) ? "text" : "other";
+const icon = (k) => `<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+  stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">${ICONS[k]}</svg>`;
+
+const bytes = (n) => n == null ? ""
+  : n < 1024 ? `${n} B`
+  : n < 1024 * 1024 ? `${(n / 1024).toFixed(0)} KB`
+  : `${(n / 1048576).toFixed(1)} MB`;
+
+// Which shelf a piece belongs on. A data set holds three different kinds of thing and a flat list
+// hides that: what you put in, what a take produced, and what the job wrote about it.
+function shelf(f) {
+  const n = f.name.replace(/ \(job #\d+\)$/, "");
+  if (/^version-\d+(-seg-\d+)?\.(mp4|mov|mkv|webm)$/i.test(n)) return "takes";
+  if (/^version-\d+\.json$/i.test(n) || IS_TEXT.test(n) && f.kind === "output") return "records";
+  return "yours";
+}
+const SHELVES = [
+  ["yours", "Your files", "what you put in"],
+  ["takes", "Takes", "video the jobs produced"],
+  ["records", "Records", "manifests and reports"],
+];
+
+// Sizes are not in the data set listing, so they are fetched once per piece and cached. A HEAD is
+// enough; nothing is downloaded to show a number.
+const sizes = new Map();
+async function fillSizes() {
+  const todo = state.pieces.filter((f) => !sizes.has(f.cid)).slice(0, 60);
+  if (!todo.length) return;
+  await Promise.all(todo.map(async (f) => {
+    try {
+      const r = await fetch(PW.fileUrl(state.provider, f.cid), { method: "HEAD" });
+      const n = Number(r.headers.get("content-length"));
+      sizes.set(f.cid, Number.isFinite(n) && n > 0 ? n : null);
+    } catch { sizes.set(f.cid, null); }
+  }));
+  const host = $("pieces");
+  if (host) { host.innerHTML = drawPieces(); bindPieces(); }
+}
+
+function cardFor(f) {
+  const k = kindOf(f.name);
+  const url = PW.fileUrl(state.provider, f.cid);
+  const made = f.kind === "output" ? '<span class="tag">made here</span>' : "";
+  const shot = k === "image"
+    ? `<img loading="lazy" src="${esc(url)}" alt="">${made}`
+    : k === "video"
+      ? `<video preload="metadata" muted playsinline src="${esc(url)}#t=0.1"></video>${made}`
+      : `${icon(k)}${made}`;
+  return `<div class="card" data-cid="${esc(f.cid)}" data-name="${esc(f.name)}" data-kind="${k}">
+    <div class="shot">${shot}</div>
+    <div class="meta"><div class="nm">${esc(f.name)}</div>
+      <div class="sub">piece ${esc(f.pieceId)}${sizes.get(f.cid) ? " \u00b7 " + bytes(sizes.get(f.cid)) : ""}</div>
+    </div></div>`;
+}
+
+function rowFor(f) {
+  const k = kindOf(f.name);
+  return `<div class="r" data-cid="${esc(f.cid)}" data-name="${esc(f.name)}" data-kind="${k}">
+    ${icon(k)}<span class="nm">${esc(f.name)}</span>
+    <span class="sub">piece ${esc(f.pieceId)}${sizes.get(f.cid) ? " \u00b7 " + bytes(sizes.get(f.cid)) : ""}</span>
+  </div>`;
+}
+
 function drawPieces() {
   if (!state.dataSetId) return "";
   if (!state.pieces.length) return '<p class="muted">Nothing stored in it yet.</p>';
-  const rows = state.pieces.map((f) => `<tr>
-    <td>${IS_PICTURE.test(f.name)
-      ? `<img class="tn" loading="lazy" src="${esc(PW.fileUrl(state.provider, f.cid))}" alt="">`
-      : ""}</td>
-    <td><a href="${esc(PW.fileUrl(state.provider, f.cid))}" data-save="${esc(f.name)}" target="_blank" rel="noopener">${esc(f.name)}</a>${
-      f.kind === "output" ? ' <span class="pill ok">made here</span>' : ""}</td>
-    <td class="muted">piece ${esc(f.pieceId)}</td>
-    <td class="muted">${esc(short(f.cid))}</td></tr>`).join("");
-  return `<p class="muted">${state.pieces.length} piece${state.pieces.length > 1 ? "s" : ""} in this data set.</p>
-    <div class="staged"><table>${rows}</table></div>`;
+  const q = (state.dsFilter ?? "").trim().toLowerCase();
+  const shown = q ? state.pieces.filter((f) => f.name.toLowerCase().includes(q)) : state.pieces;
+  const grid = (state.dsView ?? "grid") === "grid";
+  const bar = `<div class="dsbar">
+    <input id="dsq" type="search" placeholder="Search this data set" value="${esc(state.dsFilter ?? "")}">
+    <div class="vtog">
+      <button data-view="grid" aria-pressed="${grid}">Grid</button>
+      <button data-view="list" aria-pressed="${!grid}">List</button>
+    </div></div>`;
+  if (!shown.length) {
+    return `<p class="muted">${state.pieces.length} pieces in this data set.</p>${bar}
+      <p class="muted">Nothing here matches &ldquo;${esc(state.dsFilter)}&rdquo;.</p>`;
+  }
+  const body = SHELVES.map(([key, title, hint]) => {
+    const items = shown.filter((f) => shelf(f) === key);
+    if (!items.length) return "";
+    return `<div class="folder"><h4>${title}</h4>
+        <span class="n">${items.length} \u00b7 ${hint}</span></div>`
+      + (grid ? `<div class="grid">${items.map(cardFor).join("")}</div>`
+              : `<div class="rows">${items.map(rowFor).join("")}</div>`);
+  }).join("");
+  return `<p class="muted">${state.pieces.length} piece${state.pieces.length > 1 ? "s" : ""} in this data set.</p>${bar}${body}`;
+}
+
+// Opening a piece should not mean leaving the page and guessing from a hash whether it is the one.
+async function peek(cid, name, kind) {
+  const url = PW.fileUrl(state.provider, cid);
+  let inner = "";
+  if (kind === "image") inner = `<img src="${esc(url)}" alt="">`;
+  else if (kind === "video") inner = `<video src="${esc(url)}" controls autoplay playsinline></video>`;
+  else if (kind === "text") {
+    let text = "";
+    try {
+      const r = await fetch(url);
+      text = (await r.text()).slice(0, 20000);
+    } catch { text = "(could not read this piece)"; }
+    inner = `<pre>${esc(text)}</pre>`;
+  } else inner = `<p class="muted">No preview for this kind of file.</p>`;
+  const el = document.createElement("div");
+  el.className = "peek";
+  el.innerHTML = `<div class="box"><h5>${esc(name)}</h5>${inner}
+    <div class="foot"><span>piece on ${esc(state.provider?.name ?? "this provider")}</span>
+      <span>${esc(short(cid))}</span>
+      <a href="${esc(url)}" data-save="${esc(name)}" target="_blank" rel="noopener">save it</a>
+      <span style="margin-left:auto">click outside to close</span></div></div>`;
+  el.onclick = (e) => { if (e.target === el) el.remove(); };
+  el.querySelectorAll("a[data-save]").forEach((a) => (a.onclick = saveWithItsName));
+  document.body.appendChild(el);
+}
+
+function bindPieces() {
+  const q = $("dsq");
+  if (q) {
+    q.oninput = () => {
+      state.dsFilter = q.value;
+      const host = $("pieces");
+      host.innerHTML = drawPieces();
+      bindPieces();
+      const again = $("dsq");
+      if (again) { again.focus(); again.setSelectionRange(again.value.length, again.value.length); }
+    };
+  }
+  document.querySelectorAll("button[data-view]").forEach((b) => (b.onclick = () => {
+    state.dsView = b.dataset.view;
+    $("pieces").innerHTML = drawPieces();
+    bindPieces();
+  }));
+  document.querySelectorAll("#pieces [data-cid]").forEach((c) => (c.onclick = () =>
+    peek(c.dataset.cid, c.dataset.name, c.dataset.kind)));
 }
 
 function drawTakes() {
@@ -548,6 +690,9 @@ function draw() {
   $("task").innerHTML = drawTask();
   $("jobs").innerHTML = drawJobs();
   $("pieces").innerHTML = drawPieces();
+  bindPieces();
+  // Sizes are not in the data set listing, so they are fetched once and the view redraws itself.
+  if (state.pieces.length) fillSizes();
   $("extras").innerHTML = drawExtras();
   document.querySelectorAll("button[data-extra]").forEach((b) => (b.onclick = () =>
     run("steps", PW.CFG.jobs[b.dataset.extra]?.name ?? b.dataset.extra, () => runExtra(b.dataset.extra))));
@@ -615,6 +760,17 @@ card.ondragleave = () => drop.classList.remove("over");
 card.ondrop = (e) => { e.preventDefault(); drop.classList.remove("over"); stage([...e.dataTransfer.files]); };
 window.addEventListener("dragover", (e) => e.preventDefault());
 window.addEventListener("drop", (e) => e.preventDefault());
+
+// Exported so the data set view can be rendered against made-up pieces, with no wallet, no chain
+// and no provider. It was written blind otherwise: every change meant ordering a real take on
+// Calibration and waiting five minutes to see whether a thumbnail was the right size.
+export function __previewDataSet(pieces, provider) {
+  state.dataSetId = "preview";
+  state.pieces = pieces;
+  state.provider = provider ?? { id: "preview", name: "preview" };
+  $("pieces").innerHTML = drawPieces();
+  bindPieces();
+}
 
 draw();
 setInterval(() => { if (!state.busy && PW.me) refresh().catch(() => {}); }, 8000);

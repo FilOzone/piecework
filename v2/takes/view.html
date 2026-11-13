@@ -1,0 +1,50 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Data set view (preview)</title>
+<!--
+  The data set view, rendered against made-up pieces, with no wallet, no chain and no provider.
+
+  It exists because the alternative was writing this view blind: every change to a thumbnail size
+  or a folder heading meant ordering a real take on Calibration and waiting several minutes to see
+  the result. This loads the real takes.mjs, so what you see here is the shipped code and not a
+  copy of it that can drift.
+
+  The stub elements are built by reading index.html at load time rather than being listed here, so
+  adding an element to the page does not quietly break this harness.
+
+  Open it next to the real page:  http://localhost:8098/view.html
+-->
+<link rel="stylesheet" href="data:text/css,">
+<body style="padding:1.2rem;max-width:64rem;margin:auto">
+<h3 style="font-size:1rem;margin:0 0 .4rem">Data set view <span style="font-weight:400;opacity:.6">— preview, made-up pieces</span></h3>
+<div id="pieces"></div>
+<div id="stubs" hidden></div>
+<script type="module">
+const page = await fetch("./index.html").then((r) => r.text());
+
+// The page's own stylesheet, so this looks like the page rather than approximately like it.
+document.head.insertAdjacentHTML("beforeend",
+  page.slice(page.indexOf("<style>"), page.indexOf("</style>") + 8));
+
+// Every element id the real page has, minus the one we draw into.
+const ids = [...new Set([...page.matchAll(/id="([A-Za-z0-9_-]+)"/g)].map((m) => m[1]))];
+document.getElementById("stubs").innerHTML =
+  ids.filter((i) => i !== "pieces").map((i) => `<div id="${i}"></div>`).join("");
+
+const names = [
+  "beach-walk.mp4", "city-night.mp4", "sunset.jpg", "prompt.json",
+  "version-1-seg-00.mp4", "version-1-seg-01.mp4", "version-1-seg-02.mp4",
+  "version-1-seg-03.mp4", "version-1.json", "video-gen-report.txt (job #41)",
+  "version-2-seg-00.mp4", "version-2.json",
+];
+const pieces = names.map((name, i) => ({
+  pieceId: String(i + 3), name,
+  cid: "bafkr4i" + "abcdefghijklmnopqrstuvwxyz234567".repeat(2).slice(0, 45 + (i % 3)),
+  ...(/^(version-|video-gen-report)/.test(name) ? { kind: "output" } : {}),
+}));
+
+const m = await import("./takes.mjs?preview=1");
+m.__previewDataSet(pieces, { id: "preview", name: "preview provider" });
+window.__ready = true;
+</script>
+</body>
