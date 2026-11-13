@@ -55,7 +55,11 @@ DEFAULTS = {"prompt": "", "seconds": 4.0, "fps": 12, "seed": 0,
             # Segment mode only. Fixed per segment rather than derived from the take length,
             # because a segment whose length depends on how many pictures there are can never
             # be reused when a picture is added. None means take SEGMENT_SECONDS, default 2.0.
-            "secondsPerSegment": None}
+            "secondsPerSegment": None,
+            # Merge knobs. order names the clips and their sequence; target overrides the format
+            # they are brought to; merged also stores the single assembled file, which costs the
+            # whole thing again and is off by default because the segments already are the video.
+            "order": None, "target": None, "merged": False}
 
 
 def sha256(path):
@@ -133,6 +137,115 @@ def frames_in(path):
         return 0
 
 
+def probe_video(path):
+    """What format a clip actually is, read rather than assumed."""
+    try:
+        out = subprocess.run(["ffprobe", "-v", "error", "-print_format", "json",
+                              "-show_streams", "-show_format", path],
+                             check=True, capture_output=True, timeout=300, text=True).stdout
+        d = json.loads(out)
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError,
+            json.JSONDecodeError):
+        return None
+    v = next((x for x in d.get("streams", []) if x.get("codec_type") == "video"), None)
+    a = next((x for x in d.get("streams", []) if x.get("codec_type") == "audio"), None)
+    if not v:
+        return None
+    num, _, den = (v.get("r_frame_rate") or "0/1").partition("/")
+    try:
+        fps = float(num) / float(den or 1)
+    except (ValueError, ZeroDivisionError):
+        fps = 0.0
+    return {"codec": v.get("codec_name"), "width": int(v.get("width") or 0),
+            "height": int(v.get("height") or 0), "fps": round(fps, 3),
+            "pixFmt": v.get("pix_fmt"), "audio": bool(a),
+            "audioCodec": (a or {}).get("codec_name"),
+            "sampleRate": int((a or {}).get("sample_rate") or 0),
+            "seconds": round(float((d.get("format") or {}).get("duration") or 0), 3)}
+
+
+def shape_of(pr):
+    """The part of a clip's format that has to agree before segments can share one video."""
+    return (pr["codec"], pr["width"], pr["height"], pr["fps"], pr["pixFmt"],
+            pr["audioCodec"], pr["sampleRate"])
+
+
+DEFAULT_TARGET = {"codec": "h264", "pixFmt": "yuv420p",
+                  "width": 1280, "height": 720, "fps": 30.0}
+
+
+def merge_target(probes, asked=None, inherited=None):
+    """One format every clip is brought to before its segments sit in the same video.
+
+    This check is ours to make, because MUXL does not make it. Wrapping segments of a 512x512 12fps
+    clip together with a 640x360 25fps one reports success and writes a file that does not decode:
+    measured, h264 gives "top block unavailable for requested intra mode" and "Reference 2 >= 2".
+    Silently emitting that is worse than re-encoding, so clips that disagree are re-encoded once to
+    a common target -- once per source, not once per edit, which is the cost segments exist to avoid.
+
+    The target must not be derived from the clips present. It was, briefly: the largest frame and
+    highest rate in the set. That makes the format of every clip depend on every other clip, so
+    swapping one for a bigger one re-encodes all of them and an edit reuses nothing. Measured: a
+    three-clip take whose third clip was swapped reused 0 of 12 segments. It is the same mistake as
+    deriving a segment's length from how many pictures there were, one layer up.
+
+    So: a take's format is inherited from the version it builds on, and a first version takes a
+    fixed default. Neither depends on which clips are in this particular take. The client can name
+    a format instead, and then owns the consequence of changing it.
+    """
+    if isinstance(inherited, dict) and inherited.get("width"):
+        t = dict(inherited)
+    else:
+        t = dict(DEFAULT_TARGET)
+        t["audioCodec"] = "aac" if any(p["audio"] for p in probes) else None
+        t["sampleRate"] = 48000 if any(p["audio"] for p in probes) else 0
+    if isinstance(asked, dict):
+        for k in ("width", "height", "fps"):
+            if isinstance(asked.get(k), (int, float)) and asked[k] > 0:
+                t[k] = asked[k] if k == "fps" else int(asked[k])
+    # An odd dimension is not encodable by h264 at yuv420p.
+    t["width"] -= t["width"] % 2
+    t["height"] -= t["height"] % 2
+    return t
+
+
+def normalise(src, dst, target, has_audio):
+    """Re-encode one clip to the shared target, keyframe every second so cuts are reachable."""
+    gop = max(1, int(round(target["fps"])))
+    silent = bool(target["audioCodec"]) and not has_audio
+    # Every input, and its own options, before any output option. Appending "-f lavfi -i anullsrc"
+    # after -vf made ffmpeg read the filter as an option on that input and refuse the whole command.
+    args = ["ffmpeg", "-v", "error", "-y", "-i", src]
+    if silent:
+        # Some clips in the set have sound and this one does not: silence keeps the tracks aligned,
+        # because a merged video cannot have audio appear and disappear between segments.
+        args += ["-f", "lavfi", "-i", f"anullsrc=r={target['sampleRate']}:cl=stereo"]
+    args += ["-map", "0:v:0"]
+    if target["audioCodec"]:
+        args += ["-map", "1:a:0" if silent else "0:a:0?"]
+    args += ["-vf", f"scale={target['width']}:{target['height']}:force_original_aspect_ratio=decrease,"
+                    f"pad={target['width']}:{target['height']}:-1:-1:color=black,"
+                    f"fps={target['fps']}",
+             "-c:v", "libx264", "-pix_fmt", target["pixFmt"],
+             "-g", str(gop), "-keyint_min", str(gop), "-sc_threshold", "0"]
+    if target["audioCodec"]:
+        args += ["-c:a", target["audioCodec"], "-ar", str(target["sampleRate"]), "-b:a", "128k"]
+        if silent:
+            args += ["-shortest"]
+    else:
+        args += ["-an"]
+    args.append(dst)
+    try:
+        subprocess.run(args, check=True, capture_output=True, timeout=1800)
+        return True
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as e:
+        detail = getattr(e, "stderr", None) or b""
+        if isinstance(detail, bytes):
+            detail = detail.decode("utf-8", "replace")
+        print(f"could not normalise {os.path.basename(src)}: {detail.strip()[:400]}", file=sys.stderr)
+        return False
+
+
 def split_video(src, work):
     """Cut a client's video into MUXL canonical segments at its own sync samples.
 
@@ -173,23 +286,27 @@ def split_video(src, work):
         print(f"muxl could not segment {os.path.basename(src)}: {detail.strip()}", file=sys.stderr)
         return None
 
-    track = os.path.join(segdir, f"track{video_track(frag)}")
-    if not os.path.isdir(track):
-        return None
-    pieces = sorted(f for f in os.listdir(track) if f.endswith(".m4s"))
-    made = []
-    for i, m4s in enumerate(pieces):
-        # A bare .m4s is not playable on its own, and the page plays each segment in its own
-        # element, so each one is wrapped into a standalone canonical file. Deterministic: wrapping
-        # the same segment twice gives the same bytes.
-        standalone = os.path.join(work, f"seg-{i:04d}.mp4")
-        try:
-            subprocess.run([MUXL, "wrap", "--flat", standalone, os.path.join(track, m4s)],
-                           check=True, capture_output=True, timeout=300)
-        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):
-            return None
-        made.append(standalone)
-    return made or None
+    vt = video_track(frag)
+    out = []
+    for tdir in sorted(d for d in os.listdir(segdir) if d.startswith("track")):
+        tnum = int(tdir[5:] or 0)
+        full = os.path.join(segdir, tdir)
+        if not os.path.isdir(full):
+            continue
+        for i, m4s in enumerate(sorted(f for f in os.listdir(full) if f.endswith(".m4s"))):
+            # A bare .m4s is not playable on its own, and the page gives each segment its own
+            # element, so each is wrapped into a standalone canonical file. Deterministic: wrapping
+            # the same segment twice gives the same bytes.
+            standalone = os.path.join(work, f"t{tnum}-seg-{i:04d}.mp4")
+            try:
+                subprocess.run([MUXL, "wrap", "--flat", standalone, os.path.join(full, m4s)],
+                               check=True, capture_output=True, timeout=300)
+            except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):
+                return None
+            out.append({"path": standalone, "track": tnum,
+                        "kind": "video" if tnum == vt else "audio", "index": i,
+                        "m4s": os.path.join(full, m4s)})
+    return out or None
 
 
 def read_settings():
@@ -295,6 +412,16 @@ def main():
     # mode it is the better input: its cut points come from the video rather than from our generator
     # happening to pan across one still at a time.
     brought = client_videos(names) if SEGMENTS else []
+    if brought:
+        wanted = read_settings().get("order")
+        if isinstance(wanted, list) and wanted:
+            # The client's sequence, keeping only what is actually in the data set. Order has to be
+            # stated: merging several clips in whatever order the filesystem returned is not a
+            # result, it is a coin toss.
+            lower = {f.lower(): f for f in brought}
+            brought = [lower[str(w).lower()] for w in wanted if str(w).lower() in lower]
+        else:
+            brought = sorted(brought)
     source_video = brought[0] if brought else None
 
     if not images and not source_video:
@@ -413,55 +540,144 @@ def main():
     rng = np.random.default_rng(int(s["seed"]) ^ prompt_seed)
     per_image = max(1, int(round(fps * seconds / len(images)))) if images else 0
     made_segments = []
-    segments_ordered, per_seg = [], None
+    segments_ordered, per_seg, merge_note = [], None, None
     if SEGMENTS and produced_frames is None and source_video:
-        # The general case. Nothing is generated: the client's own video is cut at its own sync
-        # samples, each segment stored as a standalone canonical file, and a segment already in the
-        # data set is named rather than stored again. An edit that replaces one scene therefore
-        # costs one scene, not a whole re-encode -- and re-encoding would not even reuse, because
-        # the encoder looks ahead and changes frames before the edit as well.
+        # The general case: the client's own clips, cut at their own sync samples and stored once.
+        # Nothing is generated. A clip whose format already matches the others is stream-copied, so
+        # its bytes are untouched and reuse can recognise them; only a clip that disagrees is
+        # re-encoded, once, because MUXL will wrap mismatched segments into a file that does not
+        # decode and we would rather pay an encode than ship that.
         writer.release()
         os.remove(out_path)
+        probes = {v: probe_video(os.path.join(IN, v)) for v in brought}
+        unreadable = [v for v, pr in probes.items() if pr is None]
+        clips = [v for v in brought if probes[v] is not None]
+        if not clips:
+            with open(os.path.join(OUT, "video-gen-report.txt"), "w") as r:
+                r.write("None of the videos could be read.\n\nThe job found "
+                        f"{len(brought)} video file(s) and ffprobe could not read any of them, so "
+                        "there was nothing to cut. Nothing was stored and nothing is claimed.\n")
+            return 0
+
+        inherited = None
+        for f in sorted((x for x in names if re.fullmatch(r"version-\d+\.json", x)),
+                        key=lambda x: int(re.search(r"\d+", x).group()), reverse=True):
+            try:
+                with open(os.path.join(IN, f)) as fh:
+                    cand = (json.load(fh).get("merge") or {}).get("target")
+            except (OSError, json.JSONDecodeError):
+                continue
+            if cand:
+                inherited = cand
+                break
+        target = merge_target([probes[v] for v in clips], s.get("target"), inherited)
+        # Every clip is brought to the take's format, not only the ones that disagree with each
+        # other, because "agrees with the others" is again a property of the set.
+        mixed = any(shape_of(probes[v])[:5] != (target["codec"], target["width"], target["height"],
+                                                target["fps"], target["pixFmt"]) for v in clips) \
+            or any(bool(probes[v]["audio"]) != bool(target["audioCodec"]) for v in clips)
+        segments_ordered, normalised, failed = [], [], []
         with tempfile.TemporaryDirectory() as work:
-            cut = split_video(os.path.join(IN, source_video), work)
-            if cut is None:
+            for ci, clip in enumerate(clips):
+                src = os.path.join(IN, clip)
+                if mixed:
+                    conv = os.path.join(work, f"norm-{ci:02d}.mp4")
+                    if not normalise(src, conv, target, probes[clip]["audio"]):
+                        failed.append(clip)
+                        continue
+                    normalised.append(clip)
+                    src = conv
+                cutwork = os.path.join(work, f"cut-{ci:02d}")
+                os.makedirs(cutwork, exist_ok=True)
+                cut = split_video(src, cutwork)
+                if cut is None:
+                    failed.append(clip)
+                    continue
+                for seg in cut:
+                    digest = sha256(seg["path"])
+                    cid = None
+                    try:
+                        out = subprocess.run([MUXL, "cid", seg["path"], "--segments"], check=True,
+                                             capture_output=True, timeout=120, text=True).stdout
+                        parts = next((ln for ln in out.splitlines() if ln.strip()), "").split()
+                        cid = parts[0] if parts else None
+                    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):
+                        pass
+                    hit = known.get(digest)
+                    common = {"sha256": digest, "canonical": True, "source": clip,
+                              "track": seg["track"], "kind": seg["kind"]}
+                    if hit:
+                        # Two different things both look like a hash match, and lumping them
+                        # together flatters the number. "reused" means the bytes were already a
+                        # piece before this take ran, which is what an edit saves. "duplicate"
+                        # means two segments of this same take are identical -- stored once, which
+                        # is correct, but it is not a saving the client earned by editing. Silence
+                        # generated for a clip with no sound is the usual source of those.
+                        within = hit["from"] == f"version-{version}"
+                        segments_ordered.append({**common, "name": hit["name"],
+                                                 "muxlCid": hit.get("muxlCid") or cid,
+                                                 "bytes": hit["bytes"],
+                                                 "frames": hit["frames"] or frames_in(seg["path"]),
+                                                 "from": hit["from"],
+                                                 "reused": not within, "duplicate": within,
+                                                 "m4s": seg["m4s"]})
+                    else:
+                        seg_name = f"version-{version}-seg-{len(segments_ordered):02d}.mp4"
+                        shutil.copy2(seg["path"], os.path.join(OUT, seg_name))
+                        entry = {**common, "name": seg_name, "muxlCid": cid,
+                                 "bytes": os.path.getsize(os.path.join(OUT, seg_name)),
+                                 "frames": frames_in(seg["path"]),
+                                 "from": f"version-{version}", "reused": False,
+                                 "duplicate": False, "m4s": seg["m4s"]}
+                        segments_ordered.append(entry)
+                        known[digest] = entry
+
+            if failed or not segments_ordered:
+                # Storing a take built from two of three clips, and saying so only in a footnote,
+                # would hand the client a video that is quietly missing a third of what they asked
+                # for. Refusing costs them a re-order; the other costs them their trust in the
+                # number next to it.
                 with open(os.path.join(OUT, "video-gen-report.txt"), "w") as r:
-                    r.write(f"Could not cut {source_video} into segments.\n\nThe file was read but "
-                            "neither a stream copy nor a re-encode produced something MUXL would "
-                            "segment. Nothing was stored and nothing is claimed.\n")
+                    r.write("Did not build this take.\n\n")
+                    if failed:
+                        r.write("These clips could not be prepared:\n"
+                                + "".join(f"  {f}\n" for f in failed)
+                                + "\nA merge is the clips you named, in the order you named them. "
+                                  "Leaving one out silently would be a different video from the one "
+                                  "you ordered, so nothing was stored.\n")
+                    else:
+                        r.write("None of the videos could be cut into segments. Nothing was "
+                                "stored.\n")
+                    if unreadable:
+                        r.write("\nAlso unreadable: " + ", ".join(unreadable) + "\n")
                 return 0
-            for idx, path in enumerate(cut):
-                digest = sha256(path)
-                cid = None
-                try:
-                    out = subprocess.run([MUXL, "cid", path, "--segments"], check=True,
-                                         capture_output=True, timeout=120, text=True).stdout
-                    parts = next((ln for ln in out.splitlines() if ln.strip()), "").split()
-                    cid = parts[0] if parts else None
-                except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):
-                    pass
-                hit = known.get(digest)
-                if hit:
-                    segments_ordered.append({"name": hit["name"], "sha256": digest,
-                                             "muxlCid": hit.get("muxlCid") or cid,
-                                             "canonical": True,
-                                             "bytes": hit["bytes"],
-                                             "frames": hit["frames"] or frames_in(path),
-                                             "from": hit["from"], "source": source_video,
-                                             "reused": True})
-                else:
-                    seg_name = f"version-{version}-seg-{idx:02d}.mp4"
-                    shutil.copy2(path, os.path.join(OUT, seg_name))
-                    entry = {"name": seg_name, "sha256": digest, "muxlCid": cid,
-                             "canonical": True,
-                             "bytes": os.path.getsize(os.path.join(OUT, seg_name)),
-                             "frames": frames_in(path), "from": f"version-{version}",
-                             "source": source_video, "reused": False}
-                    segments_ordered.append(entry)
-                    known[digest] = entry
+
+            # One assembled file, only if asked for. The segments already are the video, in order,
+            # and muxl wrap rebuilds this file from them deterministically, so storing it as well
+            # costs the whole thing a second time.
+            if s.get("merged"):
+                m4s = [x["m4s"] for x in segments_ordered if os.path.exists(x["m4s"])]
+                if len(m4s) == len(segments_ordered):
+                    try:
+                        subprocess.run([MUXL, "wrap", "--flat",
+                                        os.path.join(OUT, f"version-{version}.mp4"), *m4s],
+                                       check=True, capture_output=True, timeout=900)
+                    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as e:
+                        detail = getattr(e, "stderr", None) or b""
+                        if isinstance(detail, bytes):
+                            detail = detail.decode("utf-8", "replace")
+                        print(f"could not assemble the merged file: {detail.strip()[:300]}",
+                              file=sys.stderr)
+
+        for x in segments_ordered:
+            x.pop("m4s", None)
         made_segments = [x for x in segments_ordered if not x["reused"]]
-        produced_frames = sum(x["frames"] for x in segments_ordered)
+        produced_frames = sum(x["frames"] for x in segments_ordered if x["kind"] == "video")
         per_seg = None
+        merge_note = {"clips": clips, "order": clips, "normalised": normalised,
+                      "unreadable": unreadable, "failed": failed,
+                      "mixedFormats": mixed, "target": target,
+                      "assembledFile": bool(s.get("merged"))}
 
     if SEGMENTS and produced_frames is None:
         writer.release()
@@ -516,18 +732,21 @@ def main():
                 # names the existing piece by the same sha256, so a reader can check that what it plays
                 # is exactly what the earlier version produced.
                 os.remove(tmp_path)
+                within = hit["from"] == f"version-{version}"
                 segments_ordered.append({"name": hit["name"], "sha256": digest,
                                          "muxlCid": hit.get("muxlCid") or muxl_cid,
                                          "canonical": hit.get("canonical", canon_path is not None),
                                          "bytes": hit["bytes"], "frames": hit["frames"] or per_seg,
-                                         "from": hit["from"], "source": name, "reused": True})
+                                         "from": hit["from"], "source": name,
+                                         "reused": not within, "duplicate": within})
             else:
                 seg_name = f"version-{version}-seg-{idx:02d}.mp4"
                 os.rename(tmp_path, os.path.join(OUT, seg_name))
                 entry = {"name": seg_name, "sha256": digest, "muxlCid": muxl_cid,
                          "canonical": canon_path is not None,
                          "bytes": os.path.getsize(os.path.join(OUT, seg_name)), "frames": per_seg,
-                         "from": f"version-{version}", "source": name, "reused": False}
+                         "from": f"version-{version}", "source": name, "reused": False,
+                         "duplicate": False}
                 segments_ordered.append(entry)
                 known[digest] = entry
         made_segments = [x for x in segments_ordered if not x["reused"]]
@@ -578,18 +797,24 @@ def main():
     if SEGMENTS and segments_ordered:
         segments = segments_ordered
         manifest["segments"] = segments
+        if merge_note:
+            manifest["merge"] = merge_note
         reused = [x for x in segments if x["reused"]]
-        fresh = [x for x in segments if not x["reused"]]
+        dups = [x for x in segments if x.get("duplicate")]
+        fresh = [x for x in segments if not x["reused"] and not x.get("duplicate")]
         reused_bytes = sum(x["bytes"] for x in reused)
+        dup_bytes = sum(x["bytes"] for x in dups)
         new_bytes = sum(x["bytes"] for x in fresh)
         manifest["storage"] = {
             "segmentsInThisVersion": len(segments),
             "reusedFromEarlierVersions": len(reused),
+            "duplicatesWithinThisVersion": len(dups),
             "writtenByThisVersion": len(fresh),
             "bytesWritten": new_bytes,
             "bytesReused": reused_bytes,
+            "bytesDuplicatedWithin": dup_bytes,
             # What it would have cost to store this take with no reuse: every segment, every time.
-            "bytesIfWholeFile": reused_bytes + new_bytes,
+            "bytesIfWholeFile": reused_bytes + dup_bytes + new_bytes,
             "reuseTest": "sha256 of the MUXL-canonical segment against every segment earlier "
                          "versions wrote",
             "canonicalForm": ("muxl" if all(x.get("canonical") for x in segments) else
@@ -631,27 +856,69 @@ def main():
     elapsed = time.time() - started
     with open(os.path.join(OUT, "video-gen-report.txt"), "w") as r:
         r.write(f"Version {version} of your video\n\n")
-        if source_video:
+        if merge_note:
+            cl = merge_note["clips"]
+            r.write(f"Cut from {len(cl)} video(s), at their own keyframes, in this order:\n")
+            for c in cl:
+                r.write(f"  {c}\n")
+            if merge_note["normalised"]:
+                t = merge_note["target"]
+                r.write(f"\nThe clips were not all the same format, so they were brought to "
+                        f"{t['width']}x{t['height']} at {t['fps']} fps"
+                        + (f" with {t['audioCodec']} audio" if t["audioCodec"] else "")
+                        + ".\nRe-encoded for that: " + ", ".join(merge_note["normalised"])
+                        + ".\nSegments of different sizes or rates cannot share one video: the "
+                          "file assembles but does not decode, so the clips are matched once here "
+                          "rather than per edit.\n")
+            for bad, why in (("unreadable", "could not be read"), ("failed", "could not be cut")):
+                if merge_note[bad]:
+                    r.write(f"\nSkipped, {why}: " + ", ".join(merge_note[bad]) + "\n")
+        elif source_video:
             r.write(f"Cut from {source_video}, at the video's own keyframes\n")
         else:
             r.write(f"Built from {len(images)} image(s)"
                     + (f", on top of {parent}" if parent else "") + "\n")
         if s["prompt"]:
             r.write(f"Prompt: {s['prompt']}\n")
-        r.write(f"\n{w}x{h}, {fps} fps, {manifest['produced']['frames']} frames")
+        if merge_note and merge_note.get("target"):
+            t = merge_note["target"]
+            r.write(f"\n{t['width']}x{t['height']}, {t['fps']} fps, "
+                    f"{manifest['produced']['frames']} frames")
+        else:
+            r.write(f"\n{w}x{h}, {fps} fps, {manifest['produced']['frames']} frames")
         if carried:
             r.write(f" (of which {len(carried)} carried from the previous version)")
         if SEGMENTS:
             st = manifest["storage"]
             each = (f" of {st['secondsPerSegment']}s each" if st.get("secondsPerSegment") else "")
             r.write(f"\n\nStored as {st['segmentsInThisVersion']} segments{each}, of which "
-                    f"{st['writtenByThisVersion']} were written now and "
-                    f"{st['reusedFromEarlierVersions']} turned out to be byte-for-byte what an "
-                    f"earlier version already stored, so they are only named.\n")
+                    f"{st['writtenByThisVersion']} were written now")
+            if st.get("reusedFromEarlierVersions"):
+                r.write(f" and {st['reusedFromEarlierVersions']} turned out to be byte-for-byte "
+                        "what an earlier version already stored, so they are only named")
+            if st.get("duplicatesWithinThisVersion"):
+                r.write(f". A further {st['duplicatesWithinThisVersion']} were identical to "
+                        "another segment of this same take, so they are stored once. That is "
+                        "deduplication, not a saving you earned by editing, and it is counted "
+                        "separately below for that reason")
+            r.write(".\n")
             if source_video:
-                r.write("The cut points are the video's own: MUXL segments at sync samples, which is "
-                        "the only place a segment can start. Replacing one scene costs that scene. "
-                        "Only the video track is carried; audio is not segmented yet.\n")
+                vids = len([x for x in segments if x.get("kind") == "video"])
+                auds = len([x for x in segments if x.get("kind") == "audio"])
+                r.write("The cut points are the videos' own: MUXL segments at sync samples, which "
+                        "is the only place a segment can start, so replacing one scene costs that "
+                        f"scene.\n{vids} video segment(s)"
+                        + (f" and {auds} audio segment(s)" if auds else " and no audio")
+                        + " are stored as pieces.\n")
+                if merge_note and not merge_note["assembledFile"]:
+                    r.write("The segments in order are the merged video. version-N.json lists them, "
+                            "and `muxl wrap --flat out.mp4 <segments>` rebuilds one file from them, "
+                            "so that file is not stored as well: it would cost the whole thing "
+                            'twice. Ask for "merged": true in prompt.json if you want it stored.\n')
+                elif merge_note:
+                    r.write(f"version-{version}.mp4 is the assembled file, stored as you asked. It "
+                            "is derivable from the segments, so it is extra bytes rather than "
+                            "necessary ones.\n")
             r.write(f"This version wrote {st['bytesWritten']:,} bytes. Storing every segment again would "
                     f"have been {st['bytesIfWholeFile']:,}.\n")
             if st.get("canonicalForm") == "muxl":
@@ -661,6 +928,10 @@ def main():
             elif st.get("canonicalForm") != "none":
                 r.write("Some segments could not be put in MUXL canonical form; version-N.json marks "
                         "which, and their identifiers are only stable against this encoder.\n")
+            if st.get("bytesDuplicatedWithin"):
+                pct = 100 * st["bytesDuplicatedWithin"] / st["bytesIfWholeFile"]
+                r.write(f"Of that, {st['bytesDuplicatedWithin']:,} bytes ({pct:.0f}%) are repeats "
+                        "inside this take, stored once.\n")
             if st["bytesIfWholeFile"]:
                 saved = 100 * st["bytesReused"] / st["bytesIfWholeFile"]
                 if saved:
@@ -669,7 +940,7 @@ def main():
                 else:
                     r.write("So none of it was already stored: every segment is new bytes. Matched by "
                             "sha256, segment by segment, and nothing matched.\n")
-        if abs(manifest["produced"]["seconds"] - round(seconds, 3)) > 0.05:
+        if not source_video and abs(manifest["produced"]["seconds"] - round(seconds, 3)) > 0.05:
             r.write(f"\n\nNote: you asked for {round(seconds, 3)} seconds and this is "
                     f"{manifest['produced']['seconds']}. ")
             if fixed_frames:
