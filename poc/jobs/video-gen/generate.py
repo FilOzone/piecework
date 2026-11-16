@@ -309,6 +309,63 @@ def split_video(src, work):
     return out or None
 
 
+_PIPE = None
+
+
+def svd_pipe():
+    """The model, loaded once per job rather than once per segment."""
+    global _PIPE
+    if _PIPE is not None:
+        return _PIPE
+    import torch
+    if not torch.cuda.is_available():
+        return None
+    from diffusers import StableVideoDiffusionPipeline
+    _PIPE = StableVideoDiffusionPipeline.from_pretrained(
+        os.environ.get("MODEL", "/models/svd"), torch_dtype=torch.float16,
+        variant="fp16", local_files_only=True)
+    _PIPE.to("cuda")
+    _PIPE.enable_model_cpu_offload()
+    return _PIPE
+
+
+def frames_for(name, img, big, dx, dy, per_seg, w, h, s, pic_sha):
+    """The frames of one segment, from whichever generator this provider is running.
+
+    One segment per picture holds for both. The motion generator pans across the still; the model
+    takes the still as its seed frame and invents the motion, which is a fixed number of frames it
+    does not let you choose. Either way the segment is a function of one picture, which is what
+    lets a take reuse the clips it did not change.
+    """
+    if GENERATOR == "svd":
+        pipe = svd_pipe()
+        if pipe is None:
+            print("GENERATOR=svd needs a GPU. On a processor a diffusion video model is hours per "
+                  "clip. Use GENERATOR=motion for the processor row.", file=sys.stderr)
+            return None
+        import torch
+        from PIL import Image
+        seed_img = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB)).resize((1024, 576))
+        # Seeded from this picture and this prompt, so the request is at least identical even where
+        # the answer is not: the card's own non-determinism is what the input key exists to handle.
+        gen = torch.manual_seed(int.from_bytes(hashlib.sha256(
+            str(s["prompt"]).encode() + bytes.fromhex(pic_sha) + str(int(s["seed"])).encode()
+        ).digest()[:4], "big"))
+        out = pipe(seed_img, decode_chunk_size=int(os.environ.get("CHUNK", "4")),
+                   num_frames=int(os.environ.get("NUM_FRAMES", "25")),
+                   motion_bucket_id=int(os.environ.get("MOTION", "127")),
+                   generator=gen).frames[0]
+        return [cv2.resize(cv2.cvtColor(np.array(f), cv2.COLOR_RGB2BGR), (w, h)) for f in out]
+
+    out = []
+    for i in range(per_seg):
+        t = i / (per_seg - 1)
+        x = int(dx * (1 - t) + (big.shape[1] - w) * 0.5 * t)
+        y = int(dy * (1 - t) + (big.shape[0] - h) * 0.5 * t)
+        out.append(big[y:y + h, x:x + w])
+    return out
+
+
 def read_settings():
     """The prompt and the knobs, from prompt.json if the client supplied one."""
     settings = dict(DEFAULTS)
@@ -431,13 +488,6 @@ def main():
                     "picture, or a video to cut into segments, and order again.\n")
         return 0
 
-    if SEGMENTS and GENERATOR == "svd":
-        # The two shapes are incompatible: svd produces one fixed clip, segment mode produces one piece
-        # per picture. Refusing is better than a manifest that describes neither.
-        print("SEGMENTS=1 and GENERATOR=svd cannot be combined: svd makes one fixed clip, segment mode "
-              "makes one piece per picture. Pick one.", file=sys.stderr)
-        return 2
-
     s = read_settings()
     version = next_version()
     fps = max(1, int(s["fps"]))
@@ -478,7 +528,7 @@ def main():
     # longer take that happened to be older, whatever the pictures were. Here every segment any earlier
     # version wrote is indexed by its sha256, and a segment counts as reused only when the bytes this
     # run produced are already in that index. Nothing matches means 0%, which is the point.
-    known = {}
+    known, by_input = {}, {}
     if SEGMENTS:
         for f in sorted(x for x in names if re.fullmatch(r"version-\d+\.json", x)):
             try:
@@ -487,6 +537,21 @@ def main():
             except (OSError, json.JSONDecodeError):
                 continue
             for seg in (doc.get("segments") or []):
+                if seg.get("inputKey") and seg.get("name"):
+                    # Matching on what produced a segment, rather than on what came out of it.
+                    # The byte index cannot help a generator that does not repeat itself: a model
+                    # asked twice for the same clip returns different frames, so nothing ever
+                    # matches and every take pays to generate again. The inputs are known before
+                    # the work starts, so if this exact picture, prompt, seed and model already
+                    # produced a piece that is still here, the work can be skipped rather than
+                    # done and then discarded. On a card that is about 170 seconds a segment.
+                    by_input.setdefault(seg["inputKey"], {"name": seg["name"],
+                                                          "sha256": seg.get("sha256"),
+                                                          "muxlCid": seg.get("muxlCid"),
+                                                          "bytes": seg.get("bytes", 0),
+                                                          "frames": seg.get("frames", 0),
+                                                          "from": seg.get("from", f[:-5]),
+                                                          "canonical": seg.get("canonical", False)})
                 if seg.get("sha256") and seg.get("name"):
                     known.setdefault(seg["sha256"], {"name": seg["name"],
                                                      "bytes": seg.get("bytes", 0),
@@ -501,7 +566,9 @@ def main():
     for frame in carried:
         writer.write(frame)
 
-    if GENERATOR == "svd":
+    if GENERATOR == "svd" and not SEGMENTS:
+        # The whole-file shape: one clip from the last picture. In segment mode the model is called
+        # once per picture instead, from frames_for, so a take can reuse the clips it did not change.
         # Stable Video Diffusion, image to video: the client's last picture becomes the seed frame and the
         # model invents the motion rather than panning across a still. Needs a card -- on a processor this
         # is hours per clip, which is not a slower service, it is no service -- so it refuses rather than
@@ -707,13 +774,38 @@ def main():
             dx = rng_seg.integers(0, max(1, big.shape[1] - w))
             dy = rng_seg.integers(0, max(1, big.shape[0] - h))
 
+            # Everything that decides what this segment will be, fixed before any of it is made.
+            input_key = hashlib.sha256("|".join([
+                "v1", GENERATOR, os.environ.get("MODEL", ""), str(s["prompt"]), str(int(s["seed"])),
+                pic_sha, str(per_seg), str(fps), f"{w}x{h}",
+                os.environ.get("MOTION", ""), os.environ.get("NUM_FRAMES", ""),
+            ]).encode()).hexdigest()
+
+            prior = by_input.get(input_key)
+            if prior:
+                # The expensive part is skipped, not repeated and thrown away. The claim this
+                # makes is weaker than a byte match and the manifest says which was used: with a
+                # generator that does not repeat itself there is no single right answer for these
+                # inputs, so this is one valid output for them, named by its hash.
+                segments_ordered.append({"name": prior["name"], "sha256": prior["sha256"],
+                                         "muxlCid": prior.get("muxlCid"),
+                                         "canonical": prior.get("canonical", False),
+                                         "bytes": prior["bytes"],
+                                         "frames": prior["frames"] or per_seg,
+                                         "from": prior["from"], "source": name,
+                                         "inputKey": input_key, "reusedBy": "inputs",
+                                         "reused": prior["from"] != f"version-{version}",
+                                         "duplicate": prior["from"] == f"version-{version}",
+                                         "regenerated": False})
+                continue
+
             tmp_path = os.path.join(OUT, f".seg-{idx:02d}.tmp.mp4")
+            made = frames_for(name, img, big, dx, dy, per_seg, w, h, s, pic_sha)
+            if made is None:
+                return 2
             seg = Encoder(tmp_path, w, h, fps)
-            for i in range(per_seg):
-                t = i / (per_seg - 1)
-                x = int(dx * (1 - t) + (big.shape[1] - w) * 0.5 * t)
-                y = int(dy * (1 - t) + (big.shape[0] - h) * 0.5 * t)
-                seg.write(big[y:y + h, x:x + w])
+            for fr in made:
+                seg.write(fr)
             seg.release()
 
             # What gets stored is the canonical form, not what ffmpeg happened to write, so the
@@ -733,7 +825,9 @@ def main():
                 # is exactly what the earlier version produced.
                 os.remove(tmp_path)
                 within = hit["from"] == f"version-{version}"
-                segments_ordered.append({"name": hit["name"], "sha256": digest,
+                segments_ordered.append({"inputKey": input_key, "reusedBy": "bytes",
+                                         "regenerated": True,
+                                         "name": hit["name"], "sha256": digest,
                                          "muxlCid": hit.get("muxlCid") or muxl_cid,
                                          "canonical": hit.get("canonical", canon_path is not None),
                                          "bytes": hit["bytes"], "frames": hit["frames"] or per_seg,
@@ -744,9 +838,10 @@ def main():
                 os.rename(tmp_path, os.path.join(OUT, seg_name))
                 entry = {"name": seg_name, "sha256": digest, "muxlCid": muxl_cid,
                          "canonical": canon_path is not None,
-                         "bytes": os.path.getsize(os.path.join(OUT, seg_name)), "frames": per_seg,
+                         "bytes": os.path.getsize(os.path.join(OUT, seg_name)),
+                         "frames": len(made),
                          "from": f"version-{version}", "source": name, "reused": False,
-                         "duplicate": False}
+                         "duplicate": False, "inputKey": input_key, "regenerated": True}
                 segments_ordered.append(entry)
                 known[digest] = entry
         made_segments = [x for x in segments_ordered if not x["reused"]]
@@ -801,6 +896,7 @@ def main():
             manifest["merge"] = merge_note
         reused = [x for x in segments if x["reused"]]
         dups = [x for x in segments if x.get("duplicate")]
+        skipped = [x for x in segments if x.get("regenerated") is False]
         fresh = [x for x in segments if not x["reused"] and not x.get("duplicate")]
         reused_bytes = sum(x["bytes"] for x in reused)
         dup_bytes = sum(x["bytes"] for x in dups)
@@ -809,6 +905,10 @@ def main():
             "segmentsInThisVersion": len(segments),
             "reusedFromEarlierVersions": len(reused),
             "duplicatesWithinThisVersion": len(dups),
+            # Segments that were never made at all, because this exact picture, prompt, seed and
+            # model had already produced a piece that is still in the data set. On the processor
+            # that saves a fraction of a second; on a card it is the whole cost of the segment.
+            "notRegenerated": len(skipped),
             "writtenByThisVersion": len(fresh),
             "bytesWritten": new_bytes,
             "bytesReused": reused_bytes,
@@ -894,14 +994,22 @@ def main():
             r.write(f"\n\nStored as {st['segmentsInThisVersion']} segments{each}, of which "
                     f"{st['writtenByThisVersion']} were written now")
             if st.get("reusedFromEarlierVersions"):
-                r.write(f" and {st['reusedFromEarlierVersions']} turned out to be byte-for-byte "
-                        "what an earlier version already stored, so they are only named")
+                by_in = len([x for x in segments if x["reused"] and x.get("reusedBy") == "inputs"])
+                how = ("were already made from exactly these inputs by an earlier version"
+                       if by_in == st["reusedFromEarlierVersions"]
+                       else "turned out to be byte-for-byte what an earlier version already stored")
+                r.write(f" and {st['reusedFromEarlierVersions']} {how}, so they are only named")
             if st.get("duplicatesWithinThisVersion"):
                 r.write(f". A further {st['duplicatesWithinThisVersion']} were identical to "
                         "another segment of this same take, so they are stored once. That is "
                         "deduplication, not a saving you earned by editing, and it is counted "
                         "separately below for that reason")
             r.write(".\n")
+            if st.get("notRegenerated"):
+                r.write(f"{st['notRegenerated']} of them were never generated: this picture, "
+                        "prompt, seed and model had already produced a piece that is still here, "
+                        "so the work was skipped rather than done and thrown away. That is the "
+                        "saving that matters on a card, where one segment is minutes of it.\n")
             if source_video:
                 vids = len([x for x in segments if x.get("kind") == "video"])
                 auds = len([x for x in segments if x.get("kind") == "audio"])
