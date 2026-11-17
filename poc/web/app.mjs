@@ -494,12 +494,21 @@ async function jobProgress(j) {
   if (!epochs) return {};
   const postedAt = j.deadline - epochs;
   const head = Number(await pub.getBlockNumber());
+  // A job past its deadline can no longer deliver, so there is nothing for this scan to find. Without this
+  // the loop below walks from the head back to postedAt and grows by one query every CHUNK blocks, forever:
+  // three jobs left in "waiting" weeks ago cost 763 event queries on EVERY refresh, and refresh also runs on
+  // an 8 second timer. That is what made opening a data set appear to hang -- the page was not stuck, it was
+  // issuing hundreds of reads a second and never reaching the part that draws the pieces.
+  if (head > j.deadline) return { postedAt, expired: true };
+  // And even inside the deadline the walk is bounded, because a deadline is set per job type and a long one
+  // would reintroduce the same unbounded scan more slowly.
+  const floor = Math.max(postedAt, head - CHUNK * WINDOW);
   // PiecesAddedV2, not PiecesAdded: the verifier emits the V2 shape, carrying firstPieceId and the cids rather
   // than a list of ids. Watching the older name finds nothing and reports it as "no progress yet", which is
   // indistinguishable from a dead provider — the exact failure this function exists to end.
   let arriving = 0, unread = false;
-  for (let to = head; to > postedAt; to -= CHUNK) {
-    const from = Math.max(postedAt, to - CHUNK + 1);
+  for (let to = head; to > floor; to -= CHUNK) {
+    const from = Math.max(floor, to - CHUNK + 1);
     try {
       for (const l of await pub.getContractEvents({ address: C.pdp, abi: ABI.PDPVerifier,
         eventName: "PiecesAddedV2", args: { setId: BigInt(j.dataSetId) },
