@@ -464,6 +464,15 @@ def main():
     pat = re.compile(r"version-(\d+)\.(?:mp4|mov|mkv|webm)$", re.I)
     parents = [f for f in names if pat.match(f)]
     parent = max(parents, key=lambda f: int(pat.match(f).group(1))) if parents else None
+    # A segmented take never writes a version-N.mp4 -- its video IS the segments -- so the pattern above
+    # finds nothing and every segmented take declared itself the first one. The manifest then said
+    # "parent": null while the same run reused 45 of the previous take's segments: the chain of versions,
+    # which is the whole provenance claim, was missing from exactly the takes built to carry it.
+    # The manifest is the version here, so that is what the parent is chosen from.
+    if parent is None:
+        jpat = re.compile(r"version-(\d+)\.json$", re.I)
+        jparents = [f for f in names if jpat.match(f)]
+        parent = max(jparents, key=lambda f: int(jpat.match(f).group(1))) if jparents else None
 
     # A video the client brought is an input in its own right, not just a possible parent. In segment
     # mode it is the better input: its cut points come from the video rather than from our generator
@@ -775,10 +784,17 @@ def main():
             dy = rng_seg.integers(0, max(1, big.shape[0] - h))
 
             # Everything that decides what this segment will be, fixed before any of it is made.
+            # Every knob that changes what comes out has to be in here, or the key says the inputs
+            # match when they do not and a stale clip is served as this version's. CHUNK was missing
+            # at first: it is passed to the model as decode_chunk_size and changes the output.
+            # Defaults are spelled the same way here as at the call site, so an unset variable
+            # cannot hash to one thing and run as another.
             input_key = hashlib.sha256("|".join([
-                "v1", GENERATOR, os.environ.get("MODEL", ""), str(s["prompt"]), str(int(s["seed"])),
-                pic_sha, str(per_seg), str(fps), f"{w}x{h}",
-                os.environ.get("MOTION", ""), os.environ.get("NUM_FRAMES", ""),
+                "v2", GENERATOR, os.environ.get("MODEL", "/models/svd"),
+                str(s["prompt"]), str(int(s["seed"])), pic_sha,
+                str(per_seg), str(fps), f"{w}x{h}",
+                os.environ.get("MOTION", "127"), os.environ.get("NUM_FRAMES", "25"),
+                os.environ.get("CHUNK", "4"),
             ]).encode()).hexdigest()
 
             prior = by_input.get(input_key)
