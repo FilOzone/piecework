@@ -20,31 +20,88 @@
 <div id="pieces"></div>
 <div id="stubs" hidden></div>
 <script type="module">
-const page = await fetch("./index.html").then((r) => r.text());
+// A preview that fails must say so. It used to throw and leave the heading sitting on an empty
+// page, which reads as "the view is broken" when the cause was a stale cached file.
+try {
+  const page = await fetch("./index.html").then((r) => r.text());
 
-// The page's own stylesheet, so this looks like the page rather than approximately like it.
-document.head.insertAdjacentHTML("beforeend",
-  page.slice(page.indexOf("<style>"), page.indexOf("</style>") + 8));
+  // The page's own stylesheet, so this looks like the page rather than approximately like it.
+  document.head.insertAdjacentHTML("beforeend",
+    page.slice(page.indexOf("<style>"), page.indexOf("</style>") + 8));
 
-// Every element id the real page has, minus the one we draw into.
-const ids = [...new Set([...page.matchAll(/id="([A-Za-z0-9_-]+)"/g)].map((m) => m[1]))];
-document.getElementById("stubs").innerHTML =
-  ids.filter((i) => i !== "pieces").map((i) => `<div id="${i}"></div>`).join("");
+  // Every element id the real page has, minus the one we draw into.
+  const ids = [...new Set([...page.matchAll(/id="([A-Za-z0-9_-]+)"/g)].map((m) => m[1]))];
+  document.getElementById("stubs").innerHTML =
+    ids.filter((i) => i !== "pieces").map((i) => `<div id="${i}"></div>`).join("");
 
-const names = [
-  "beach-walk.mp4", "city-night.mp4", "sunset.jpg", "prompt.json",
-  "version-1-seg-00.mp4", "version-1-seg-01.mp4", "version-1-seg-02.mp4",
-  "version-1-seg-03.mp4", "version-1.json", "video-gen-report.txt (job #41)",
-  "version-2-seg-00.mp4", "version-2.json",
-];
-const pieces = names.map((name, i) => ({
-  pieceId: String(i + 3), name,
-  cid: "bafkr4i" + "abcdefghijklmnopqrstuvwxyz234567".repeat(2).slice(0, 45 + (i % 3)),
-  ...(/^(version-|video-gen-report)/.test(name) ? { kind: "output" } : {}),
-}));
+  // Real media, so the thumbnails are thumbnails and the posters are posters. A preview whose
+  // tiles are all empty boxes cannot tell you whether the view works.
+  const media = {
+    video: ["./preview-media/aurora.mp4", "./preview-media/bokeh.mp4", "./preview-media/ink.mp4"],
+    image: "./preview-media/still.jpg",
+  };
+  let v = 0;
+  const forName = (name) =>
+    /\.(mp4|mov|mkv|webm)$/i.test(name) ? media.video[v++ % media.video.length]
+    : /\.(jpe?g|png|webp)$/i.test(name) ? media.image
+    : undefined;
 
-const m = await import("./takes.mjs?preview=1");
-m.__previewDataSet(pieces, { id: "preview", name: "preview provider" });
-window.__ready = true;
+  const names = [
+    "aurora.mp4", "bokeh.mp4", "ink.mp4", "poster.jpg", "prompt.json",
+    "version-1-seg-00.mp4", "version-1-seg-01.mp4", "version-1-seg-02.mp4",
+    "version-1-seg-03.mp4", "version-1.json", "video-gen-report.txt (job #41)",
+    "version-2-seg-00.mp4", "version-2.json",
+  ];
+  const stub = names.map((name, i) => ({
+    pieceId: String(i + 3), name,
+    cid: "bafkr4i" + "abcdefghijklmnopqrstuvwxyz234567".repeat(2).slice(0, 45 + (i % 3)),
+    previewUrl: forName(name),
+    ...(/^(version-|video-gen-report)/.test(name) ? { kind: "output" } : {}),
+  }));
+
+  // ?set=<id> draws a data set this provider really holds, with the real names and the real CIDs,
+  // and the bytes streamed from the provider. Without it the made-up pieces above are used, which is
+  // what you want when changing the view itself and do not care what is in it.
+  //
+  // Video tiles point at /play rather than /piece deliberately: a piece is the canonical MUXL
+  // fragment, which is the thing the protocol talks about and not a file a browser will play.
+  const PROVIDER = "http://localhost:8080";
+  const want = new URLSearchParams(location.search).get("set");
+  let pieces = stub, heading = "preview, made-up pieces";
+  if (want) {
+    const all = await fetch("./real-pieces.json").then((r) => r.ok ? r.json() : null).catch(() => null);
+    const set = all && all[want];
+    if (!set) throw new Error(
+      `No data set #${want} in real-pieces.json.` +
+      (all ? ` This provider holds: ${Object.keys(all).join(", ")}.` : " The file is not being served."));
+    // A set can carry its own media (a take built here, wrapped into playable files) or be served
+    // by the provider. Falling back to the provider for a set it does not hold would draw a grid of
+    // broken tiles and look like the view failing.
+    pieces = set.pieces.map((p) => ({
+      ...p,
+      previewUrl: set.base ? (p.media ? set.base + p.media : undefined)
+                : /\.(mp4|mov|mkv|webm)$/i.test(p.name) ? `${PROVIDER}/play/${p.cid}`
+                : /\.(jpe?g|png|webp)$/i.test(p.name) ? `${PROVIDER}/piece/${p.cid}`
+                : undefined,
+      ...(/^(version-|video-gen-report|image-index|.*-index\.txt)/.test(p.name) ? { kind: "output" } : {}),
+    }));
+    heading = set.base ? `${want} \u2014 ${set.pieces.length} real pieces, built on this machine`
+                   : `data set #${want} \u2014 ${set.pieces.length} real pieces on this provider`;
+  }
+  document.querySelector("h3 span").textContent = "\u2014 " + heading;
+
+  // Cache-busted: a fixed query meant the browser kept serving the module from before the edit,
+  // which looks exactly like the edit not working.
+  const m = await import(`./takes.mjs?preview=${Date.now()}`);
+  m.__previewDataSet(pieces, { id: "preview", name: "preview provider", curioUrl: PROVIDER });
+  window.__ready = true;
+} catch (e) {
+  document.getElementById("pieces").innerHTML =
+    `<pre style="white-space:pre-wrap;color:#f88;font:13px/1.5 ui-monospace,monospace;border:1px solid #633;border-radius:8px;padding:1rem">`
+    + `The preview failed to build.\n\n${e && e.stack || e}\n\n`
+    + `If this says a module or fetch failed, the browser is probably holding an older copy: `
+    + `reload with shift held, or open the page in a private window.</pre>`;
+  console.error(e);
+}
 </script>
 </body>

@@ -145,8 +145,8 @@ const PARAMS = {
       desc: "Reads every frame, not a sample, and tracks one region you name in track.json. The answer is usually a negative worth having: it did not move, in any frame, and here are the coordinates to check that against the stored video.",
       reads: "your videos and track.json", writes: "a -stability.txt and a -stability.json per video, and a report" },
     videogenseg: { name: "Build a video stored as segments, reusing what did not change", image: "video-gen-segments:v1", price: U("0.4"), deadline: NET.deadlines.proved,
-      desc: "The same loop, stored as one piece per shot instead of one piece per version. A take built on another names the segments it did not change rather than storing them again, so the third take is twelve segments of video that cost four to store.",
-      reads: "your pictures, prompt.json, and the earlier versions", writes: "version-N-seg-KK.mp4 per shot, version-N.json and a report" },
+      desc: "One piece per shot instead of one piece per version, so a take built on another names the shots it did not change rather than storing them again. Reuse is measured: a segment counts as reused only when the bytes this run produced are already a piece in your data set. Give it videos instead of pictures and it cuts them at their own keyframes and merges them, so swapping one clip of three costs that clip.",
+      reads: "your pictures or videos, prompt.json, and the earlier versions", writes: "version-N-seg-KK.mp4 per shot, version-N.json and a report" },
     videogen: { name: "Build a video from my pictures, and record what it came from", image: "video-gen:v1", price: U("0.4"), deadline: NET.deadlines.proved,
       desc: "Builds a video from the pictures you pick, and writes beside it a record of exactly what it was made from: every input by its sha256, the prompt you gave, and the version it was built on. Order it again and it builds the next version on top of the last, in the same data set, so you end up with a chain of versions where each names its parent. Put your prompt in prompt.json. The generator is deliberately simple; the record is the point.",
       reads: "your pictures, prompt.json, and the previous version", writes: "version-N.mp4, version-N.json and a report" },
@@ -330,9 +330,13 @@ JOB_SCRIPTS["video-gen-segments:v1"] = {
   dockerImage: "piecework/video-gen:v1",
   env: { SEGMENTS: "1" },
   outputs: "*",
-  inputs: (name) => /\.(jpe?g|png|webp|bmp)$/i.test(name)
+  // Must agree with jobs["video-gen-segments:v1"].inputPattern in web/config.json. The client uses
+  // that one to pick which pieces to name in the order; this one decides what actually lands in
+  // /in. They were out of step once: the client named three videos, the provider staged only
+  // prompt.json, and the job honestly reported that it had been given nothing to build from.
+  inputs: (name) => /\.(jpe?g|png|webp|bmp|mp4|mov|mkv|webm)$/i.test(name)
     || /^prompt\.(json|txt)$/i.test(name)
-    || /^version-\d+(-seg-\d+)?\.(mp4|json)$/i.test(name),
+    || /^version-\d+\.json$/i.test(name),
 };
 
 JOB_SCRIPTS["video-gen:v1"] = {
