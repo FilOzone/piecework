@@ -342,7 +342,16 @@ async function refresh() {
   const takes = [];
   for (const r of records) {
     const n = Number(r.name.match(/\d+/)[0]);
-    const manifest = await fetch(PW.fileUrl(state.provider, r.cid)).then((x) => x.json()).catch(() => null);
+    // The bytes, not just the parsed object: a segmented take names its parent as that take's
+    // version-N.json and records the sha256 OF THAT FILE, so verifying the link needs the file's own
+    // hash. Re-serialising the parsed JSON would not reproduce it.
+    const raw = await fetch(PW.fileUrl(state.provider, r.cid)).then((x) => x.arrayBuffer()).catch(() => null);
+    let manifest = null, fileSha = null;
+    if (raw) {
+      try { manifest = JSON.parse(new TextDecoder().decode(raw)); } catch { manifest = null; }
+      fileSha = [...new Uint8Array(await crypto.subtle.digest("SHA-256", raw))]
+        .map((b) => b.toString(16).padStart(2, "0")).join("");
+    }
     const segs = manifest?.segments ?? null;
     const video = files.find((f) => f.name === `version-${n}.mp4`) ?? null;
     // A segmented take plays as its own pieces, in order. Those named from an earlier version are not
@@ -350,7 +359,7 @@ async function refresh() {
     const pieces = segs
       ? segs.map((sg) => ({ ...sg, piece: files.find((f) => f.name === sg.name) ?? null }))
       : null;
-    takes.push({ n, video, manifest, segments: pieces });
+    takes.push({ n, video, manifest, fileSha, segments: pieces });
   }
   state.takes = takes.sort((a, b) => b.n - a.n);
   draw();
@@ -434,6 +443,9 @@ const ICONS = {
   other: '<path d="M6 3h8l4 4v14a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/>'
        + '<path d="M14 3v5h4"/>',
 };
+// Where a piece's bytes are. Normally the provider holding the data set; a preview supplies its
+// own url instead, which is the difference between a view you can judge and a grid of empty boxes.
+const pieceUrl = (f) => f.previewUrl ?? PW.fileUrl(state.provider, f.cid);
 const kindOf = (n) => IS_PICTURE.test(n) ? "image" : IS_VIDEO.test(n) ? "video"
                     : IS_TEXT.test(n) ? "text" : "other";
 const icon = (k) => `<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -466,7 +478,7 @@ async function fillSizes() {
   if (!todo.length) return;
   await Promise.all(todo.map(async (f) => {
     try {
-      const r = await fetch(PW.fileUrl(state.provider, f.cid), { method: "HEAD" });
+      const r = await fetch(pieceUrl(f), { method: "HEAD" });
       const n = Number(r.headers.get("content-length"));
       sizes.set(f.cid, Number.isFinite(n) && n > 0 ? n : null);
     } catch { sizes.set(f.cid, null); }
@@ -477,14 +489,15 @@ async function fillSizes() {
 
 function cardFor(f) {
   const k = kindOf(f.name);
-  const url = PW.fileUrl(state.provider, f.cid);
+  const url = pieceUrl(f);
   const made = f.kind === "output" ? '<span class="tag">made here</span>' : "";
   const shot = k === "image"
     ? `<img loading="lazy" src="${esc(url)}" alt="">${made}`
     : k === "video"
       ? `<video preload="metadata" muted playsinline src="${esc(url)}#t=0.1"></video>${made}`
       : `${icon(k)}${made}`;
-  return `<div class="card" data-cid="${esc(f.cid)}" data-name="${esc(f.name)}" data-kind="${k}">
+  return `<div class="card" data-cid="${esc(f.cid)}" data-name="${esc(f.name)}" data-kind="${k}"
+    data-url="${esc(url)}">
     <div class="shot">${shot}</div>
     <div class="meta"><div class="nm">${esc(f.name)}</div>
       <div class="sub">piece ${esc(f.pieceId)}${sizes.get(f.cid) ? " \u00b7 " + bytes(sizes.get(f.cid)) : ""}</div>
@@ -493,7 +506,8 @@ function cardFor(f) {
 
 function rowFor(f) {
   const k = kindOf(f.name);
-  return `<div class="r" data-cid="${esc(f.cid)}" data-name="${esc(f.name)}" data-kind="${k}">
+  return `<div class="r" data-cid="${esc(f.cid)}" data-name="${esc(f.name)}" data-kind="${k}"
+    data-url="${esc(pieceUrl(f))}">
     ${icon(k)}<span class="nm">${esc(f.name)}</span>
     <span class="sub">piece ${esc(f.pieceId)}${sizes.get(f.cid) ? " \u00b7 " + bytes(sizes.get(f.cid)) : ""}</span>
   </div>`;
@@ -527,8 +541,7 @@ function drawPieces() {
 }
 
 // Opening a piece should not mean leaving the page and guessing from a hash whether it is the one.
-async function peek(cid, name, kind) {
-  const url = PW.fileUrl(state.provider, cid);
+async function peek(cid, name, kind, url) {
   let inner = "";
   if (kind === "image") inner = `<img src="${esc(url)}" alt="">`;
   else if (kind === "video") inner = `<video src="${esc(url)}" controls autoplay playsinline></video>`;
@@ -570,15 +583,24 @@ function bindPieces() {
     bindPieces();
   }));
   document.querySelectorAll("#pieces [data-cid]").forEach((c) => (c.onclick = () =>
-    peek(c.dataset.cid, c.dataset.name, c.dataset.kind)));
+    peek(c.dataset.cid, c.dataset.name, c.dataset.kind, c.dataset.url)));
 }
 
 function drawTakes() {
   return state.takes.map((t) => {
     const m = t.manifest;
     const parent = m?.from?.parent;
-    const parentTake = parent && state.takes.find((x) => x.manifest?.produced?.name === parent.name);
-    const matches = parentTake && parentTake.manifest.produced.sha256 === parent.sha256;
+    // Matched by version number: the parent is named version-2.json for a segmented take and
+    // version-2.mp4 for an unsegmented one, and produced.name only ever carried the latter, so every
+    // segmented take failed to find its parent and reported the link broken.
+    const parentN = parent ? Number(String(parent.name).match(/\d+/)?.[0]) : null;
+    const parentTake = parent && state.takes.find((x) => x.n === parentN);
+    // And compared against the right hash: parent.sha256 is the hash of the FILE named, which for a
+    // manifest is the manifest's own bytes, not the hash of the video that take produced. Comparing
+    // the two is what printed "does not match any take here" over a link that was in fact correct.
+    const matches = parentTake && (/\.json$/i.test(String(parent.name))
+      ? parentTake.fileSha === parent.sha256
+      : parentTake.manifest?.produced?.sha256 === parent.sha256);
     const seg = t.segments;
     const st = m?.storage;
 
