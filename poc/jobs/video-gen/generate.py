@@ -343,6 +343,8 @@ def frames_for(name, img, big, dx, dy, per_seg, w, h, s, pic_sha):
             print("GENERATOR=svd needs a GPU. On a processor a diffusion video model is hours per "
                   "clip. Use GENERATOR=motion for the processor row.", file=sys.stderr)
             return None
+        import cv2
+        import numpy as np
         import torch
         from PIL import Image
         seed_img = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB)).resize((1024, 576))
