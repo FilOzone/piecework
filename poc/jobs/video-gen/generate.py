@@ -329,6 +329,29 @@ def svd_pipe():
     return _PIPE
 
 
+def fit_into(img, w, h):
+    """Scale an image into a w x h frame without changing the shape of what is in it.
+
+    The model generates at a fixed 1024x576 while the take's frame is the source picture's own
+    shape, so resizing one straight onto the other squashes the picture. James Bluett saw this on
+    the A4000 run of 20 Nov 2026: square stills in, 16:9 frames out, flattened to 512x512. Scale by
+    the smaller of the two ratios and pad the remainder instead.
+    """
+    import cv2
+    import numpy as np
+    ih, iw = img.shape[:2]
+    if (iw, ih) == (w, h):
+        return img
+    r = min(w / iw, h / ih)
+    nw, nh = max(1, int(round(iw * r))), max(1, int(round(ih * r)))
+    small = cv2.resize(img, (nw, nh),
+                       interpolation=cv2.INTER_AREA if r < 1 else cv2.INTER_LINEAR)
+    frame = np.zeros((h, w, 3), dtype=small.dtype)
+    y, x = (h - nh) // 2, (w - nw) // 2
+    frame[y:y + nh, x:x + nw] = small
+    return frame
+
+
 def frames_for(name, img, big, dx, dy, per_seg, w, h, s, pic_sha):
     """The frames of one segment, from whichever generator this provider is running.
 
@@ -357,7 +380,7 @@ def frames_for(name, img, big, dx, dy, per_seg, w, h, s, pic_sha):
                    num_frames=int(os.environ.get("NUM_FRAMES", "25")),
                    motion_bucket_id=int(os.environ.get("MOTION", "127")),
                    generator=gen).frames[0]
-        return [cv2.resize(cv2.cvtColor(np.array(f), cv2.COLOR_RGB2BGR), (w, h)) for f in out]
+        return [fit_into(cv2.cvtColor(np.array(f), cv2.COLOR_RGB2BGR), w, h) for f in out]
 
     out = []
     for i in range(per_seg):
@@ -605,7 +628,7 @@ def main():
                     motion_bucket_id=int(os.environ.get("MOTION", "127")),
                     generator=gen).frames[0]
         for f in made:
-            writer.write(cv2.resize(cv2.cvtColor(np.array(f), cv2.COLOR_RGB2BGR), (w, h)))
+            writer.write(fit_into(cv2.cvtColor(np.array(f), cv2.COLOR_RGB2BGR), w, h))
         writer.release()
         produced_frames = len(carried) + len(made)
         fixed_frames = len(made)
