@@ -933,11 +933,21 @@ def main():
             "bytesDuplicatedWithin": dup_bytes,
             # What it would have cost to store this take with no reuse: every segment, every time.
             "bytesIfWholeFile": reused_bytes + dup_bytes + new_bytes,
-            "reuseTest": "sha256 of the MUXL-canonical segment against every segment earlier "
-                         "versions wrote",
+            # What this run actually compared. Saying "MUXL-canonical" unconditionally claimed a
+            # property the segments do not have wherever muxl is absent, as it is in the GPU image.
+            "reuseTest": ("sha256 of the MUXL-canonical segment against every segment earlier "
+                          "versions wrote" if all(x.get("canonical") for x in segments) else
+                          "sha256 of the segment as this encoder wrote it, against every segment "
+                          "earlier versions wrote; version-N.json marks which segments are in MUXL "
+                          "canonical form, and the identifiers of the rest are stable only against "
+                          "this encoder"),
             "canonicalForm": ("muxl" if all(x.get("canonical") for x in segments) else
                               "mixed" if any(x.get("canonical") for x in segments) else "none"),
-            "secondsPerSegment": round(per_seg / fps, 3) if per_seg else None,
+            # The frames written, not per_seg: a model that emits a fixed frame count ignores what
+            # was asked for, and this field described the request rather than the result.
+            "secondsPerSegment": (round(segments[0]["frames"] / fps, 3)
+                                  if segments and len({x["frames"] for x in segments}) == 1
+                                  else None),
             "note": ("a segment counts as reused only when the bytes this run produced are already a "
                      "piece in this data set, matched by sha256; those bytes are not written again and "
                      "this version names the existing piece, so a reader can check that what it plays is "
@@ -1060,12 +1070,24 @@ def main():
                         "inside this take, stored once.\n")
             if st["bytesIfWholeFile"]:
                 saved = 100 * st["bytesReused"] / st["bytesIfWholeFile"]
+                # Which test actually fired. A segment skipped on its input key was never generated,
+                # so there were no bytes to hash, and saying "matched by sha256" described a
+                # comparison that did not happen.
+                reused_now = [x for x in segments if x.get("reused")]
+                by_inputs = len([x for x in reused_now if x.get("reusedBy") == "inputs"])
                 if saved:
+                    how = ("the picture, prompt, seed and model were already on record against "
+                           "those bytes, so nothing was generated to compare"
+                           if by_inputs == len(reused_now) else
+                           "the bytes this run produced hash to pieces that were already here"
+                           if by_inputs == 0 else
+                           f"{by_inputs} matched on inputs before generating and "
+                           f"{len(reused_now) - by_inputs} on the bytes produced")
                     r.write(f"So {saved:.0f}% of it cost nothing to store, because the same bytes were "
-                            f"already here. Matched by sha256, segment by segment.\n")
+                            f"already here: {how}.\n")
                 else:
-                    r.write("So none of it was already stored: every segment is new bytes. Matched by "
-                            "sha256, segment by segment, and nothing matched.\n")
+                    r.write("So none of it was already stored: every segment is new bytes. Nothing "
+                            "matched, on inputs or on the bytes produced.\n")
         if not source_video and abs(manifest["produced"]["seconds"] - round(seconds, 3)) > 0.05:
             r.write(f"\n\nNote: you asked for {round(seconds, 3)} seconds and this is "
                     f"{manifest['produced']['seconds']}. ")
