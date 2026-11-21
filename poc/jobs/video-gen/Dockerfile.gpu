@@ -18,6 +18,16 @@
 #
 # Weights baked at build time: the job runs with --network none. The image is correspondingly large
 # (~12 GB); that is the cost of a job that cannot reach for its model at run time.
+# muxl is built here for the same reason as in the CPU image: a segment's identifier must not depend
+# on which muxer packaged it. The GPU image shipped without it, so every segmented GPU take recorded
+# canonicalForm "none" while the manifest's reuseTest still said MUXL-canonical. Same pinned tag as
+# the CPU image, because two rows on different canonical forms is a reuse index that does not match
+# across providers.
+FROM rust:1-slim AS muxl
+RUN apt-get update && apt-get install -y --no-install-recommends git pkg-config \
+ && rm -rf /var/lib/apt/lists/*
+RUN cargo install --locked --git https://github.com/streamplace/muxl --tag v0.3.6 --bin muxl --root /muxl
+
 FROM nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-pip ffmpeg libgl1 libglib2.0-0 \
@@ -30,6 +40,7 @@ from diffusers import StableVideoDiffusionPipeline; import torch; \
 StableVideoDiffusionPipeline.from_pretrained('stabilityai/stable-video-diffusion-img2vid-xt', \
   torch_dtype=torch.float16, variant='fp16').save_pretrained('/models/svd', variant='fp16')"
 ENV GENERATOR=svd DEVICE=cuda MODEL=/models/svd NUM_FRAMES=25 CHUNK=4 MOTION=127
+COPY --from=muxl /muxl/bin/muxl /usr/local/bin/muxl
 COPY generate.py /app/generate.py
 LABEL org.piecework.job="video-gen-gpu" org.piecework.inputs="/in/*.jpg /in/*.png /in/prompt.json" \
       org.piecework.outputs="/out/version-N.mp4 /out/version-N.json /out/video-gen-report.txt"
