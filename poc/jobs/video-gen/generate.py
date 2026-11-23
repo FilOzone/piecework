@@ -31,6 +31,7 @@ do share most of their content.
 import hashlib
 import json
 import os
+import platform
 import re
 import shutil
 import tempfile
@@ -327,6 +328,57 @@ def svd_pipe():
     _PIPE.to("cuda")
     _PIPE.enable_model_cpu_offload()
     return _PIPE
+
+
+def environment():
+    """What produced these bytes, recorded and not asserted.
+
+    Naming the environment is not a promise that the same inputs give the same bytes anywhere
+    else. On one fixed stack they did: the model path came out byte-identical across two runs on
+    James Bluett's A4000, 20 Nov 2026. Nothing has been run across two architectures, and kernel
+    selection in cuDNN and cuBLAS is per compute capability, so the fp16 accumulation order is not
+    expected to survive a change of card. This block exists so that such a comparison is possible
+    at all. A field this job cannot see is recorded as null rather than omitted, so the gap is
+    visible instead of looking like an absence of variation.
+    """
+    env = {"python": platform.python_version(),
+           # Set by whoever runs the job, since a container cannot read its own image digest.
+           "image": os.environ.get("IMAGE"),
+           "muxl": None}
+    for mod, key in (("cv2", "opencv"), ("numpy", "numpy")):
+        try:
+            env[key] = __import__(mod).__version__
+        except Exception:
+            env[key] = None
+    if MUXL:
+        try:
+            out = subprocess.run([MUXL, "--version"], capture_output=True, text=True, timeout=10)
+            env["muxl"] = (out.stdout or out.stderr).strip() or None
+        except Exception:
+            pass
+    if GENERATOR == "svd":
+        gpu = {"torch": None, "cuda": None, "cudnn": None, "gpu": None,
+               "computeCapability": None, "driver": None,
+               "cudnnBenchmark": None, "deterministicAlgorithms": None}
+        try:
+            import torch
+            gpu["torch"] = torch.__version__
+            gpu["cuda"] = torch.version.cuda
+            gpu["cudnn"] = torch.backends.cudnn.version()
+            gpu["cudnnBenchmark"] = bool(torch.backends.cudnn.benchmark)
+            gpu["deterministicAlgorithms"] = bool(torch.are_deterministic_algorithms_enabled())
+            if torch.cuda.is_available():
+                gpu["gpu"] = torch.cuda.get_device_name(0)
+                gpu["computeCapability"] = "%d.%d" % torch.cuda.get_device_capability(0)
+        except Exception:
+            pass
+        try:
+            with open("/proc/driver/nvidia/version") as fh:
+                gpu["driver"] = fh.readline().strip()
+        except OSError:
+            pass
+        env.update(gpu)
+    return env
 
 
 def fit_into(img, w, h):
@@ -913,7 +965,7 @@ def main():
     manifest = {
         "version": version,
         "prompt": s["prompt"],
-        "generator": {"name": GENERATOR, "device": DEVICE},
+        "generator": {"name": GENERATOR, "device": DEVICE, "environment": environment()},
         "settings": {"seconds": seconds, "fps": fps, "seed": int(s["seed"])},
         "from": {
             "images": [{"name": n, "sha256": sha256(os.path.join(IN, n))} for n in images],
