@@ -39,6 +39,14 @@ RUN python3 -c "\
 from diffusers import StableVideoDiffusionPipeline; import torch; \
 StableVideoDiffusionPipeline.from_pretrained('stabilityai/stable-video-diffusion-img2vid-xt', \
   torch_dtype=torch.float16, variant='fp16').save_pretrained('/models/svd', variant='fp16')"
+# save_pretrained writes the weights with root's umask, so the safetensors land -rw------- and a
+# container started with --user cannot read them: the run dies in 8 s inside from_pretrained, with
+# PermissionError on the vae and FileNotFoundError on the image_encoder. The same run has no writable
+# HF cache either, because an unmapped uid gets HOME=/ and the hub tries to create /.cache/huggingface.
+# Output owned by root is the reason to pass --user in the first place, so the image has to allow it.
+# a+rX, not a+rw: the weights stay unwritable, only readable, and directories become traversable.
+RUN chmod -R a+rX /models
+ENV HF_HOME=/tmp/hf
 ENV GENERATOR=svd DEVICE=cuda MODEL=/models/svd NUM_FRAMES=25 CHUNK=4 MOTION=127
 COPY --from=muxl /muxl/bin/muxl /usr/local/bin/muxl
 COPY generate.py /app/generate.py
