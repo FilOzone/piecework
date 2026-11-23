@@ -1417,7 +1417,7 @@ async function calibnetCommand() {
   await connectCalibnet();
   say("Provider", A.provider, "balance", fmt(await pub.getBalance({ address: A.provider })), "tFIL");
   if (process.argv.includes("--register")) {
-    const r = await FOC.registerProvider({ pub, wallet, chain: filecoinCalibration }, providerAcct, C, ABI, "https://github.com/lucaniz/foc-compute");
+    const r = await FOC.registerProvider({ pub, wallet, chain: filecoinCalibration }, providerAcct, C, ABI, "https://github.com/FilOzone/piecework");
     return say("Registered. Provider id:", r.providerId.toString(), r.receipt ? `tx ${r.receipt.transactionHash}` : "(was already registered)");
   }
   if (process.argv.includes("--deploy")) {
